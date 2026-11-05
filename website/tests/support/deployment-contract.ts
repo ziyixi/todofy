@@ -1,3 +1,10 @@
+import { sha256 } from "../../src/lib/content/hash";
+import {
+  CONTENT_SCHEMA_VERSION,
+  type ContentSnapshot,
+  type Post,
+} from "../../src/lib/content/schema";
+
 export interface SegmentPayloadContract {
   contentType: string | undefined;
   requestUrl: string;
@@ -9,6 +16,65 @@ export interface FixtureDeploymentPolicy {
   allowFixture: boolean;
   baseUrl: string;
   sourceMode: "empty" | "fixture" | "notion";
+}
+
+export function makePost(slug = "published-note", overrides: Partial<Post> = {}): Post {
+  const sourceKey = overrides.sourceKey ?? sha256(slug);
+  return {
+    sourceKey,
+    feedGuid: `urn:ziyixi:post:${sourceKey}`,
+    slug,
+    title: "A published note",
+    summary: "Public article metadata.",
+    language: "en",
+    publishedAt: "2026-01-01T00:00:00.000Z",
+    tags: [],
+    blocks: [
+      {
+        id: "public-paragraph",
+        type: "paragraph",
+        richText: [{ text: "Public article body." }],
+        children: [],
+      },
+    ],
+    toc: [],
+    media: [],
+    ...overrides,
+  };
+}
+
+export function makeSnapshot(
+  posts: Post[] = [],
+  overrides: Partial<ContentSnapshot> = {},
+): ContentSnapshot {
+  return {
+    schemaVersion: CONTENT_SCHEMA_VERSION,
+    sourceMode: posts.length ? "fixture" : "empty",
+    posts,
+    media: [],
+    redirects: [],
+    ...overrides,
+  };
+}
+
+export function makeNotionPage(index: number, value: Post, status = "Published") {
+  const richText = (text: string) => ({ type: "rich_text", rich_text: [{ plain_text: text }] });
+  return {
+    id: index.toString(16).padStart(32, "0"),
+    last_edited_time: "2025-02-01T00:00:00.000Z",
+    properties: {
+      Title: { type: "title", title: [{ plain_text: value.title }] },
+      Slug: richText(value.slug),
+      Summary: richText(value.summary),
+      Status: { type: "status", status: { name: status } },
+      PublishedAt: { type: "date", date: { start: value.publishedAt } },
+      Language: { type: "select", select: { name: value.language } },
+      Tags: { type: "multi_select", multi_select: [] },
+      ...(value.translationKey !== undefined
+        ? { TranslationKey: richText(value.translationKey) }
+        : {}),
+    },
+  };
 }
 
 function parseHttpUrl(value: string, label: string): URL {

@@ -18,6 +18,7 @@ import github_config
 import github_secrets
 import bootstrap_inventory as inventory
 import finalize
+import inventory_pr
 import private_input
 import state_imports
 import tofu_bootstrap
@@ -444,6 +445,124 @@ class Cloud(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
 
+    def test_adopt_metadata_prepare_validates_fresh_and_adopt_inputs(self):
+        with self.assertRaisesRegex(BootstrapError, "INFRA_PRIVATE_INPUT_INVALID"):
+            adopt_metadata.prepare({"infra_values": "bad"}, {}, "example.invalid", "fresh")
+
+        with self.assertRaisesRegex(BootstrapError, "GITHUB_OAUTH_INPUT_REQUIRED"):
+            adopt_metadata.prepare({"infra_values": {}}, {}, "example.invalid", "fresh")
+
+        fresh_private = {
+            "infra_values": {
+                "access_github_oauth": {"client_id": "cid", "client_secret": "csec"},
+            },
+            "github_secrets": {"MAIL_HERO_RECEIVE_ADDRESS": "inbox@inbox.example.invalid"},
+        }
+        adopt_metadata.prepare(fresh_private, {}, "example.invalid", "fresh")
+        self.assertEqual(
+            fresh_private["infra_values"],
+            {
+                "access_github_oauth": {"client_id": "cid", "client_secret": "csec"},
+                "legacy_mail_hero_backup": False,
+                "mail_route_ready": False,
+                "mail_receive_address": "inbox@inbox.example.invalid",
+            },
+        )
+
+        with self.assertRaisesRegex(BootstrapError, "ADOPT_GITHUB_ID_REQUIRED"):
+            adopt_metadata.prepare(
+                {"cloudflare_api_token": "tok", "infra_values": {"account_id": ACCOUNT}},
+                {},
+                "example.invalid",
+                "adopt",
+            )
+
+        def fake_fetch(token, path):
+            if path.endswith("/gh-idp"):
+                return {"type": "github", "name": "GitHub SSO", "config": {"client_id": "gh-client"}}
+            if path.endswith("/otp-idp"):
+                return {"type": "onetimepin", "name": "One-time Pin"}
+            if path.endswith("/rule-1"):
+                return {
+                    "name": "Mail Hero Rule",
+                    "enabled": True,
+                    "priority": 0,
+                    "source": "api",
+                    "actions": [{"type": "worker", "value": ["mail-hero"]}],
+                    "matchers": [{"type": "literal", "field": "to", "value": "mail@inbox.example.invalid"}],
+                }
+            raise AssertionError(f"unexpected path {path}")
+
+        adopt_private = {
+            "cloudflare_api_token": "tok",
+            "infra_values": {
+                "account_id": ACCOUNT,
+                "access_github_idp_id": "gh-idp",
+                "access_allowed_idp_ids": ["gh-idp", "otp-idp"],
+            },
+            "adopt_ids": {adopt_metadata.MAIL_RULE: "rule-1"},
+        }
+        adopt_metadata.prepare(
+            adopt_private,
+            {"zone_id": ZONE, "managed_ids": {}},
+            "example.invalid",
+            "adopt",
+            fetch=fake_fetch,
+        )
+        self.assertEqual(
+            adopt_private["infra_values"]["access_github_oauth"],
+            {"client_id": "gh-client", "name": "GitHub SSO"},
+        )
+        self.assertEqual(adopt_private["infra_values"]["access_email_idp_name"], "One-time Pin")
+        self.assertTrue(adopt_private["infra_values"]["mail_route_ready"])
+        self.assertEqual(adopt_private["infra_values"]["mail_receive_address"], "mail@inbox.example.invalid")
+        self.assertEqual(adopt_private["adopt_ids"][adopt_metadata.GITHUB], "gh-idp")
+        self.assertEqual(adopt_private["adopt_ids"][adopt_metadata.EMAIL], "otp-idp")
+
+        with self.assertRaisesRegex(BootstrapError, "ADOPT_GITHUB_IDENTITY_MISMATCH"):
+            adopt_metadata.prepare(
+                {
+                    "cloudflare_api_token": "tok",
+                    "infra_values": {"account_id": ACCOUNT, "access_github_idp_id": "gh-idp"},
+                },
+                {},
+                "example.invalid",
+                "adopt",
+                fetch=lambda token, path: {"type": "other"},
+            )
+
+        with self.assertRaisesRegex(BootstrapError, "ADOPT_EMAIL_IDENTITY_AMBIGUOUS"):
+            adopt_metadata.prepare(
+                {
+                    "cloudflare_api_token": "tok",
+                    "infra_values": {"account_id": ACCOUNT, "access_github_idp_id": "gh-idp", "access_allowed_idp_ids": []},
+                },
+                {},
+                "example.invalid",
+                "adopt",
+                fetch=fake_fetch,
+            )
+
+        with self.assertRaisesRegex(BootstrapError, "ADOPT_MAIL_RULE_MISMATCH"):
+            adopt_metadata.prepare(
+                {
+                    "cloudflare_api_token": "tok",
+                    "infra_values": {
+                        "account_id": ACCOUNT,
+                        "access_github_idp_id": "gh-idp",
+                        "access_allowed_idp_ids": ["otp-idp"],
+                    },
+                    "adopt_ids": {adopt_metadata.MAIL_RULE: "bad-rule"},
+                },
+                {"zone_id": ZONE},
+                "example.invalid",
+                "adopt",
+                fetch=lambda token, path: fake_fetch(token, path)
+                if not path.endswith("/bad-rule")
+                else {"enabled": False, "actions": [], "matchers": []},
+            )
+
+
 class Finalize(unittest.TestCase):
     def test_first_releases_name_every_durable_object_namespace(self):
         # finalize requires the namespaces read from these apps' first releases to be exactly DO_KEYS, so an app missing
@@ -456,6 +575,190 @@ class Finalize(unittest.TestCase):
                  for app in finalize.APPS for path in WORKERS[app]
                  for binding in read_toml(ROOT / path).get("durable_objects", {}).get("bindings", [])}
         self.assertEqual(bound, set(finalize.DO_KEYS))
+
+    def test_github_client_and_namespaces_validate_live_observation(self):
+        with mock.patch.object(
+            finalize.subprocess,
+            "run",
+            return_value=SimpleNamespace(returncode=0, stdout=b'{"ok":true}'),
+        ):
+            self.assertEqual(finalize.Github().call("repos/x/y"), {"ok": True})
+        with mock.patch.object(
+            finalize.subprocess,
+            "run",
+            return_value=SimpleNamespace(returncode=1, stdout=b""),
+        ):
+            with self.assertRaisesRegex(BootstrapError, "GITHUB_DEPLOYMENT_METADATA_UNAVAILABLE"):
+                finalize.Github().call("repos/x/y")
+        with mock.patch.object(
+            finalize.subprocess,
+            "run",
+            return_value=SimpleNamespace(returncode=0, stdout=b"not-json"),
+        ):
+            with self.assertRaisesRegex(BootstrapError, "GITHUB_DEPLOYMENT_METADATA_INVALID"):
+                finalize.Github().call("repos/x/y")
+
+        sha = "a" * 40
+        expected_ns = {
+            key: f"{ idx + 1:032x}"
+            for idx, key in enumerate(sorted(finalize.DO_KEYS.values()))
+        }
+        app_keys = list(finalize.DO_KEYS.values())
+        fake_configs = [[{"name": "worker-a"}], [{"name": "worker-b"}]]
+
+        with mock.patch.object(
+            finalize.subprocess,
+            "run",
+            return_value=SimpleNamespace(returncode=1, stdout=b"bad"),
+        ):
+            with self.assertRaisesRegex(BootstrapError, "BOOTSTRAP_SOURCE_SHA_INVALID"):
+                finalize.namespaces(
+                    {"cloudflare_api_token": "tok"},
+                    {"repository": "owner/repo"},
+                    {},
+                    github=SimpleNamespace(),
+                    cloud=SimpleNamespace(),
+                )
+
+        with (
+            mock.patch.object(finalize, "APPS", ("app-a", "app-b")),
+            mock.patch.object(
+                finalize.subprocess,
+                "run",
+                return_value=SimpleNamespace(returncode=0, stdout=(sha + "\n").encode()),
+            ),
+            mock.patch.object(
+                finalize,
+                "last_good",
+                side_effect=lambda gh, repo, app: {
+                    "sha": sha,
+                    "payload": {"workers": [{"script": "worker-a"}, {"script": "worker-b"}]},
+                },
+            ),
+            mock.patch.object(
+                finalize,
+                "release_inputs",
+                side_effect=lambda src, app: (
+                    None,
+                    None,
+                    fake_configs[0] if app == "app-a" else fake_configs[1],
+                    {"worker-a": {}, "worker-b": {}},
+                ),
+            ),
+            mock.patch.object(
+                finalize,
+                "observe",
+                side_effect=lambda cloud, cfg, des, res, s, exp: {
+                    "changes": [],
+                    "namespaces": (
+                        {k: expected_ns[k] for k in app_keys[:1]}
+                        if cfg["name"] == "worker-a"
+                        else {k: expected_ns[k] for k in app_keys[1:]}
+                    ),
+                },
+            ),
+        ):
+            captured = finalize.namespaces(
+                {"cloudflare_api_token": "tok"},
+                {"repository": "owner/repo"},
+                {},
+                github=SimpleNamespace(),
+                cloud=SimpleNamespace(),
+            )
+            self.assertEqual(captured, expected_ns)
+
+            with self.assertRaisesRegex(BootstrapError, "EXISTING_NAMESPACE_BASELINE_CHANGED"):
+                finalize.namespaces(
+                    {"cloudflare_api_token": "tok"},
+                    {"repository": "owner/repo"},
+                    {"durable_objects": {app_keys[0]: "f" * 32}},
+                    github=SimpleNamespace(),
+                    cloud=SimpleNamespace(),
+                )
+
+        with (
+            mock.patch.object(finalize, "APPS", ("app-a",)),
+            mock.patch.object(
+                finalize.subprocess,
+                "run",
+                return_value=SimpleNamespace(returncode=0, stdout=(sha + "\n").encode()),
+            ),
+            mock.patch.object(
+                finalize,
+                "last_good",
+                side_effect=finalize.ReleaseError("API_ERROR"),
+            ),
+        ):
+            with self.assertRaisesRegex(BootstrapError, "FIRST_RELEASE_PROVIDER_METADATA_UNVERIFIED"):
+                finalize.namespaces(
+                    {"cloudflare_api_token": "tok"},
+                    {"repository": "owner/repo"},
+                    {},
+                    github=SimpleNamespace(),
+                    cloud=SimpleNamespace(),
+                )
+
+
+class InventoryPullRequest(unittest.TestCase):
+    def test_inventory_pr_enforces_allowed_file_scope_and_creates_pr(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            repo = Path(temporary) / "repo"
+            (repo / "config").mkdir(parents=True)
+            (repo / "config/resources.toml").write_text("account_id = 'a'\n")
+
+            with mock.patch.object(
+                inventory_pr.subprocess,
+                "run",
+                side_effect=OSError("spawn failed"),
+            ):
+                with self.assertRaisesRegex(BootstrapError, "INVENTORY_PR_COMMAND_FAILED"):
+                    inventory_pr._run(["git", "status"], repo)
+
+            with mock.patch.object(
+                inventory_pr.subprocess,
+                "run",
+                return_value=SimpleNamespace(returncode=1, stdout=b""),
+            ):
+                with self.assertRaisesRegex(BootstrapError, "INVENTORY_PR_COMMAND_FAILED"):
+                    inventory_pr._run(["git", "status"], repo)
+
+            sha = "a" * 40
+
+            def make_runner(diff_output: str):
+                calls = []
+
+                def fake_run(arguments, cwd):
+                    calls.append(arguments)
+                    if arguments == ["git", "rev-parse", "HEAD"]:
+                        return sha
+                    if arguments[:2] == ["git", "clone"]:
+                        target = Path(arguments[-1])
+                        (target / "config").mkdir(parents=True, exist_ok=True)
+                        return ""
+                    if arguments == ["git", "diff", "--name-only"]:
+                        return diff_output
+                    if arguments[:3] == ["gh", "pr", "create"]:
+                        return "https://github.com/owner/cloud/pull/42"
+                    return ""
+
+                return calls, fake_run
+
+            _, empty_runner = make_runner("")
+            with mock.patch.object(inventory_pr, "_run", side_effect=empty_runner):
+                self.assertEqual(inventory_pr.create(repo, "owner/cloud"), "")
+
+            _, forbidden_runner = make_runner("config/resources.toml\nsecret.txt")
+            with mock.patch.object(inventory_pr, "_run", side_effect=forbidden_runner):
+                with self.assertRaisesRegex(BootstrapError, "INVENTORY_PR_SCOPE_INVALID"):
+                    inventory_pr.create(repo, "owner/cloud")
+
+            calls, valid_runner = make_runner("config/resources.toml\ninfra/ids.tf")
+            with mock.patch.object(inventory_pr, "_run", side_effect=valid_runner):
+                url = inventory_pr.create(repo, "owner/cloud")
+            self.assertEqual(url, "https://github.com/owner/cloud/pull/42")
+            self.assertTrue(
+                any(cmd[:3] == ["gh", "workflow", "run"] for cmd in calls)
+            )
 
 
 if __name__ == "__main__":

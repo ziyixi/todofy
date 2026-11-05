@@ -1,10 +1,111 @@
-/** The backup's clock, values and Ops view (src/backup.ts) without a runtime; test/runtime/backup.test.ts runs the job. */
+/** The backup's clock, values, restore validation, and Ops view (src/backup.ts, src/restore.ts, src/ops.ts) without a runtime. */
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
+import { gzipSync } from 'node:zlib';
 import { Severity } from '@ziyixi/proto/ops/v1/ops_pb';
-import { expect, it } from 'vitest';
-import { BACKUP_STALE_MS, backupOps, encodeValue, nextRun, rowLine, timestamp } from '../src/backup.ts';
+import { afterEach, expect, it, vi } from 'vitest';
+
+vi.mock('cloudflare:workers', () => ({
+  WorkerEntrypoint: class {
+    env: unknown;
+    constructor(_ctx?: unknown, env?: unknown) {
+      this.env = env;
+    }
+  },
+}));
+
+import {
+  BACKUP_FORMAT,
+  BACKUP_STALE_MS,
+  MANIFEST,
+  RESTORE_KEY,
+  SCHEMA_VERSION,
+  backupOps,
+  encodeValue,
+  nextRun,
+  rowLine,
+  sha256Hex,
+  timestamp,
+  type BackupStorage,
+} from '../src/backup.ts';
+import type { Env } from '../src/env.ts';
+import { buildOpsStatus, Ops } from '../src/ops.ts';
+import { RESTORE_MAX_ERRORS, RESTORE_RETRY_MS, restoreState, restoreStep, startRestore } from '../src/restore.ts';
 
 const DAY = 86_400_000;
 const SLOT = Date.parse('2026-10-28T05:23:00Z');
+const databases: DatabaseSync[] = [];
+afterEach(() => {
+  for (const database of databases.splice(0)) database.close();
+});
+
+function createBackupStorage(): BackupStorage {
+  const database = new DatabaseSync(':memory:');
+  databases.push(database);
+  database.exec('CREATE TABLE test_events (id TEXT PRIMARY KEY)');
+  const kvMap = new Map<string, unknown>();
+  const sql = {
+    exec(query: string, ...bindings: SqlStorageValue[]) {
+      const trimmed = query.trimStart();
+      if (trimmed.startsWith('CREATE')) {
+        database.exec(query);
+        return { toArray: () => [], one: () => ({}), raw: () => [][Symbol.iterator]() };
+      }
+      const values = bindings.map(value => value instanceof ArrayBuffer ? new Uint8Array(value) : value) satisfies SQLInputValue[];
+      const statement = database.prepare(query);
+      if (/^(SELECT|PRAGMA)/i.test(trimmed)) {
+        const rows = statement.all(...values) as Record<string, unknown>[];
+        return {
+          toArray: () => rows,
+          one: () => rows[0] ?? {},
+          raw: () => rows.map(row => Object.values(row))[Symbol.iterator](),
+        };
+      }
+      statement.run(...values);
+      return { toArray: () => [], one: () => ({}), raw: () => [][Symbol.iterator]() };
+    },
+  } as unknown as SqlStorage;
+  const kv = {
+    get: <T>(key: string) => kvMap.get(key) as T | undefined,
+    put: (key: string, value: unknown) => { kvMap.set(key, structuredClone(value)); },
+    delete: (key: string) => kvMap.delete(key),
+    list: () => new Map(kvMap),
+  } as unknown as DurableObjectStorage['kv'];
+  let transaction = 0;
+  return {
+    sql,
+    kv,
+    transactionSync<T>(action: () => T): T {
+      const savepoint = `restore_test_${String(++transaction)}`;
+      const kvSnapshot = new Map(kvMap);
+      database.exec(`SAVEPOINT ${savepoint}`);
+      try {
+        const result = action();
+        database.exec(`RELEASE ${savepoint}`);
+        return result;
+      } catch (error) {
+        database.exec(`ROLLBACK TO ${savepoint}`);
+        database.exec(`RELEASE ${savepoint}`);
+        kvMap.clear();
+        for (const [k, v] of kvSnapshot) kvMap.set(k, v);
+        throw error;
+      }
+    },
+  };
+}
+
+function createR2Bucket(objects: Record<string, Uint8Array | string>): R2Bucket {
+  return {
+    get(key: string) {
+      const value = objects[key];
+      if (value === undefined) return Promise.resolve(null);
+      const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : value;
+      return Promise.resolve({
+        arrayBuffer: () => Promise.resolve(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)),
+        json: () => Promise.resolve(JSON.parse(new TextDecoder().decode(bytes)) as unknown),
+      } as unknown as R2ObjectBody);
+    },
+  } as unknown as R2Bucket;
+}
 
 it('runs daily at 05:23 UTC, and not again on the day of an early backup', () => {
   expect(nextRun(SLOT - 1)).toBe(SLOT);
@@ -39,3 +140,133 @@ it('reports the backup age, a stale backup and a failed job, and nothing without
     { code: 'backup_failed', severity: Severity.WARNING, metrics: {} },
   ]);
 });
+
+it('builds Ops status for status_unavailable, subscription_rejected, source_unavailable, and rejects setGuard', async () => {
+  expect(buildOpsStatus(undefined, SLOT)).toMatchObject({
+    health: 'down',
+    signals: [{ code: 'status_unavailable', severity: 'critical' }],
+  });
+
+  const degraded = buildOpsStatus({
+    stage: 'work_memory',
+    build_sha: 'synthetic',
+    subscriptions: 2,
+    deliveries: { pending: 1, accepted: 4, failed: 0 },
+    last_delivery: {
+      event_id: 'evt-1',
+      state: 'accepted',
+      attempts: 1,
+      accepted_at: SLOT + 500,
+      error_code: null,
+      event_at: new Date(SLOT).toISOString(),
+    },
+    sources: [
+      { name: 'task.changed', checked_at: SLOT - 1000, error_code: 'source_unavailable' },
+      { name: 'mail.ready', checked_at: SLOT, error_code: 'cursor_reset_required' },
+    ],
+    work: { open: 1, waiting: 0, pending_reports: 0 },
+    last_tool_at: SLOT - 2000,
+    last_subscription_at: SLOT - 3000,
+    last_subscription_request: {
+      method: 'events/subscribe',
+      phase: 'rejected',
+      rpc_code: -32015,
+      reason: 'challenge_failed',
+    },
+    backup: null,
+    restore: null,
+    meaning: 'synthetic',
+  }, SLOT);
+
+  expect(degraded).toMatchObject({
+    health: 'degraded',
+    counters: {
+      active_subscriptions: 2,
+      pending_deliveries: 1,
+      accepted_deliveries: 4,
+      failed_deliveries: 0,
+      last_tool_at_ms: SLOT - 2000,
+      last_subscription_at_ms: SLOT - 3000,
+      last_source_check_at_ms: SLOT,
+      last_event_at_ms: SLOT,
+      last_delivery_at_ms: SLOT + 500,
+    },
+    signals: [
+      { code: 'source_unavailable', severity: 'warning', metrics: { count: 2 } },
+      { code: 'subscription_rejected', severity: 'warning', metrics: { rpc_code: -32015 } },
+    ],
+  });
+
+  const ops = new Ops({} as ExecutionContext, {
+    SUBSCRIPTIONS: {
+      idFromName: () => ({}),
+      get: () => ({ getOpsStatus: () => Promise.reject(new Error('Synthetic DO failure')) }),
+    },
+  } as unknown as Env);
+  expect(await ops.status()).toMatchObject({
+    health: 'down',
+    signals: [{ code: 'status_unavailable', severity: 'critical' }],
+  });
+  await expect(ops.setGuard()).rejects.toThrow('invalid_input');
+});
+
+it('surfaces backups_not_bound, part_hash_mismatch, part_rows_mismatch, and verification_failed during restore', async () => {
+  const prefix = 'backups/2026-10-28T052300Z/';
+  const partKey = `${prefix}tables/test_events/00000.ndjson.gz`;
+  const compressed = new Uint8Array(gzipSync('[1,"evt-1"]\n'));
+  const validSha = await sha256Hex(compressed);
+
+  const storage = createBackupStorage();
+  expect(await startRestore(storage, undefined, prefix, SLOT)).toMatchObject({
+    status: 503,
+    error: 'backups_not_bound',
+  });
+
+  const makeBucket = (sha256: string, partRows: number, manifestRows = partRows) => createR2Bucket({
+    [`${prefix}${MANIFEST}`]: JSON.stringify({
+      format: BACKUP_FORMAT,
+      schema_version: SCHEMA_VERSION,
+      created_at: '2026-10-28T05:23:00Z',
+      tables: [{
+        name: 'test_events',
+        columns: ['rowid', 'id'],
+        rows: manifestRows,
+        parts: [{ key: partKey, rows: partRows, sha256 }],
+      }],
+      kv: { rows: 0, parts: [] },
+    }),
+    [partKey]: compressed,
+  });
+
+  const started = await startRestore(storage, makeBucket('0'.repeat(64), 1), prefix, SLOT);
+  expect(started.status).toBe(202);
+  expect(await restoreStep(storage, undefined, SLOT)).toBe(SLOT + RESTORE_RETRY_MS);
+  expect(restoreState(storage)).toMatchObject({ phase: 'running', errors: 1, error_code: 'backups_not_bound' });
+
+  expect(await restoreStep(storage, makeBucket('0'.repeat(64), 1), SLOT)).toBe(SLOT + RESTORE_RETRY_MS);
+  expect(restoreState(storage)).toMatchObject({ phase: 'running', errors: 2, error_code: 'part_hash_mismatch' });
+
+  // Third consecutive step failure transitions phase to failed with part_rows_mismatch.
+  expect(await restoreStep(storage, makeBucket(validSha, 2), SLOT)).toBeNull();
+  expect(restoreState(storage)).toMatchObject({
+    phase: 'failed',
+    errors: RESTORE_MAX_ERRORS,
+    error_code: 'part_rows_mismatch',
+  });
+
+  // Verification failure when part loads cleanly (1 row) but manifest table total declares 2 rows.
+  const verifyStorage = createBackupStorage();
+  const verifyBucket = makeBucket(validSha, 1, 2);
+  expect((await startRestore(verifyStorage, verifyBucket, prefix, SLOT)).status).toBe(202);
+  expect(await restoreStep(verifyStorage, verifyBucket, SLOT)).toBeNull();
+  expect(restoreState(verifyStorage)).toMatchObject({
+    phase: 'failed',
+    error_code: 'verification_failed',
+    verification: [
+      { name: 'test_events', expected: 2, restored: 1, ok: false },
+      { name: 'kv', expected: 0, restored: 0, ok: true },
+    ],
+  });
+  expect(verifyStorage.kv.get(RESTORE_KEY)).toBeDefined();
+});
+

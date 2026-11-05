@@ -3,14 +3,17 @@
 A synthetic engine stands in for the model; feeds come from MockTransport.
 """
 
+import asyncio
 import copy
 import dataclasses
 import datetime
 import importlib.resources as resources
 import pathlib
 
+import httpx
 import pytest
 
+import newsletter.collection.instructions as instructions
 import newsletter.contracts as contracts
 import newsletter.store as newsletter_store
 import newsletter.workflow.content as content
@@ -794,3 +797,496 @@ async def test_the_pool_records_what_it_leaves_out_and_why(nodes, tmp_path):
             "reason": "research_cap",
         },
     ]
+
+
+@pytest.mark.parametrize(
+    ("raw_doi", "expected"),
+    [
+        ("doi:10.1038/s41586-026-00001-1", "10.1038/s41586-026-00001-1"),
+        (
+            "https://doi.org/10.1145/1234567.1234568",
+            "10.1145/1234567.1234568",
+        ),
+        (
+            "http://doi.org/10.1145/1234567.1234568",
+            "10.1145/1234567.1234568",
+        ),
+        (
+            "https://dx.doi.org/10.48550/arXiv.2609.00001",
+            "10.48550/arxiv.2609.00001",
+        ),
+        ("10.1234/" + "a" * 260, ""),
+        ("not-a-doi", ""),
+    ],
+)
+def test_normalize_doi_handles_prefixes_urls_and_bounds(raw_doi, expected):
+    assert sources.normalize_doi(raw_doi) == expected
+
+
+def test_sources_validation_guards_reject_missing_identity_and_bad_limits():
+    with pytest.raises(ValueError, match="no public identity"):
+        sources.candidate_id({"title": "short"})
+    with pytest.raises(ValueError, match="limit must be 1..60"):
+        sources.deduplicate_candidates([], limit=0)
+    with pytest.raises(ValueError, match="Invalid metadata title"):
+        sources.metadata_candidate(
+            "",
+            "https://example.org/item",
+            "",
+            DAY,
+            "feed",
+            direction="01-ai-ml",
+        )
+
+
+def make_candidate(
+    slug,
+    index,
+    *,
+    provenance="discovery",
+    scope="abstract",
+    published_at=DAY,
+    doi="",
+    authors="Synthetic Team",
+    affiliations="Synthetic Lab",
+    venue="Synthetic Venue",
+    contribution="Demonstrates a concrete latency reduction.",
+    evidence_urls=None,
+):
+    url = f"https://example.org/{slug}/{index}"
+    return {
+        "id": f"cand-{slug}-{index}",
+        "direction": slug,
+        "title": f"{slug} candidate {index} with concrete mechanism and benchmark",
+        "url": url,
+        "doi": doi,
+        "version": "v1",
+        "event_key": f"{slug}-event-{index}",
+        "published_at": published_at,
+        "summary": "Explains the prior bottleneck and the measured improvement.",
+        "why_now": "Published within the issue window with primary evidence.",
+        "access_scope": scope,
+        "provenance": provenance,
+        "authors": authors,
+        "affiliations": affiliations,
+        "venue": venue,
+        "publication_status": "预印本",
+        "contribution": contribution,
+        "source_basis": "Opened primary source",
+        "evidence_urls": (
+            [url, f"{url}/appendix"]
+            if evidence_urls is None
+            else list(evidence_urls)
+        ),
+    }
+
+
+@pytest.fixture
+def candidate_pool(tmp_path):
+    async def _run(
+        discovered_by_direction,
+        feed_candidates=(),
+        *,
+        limit=6,
+        history=(),
+    ):
+        node_runner = story_nodes.WorkflowNodes(
+            content=None,
+            feeds=None,
+            editor=None,
+            instructions=[],
+        )
+        artifacts = {
+            ("feeds", ""): {
+                "candidates": list(feed_candidates),
+                "diagnostics": [],
+            }
+        }
+        for direction, items in discovered_by_direction.items():
+            artifacts[("discover", direction)] = {
+                "candidates": list(items),
+                "coverage": {
+                    "direction": direction,
+                    "status": "covered" if items else "empty",
+                    "note": "ok",
+                },
+            }
+        context = engine.NodeContext(
+            run_id="run-pool-test",
+            issue_date=DAY,
+            item_id="",
+            node={"id": "pool", "type": "deduplicate", "config": {}},
+            budgets={"max_candidates": limit},
+            artifacts=artifacts,
+            candidate_history=list(history),
+        )
+        result = await node_runner.execute("pool", context, tmp_path / "pool")
+        return result.body["candidates"]
+
+    return _run
+
+
+async def test_pool_round_robins_across_directions_before_early_direction_fills_cap(
+    candidate_pool,
+):
+    selected = await candidate_pool(
+        {
+            "01-ai-ml": [make_candidate("01-ai-ml", i) for i in range(5)],
+            "02-computing-systems": [
+                make_candidate("02-computing-systems", i) for i in range(2)
+            ],
+            "03-world-tech-policy": [
+                make_candidate("03-world-tech-policy", i) for i in range(2)
+            ],
+        },
+        limit=4,
+    )
+    directions = [item["direction"] for item in selected]
+    assert directions[:3] == [
+        "01-ai-ml",
+        "02-computing-systems",
+        "03-world-tech-policy",
+    ]
+    assert len(selected) == 4
+
+
+async def test_pool_prioritizes_opened_rich_evidence_over_metadata_only_leads(
+    candidate_pool,
+):
+    metadata_only = make_candidate(
+        "01-ai-ml",
+        1,
+        provenance="feed",
+        scope="metadata",
+        authors="",
+        affiliations="",
+        venue="arXiv",
+        contribution="",
+        evidence_urls=["https://example.org/01-ai-ml/1"],
+    )
+    opened_primary = make_candidate(
+        "01-ai-ml",
+        2,
+        provenance="web_open",
+        scope="full_text",
+        doi="10.1234/primary.2",
+    )
+    selected = await candidate_pool(
+        {"01-ai-ml": [metadata_only, opened_primary]},
+        limit=1,
+    )
+    assert [item["id"] for item in selected] == [opened_primary["id"]]
+
+
+async def test_pool_merges_feed_doi_and_provenance_into_matching_discovery_candidate(
+    candidate_pool,
+):
+    shared_url = "https://arxiv.org/abs/2609.01234v1"
+    discovered = make_candidate(
+        "01-ai-ml",
+        1,
+        provenance="web_open",
+        scope="abstract",
+        doi="",
+        authors="",
+        affiliations="Systems AI Institute",
+        venue="",
+        evidence_urls=[shared_url, "https://example.org/benchmark"],
+    )
+    discovered["url"] = shared_url
+    feed_item = make_candidate(
+        "01-ai-ml",
+        9,
+        provenance="feed",
+        scope="abstract",
+        doi="10.48550/arXiv.2609.01234",
+        authors="Lin Chen, Maya Patel",
+        affiliations="",
+        venue="arXiv cs.LG",
+        evidence_urls=[
+            shared_url,
+            "https://doi.org/10.48550/arXiv.2609.01234",
+        ],
+    )
+    feed_item["url"] = shared_url
+
+    selected = await candidate_pool(
+        {"01-ai-ml": [discovered]},
+        feed_candidates=[feed_item],
+        limit=5,
+    )
+    assert len(selected) == 1
+    merged = selected[0]
+    assert merged["provenance"] == "web_open"
+    assert merged["doi"] == "10.48550/arXiv.2609.01234"
+    assert merged["authors"] == "Lin Chen, Maya Patel"
+    assert merged["affiliations"] == "Systems AI Institute"
+    assert merged["venue"] == "arXiv cs.LG"
+    assert merged["evidence_urls"] == [
+        shared_url,
+        "https://example.org/benchmark",
+        "https://doi.org/10.48550/arXiv.2609.01234",
+    ]
+
+
+async def test_pool_assigns_feed_only_candidates_to_their_own_direction_bucket(
+    candidate_pool,
+):
+    ai_discovery = [make_candidate("01-ai-ml", i) for i in range(4)]
+    life_feed = make_candidate(
+        "05-life-health-earth",
+        1,
+        provenance="feed",
+        scope="abstract",
+    )
+    selected = await candidate_pool(
+        {"01-ai-ml": ai_discovery},
+        feed_candidates=[life_feed],
+        limit=2,
+    )
+    assert {item["direction"] for item in selected} == {
+        "01-ai-ml",
+        "05-life-health-earth",
+    }
+
+
+async def test_pool_prefers_fresher_candidate_within_same_direction(
+    candidate_pool,
+):
+    older = make_candidate("02-computing-systems", 1, published_at="2026-09-01")
+    newer = make_candidate("02-computing-systems", 2, published_at=DAY)
+    selected = await candidate_pool(
+        {"02-computing-systems": [older, newer]},
+        limit=1,
+    )
+    assert [item["id"] for item in selected] == [newer["id"]]
+
+
+ARXIV_FEED = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"
+      xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <entry>
+    <id>http://arxiv.org/abs/2609.01234v2</id>
+    <updated>2026-09-06T09:00:00Z</updated>
+    <published>2026-09-05T18:00:00Z</published>
+    <title>  Verified    Test-Time Scaling Laws </title>
+    <summary>Abstract text is untrusted and must not be copied.</summary>
+    <link href="https://arxiv.org/abs/2609.01234v2" rel="alternate" type="text/html"/>
+    <arxiv:doi>10.48550/arXiv.2609.01234</arxiv:doi>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2601.00001v1</id>
+    <updated>2026-01-01T00:00:00Z</updated>
+    <title>Stale entry outside the issue window</title>
+  </entry>
+</feed>
+"""
+
+
+CROSSREF_JSON = {
+    "message": {
+        "items": [
+            {
+                "DOI": "10.1038/s41586-026-00001-1",
+                "URL": "https://doi.org/10.1038/s41586-026-00001-1",
+                "title": ["Cryo-EM structure of a synthetic test complex"],
+                "abstract": "<jats:p>Untrusted abstract body</jats:p>",
+                "published": {"date-parts": [[2026, 9, 5]]},
+            },
+            {
+                "DOI": "10.1038/private",
+                "URL": "http://127.0.0.1/private",
+                "title": ["Rejected private URL"],
+                "published": {"date-parts": [[2026, 9, 6]]},
+            },
+        ]
+    }
+}
+
+
+def test_feed_parsers_keep_only_validated_recent_metadata():
+    arxiv = sources.parse_arxiv(ARXIV_FEED, DAY)
+    crossref = sources.parse_crossref(CROSSREF_JSON, DAY)
+    assert len(arxiv) == 1 and len(crossref) == 1
+    assert arxiv[0]["url"] == "https://arxiv.org/abs/2609.01234v2"
+    assert arxiv[0]["doi"] == "10.48550/arxiv.2609.01234"
+    assert arxiv[0]["version"] == "v2"
+    assert arxiv[0]["access_scope"] == "metadata"
+    assert "Untrusted" not in str(arxiv[0])
+    assert "Untrusted" not in str(crossref[0])
+    assert crossref[0]["published_at"] == "2026-09-05"
+
+
+async def test_public_feeds_continue_when_one_provider_fails():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "arxiv.org" in request.url.host:
+            return httpx.Response(200, text=ARXIV_FEED)
+        return httpx.Response(503, text="provider down")
+
+    client = sources.PublicFeeds(transport=httpx.MockTransport(handler))
+    result = await client.fetch(DAY, max_results_per_query=2)
+    assert len(result.candidates) == 1
+    assert any(item.startswith("crossref:") for item in result.diagnostics)
+
+
+async def test_public_feeds_preserve_partial_arxiv_results_on_later_query_error():
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        if "arxiv.org" in request.url.host:
+            calls += 1
+            if calls == 1:
+                return httpx.Response(200, text=ARXIV_FEED)
+            return httpx.Response(503, text="second query down")
+        return httpx.Response(200, json=CROSSREF_JSON)
+
+    client = sources.PublicFeeds(transport=httpx.MockTransport(handler))
+    result = await client.fetch(DAY, max_results_per_query=2)
+    assert {item["provenance"] for item in result.candidates} == {
+        "arxiv",
+        "crossref",
+    }
+    assert any(
+        item == "arxiv:02-computing-systems:HTTPStatusError"
+        for item in result.diagnostics
+    )
+
+
+async def test_public_feeds_bound_total_wall_time_across_sequential_queries():
+    async def slow_handler(request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(0.05)
+        return httpx.Response(200, text=ARXIV_FEED)
+
+    client = sources.PublicFeeds(
+        transport=httpx.MockTransport(slow_handler),
+        timeout_seconds=0.07,
+    )
+    started = asyncio.get_running_loop().time()
+    result = await client.fetch(DAY, max_results_per_query=2)
+    elapsed = asyncio.get_running_loop().time() - started
+    assert elapsed < 0.2
+    assert any("TimeoutError" in item for item in result.diagnostics)
+
+
+def test_deduplication_suppresses_same_work_across_doi_arxiv_url_and_title():
+    first = sources.metadata_candidate(
+        "Verified Test-Time Scaling Laws",
+        "https://arxiv.org/abs/2609.01234v1?utm_source=feed",
+        "https://doi.org/10.48550/arXiv.2609.01234",
+        "2026-09-05",
+        "arxiv",
+        direction="01-ai-ml",
+        version="v1",
+    )
+    pdf_duplicate = {
+        **first,
+        "id": "dup-pdf",
+        "url": "https://arxiv.org/pdf/2609.01234v1.pdf",
+        "doi": "",
+    }
+    older_history = [{**first, "published_at": "2026-09-05", "version": "v1"}]
+    unchanged = sources.deduplicate_candidates(
+        [first, pdf_duplicate], older_history
+    )
+    assert unchanged == []
+
+    revised = {
+        **first,
+        "url": "https://arxiv.org/abs/2609.01234v2",
+        "version": "v2",
+        "published_at": DAY,
+        "why_now": (
+            "Version v2 adds independent hardware replications and failure "
+            "bounds."
+        ),
+    }
+    assert sources.deduplicate_candidates([revised], older_history) == [revised]
+
+
+def test_every_direction_includes_curated_source_guide_and_watchlists():
+    loaded = instructions.load_instructions()
+    assert len(loaded) == 5
+    for item in loaded:
+        for required_section in (
+            "## Priority Source Guide",
+            "### High-Signal Primary Sources",
+            "### Watchlist Entities & Venues",
+            "### Query Angles",
+            "### Low-Signal / Verify-via-Primary Patterns",
+        ):
+            assert required_section in item.body, (
+                f"{item.slug} missing {required_section}"
+            )
+
+
+def test_direction_source_guides_cover_domain_specific_authorities():
+    by_slug = {
+        item.slug: item.body for item in instructions.load_instructions()
+    }
+    expected = {
+        "01-ai-ml": ("arXiv", "NeurIPS", "ICML", "ICLR", " LMSYS"),
+        "02-computing-systems": (
+            "LWN",
+            "USENIX",
+            "SOSP",
+            "OSDI",
+            "NSDI",
+            "SIGCOMM",
+        ),
+        "03-world-tech-policy": (
+            "EUR-Lex",
+            "Federal Register",
+            "NIST",
+            "FTC",
+            "BIS",
+            "Ofcom",
+        ),
+        "04-math-physics-foundations": (
+            "Physical Review Letters",
+            "PRX Quantum",
+            "CERN",
+            "Quanta",
+        ),
+        "05-life-health-earth": (
+            "Nature",
+            "Science",
+            "NEJM",
+            "Lancet",
+            "WHO",
+            "IPCC",
+        ),
+    }
+    for slug, markers in expected.items():
+        body = by_slug[slug]
+        for marker in markers:
+            assert marker.strip() in body, f"{slug} missing {marker}"
+
+
+def test_discovery_and_research_prompts_operationalize_source_guides():
+    discovery = (
+        resources.files("newsletter")
+        .joinpath("prompts/direction_discovery.md")
+        .read_text("utf-8")
+    )
+    research = (
+        resources.files("newsletter")
+        .joinpath("prompts/story_research.md")
+        .read_text("utf-8")
+    )
+    assert "Priority Source Guide" in discovery
+    assert "Watchlist Entities & Venues" in discovery
+    assert "二级报道或聚合帖只能当线索" in discovery
+    assert "优先打开一手原文、官方公告、标准草案、实验仓库或基准说明" in research
+
+
+def test_curated_arxiv_queries_cover_all_five_directions():
+    directions = {slug for slug, _ in sources.ARXIV_QUERIES}
+    assert directions == {
+        "01-ai-ml",
+        "02-computing-systems",
+        "03-world-tech-policy",
+        "04-math-physics-foundations",
+        "05-life-health-earth",
+    }
+

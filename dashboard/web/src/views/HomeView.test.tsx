@@ -1,7 +1,7 @@
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { apiError, freezeClock, installFetch, json, renderApp, serve, PATHS } from '../test/harness'
-import { analyticsUnavailable, healthy, observedOnly, oneWarning, shell, todofyUnreachable, withCodex, withLinkOnly, type Scenario } from '../test/fixtures'
+import { GEMINI_ITEM, UNREACHABLE_ITEM, analyticsUnavailable, healthy, observedOnly, oneWarning, shell, todofyUnreachable, withCodex, withLinkOnly, type Scenario } from '../test/fixtures'
 
 async function showHome(scenario: Scenario) {
   freezeClock()
@@ -336,4 +336,46 @@ describe('首页', () => {
     expect(mail).toHaveTextContent('无法获取这一项的数据')
     expect(within(launcher()).getByRole('link', { name: /打开 Mail Hero/ })).toBeInTheDocument()
   })
+
+  it('renders control_unavailable_count notice, held badges, and expand/collapse toggle on the attention strip', async () => {
+    const base = healthy()
+    const items = [
+      UNREACHABLE_ITEM,
+      GEMINI_ITEM,
+      { ...GEMINI_ITEM, source: 'mail-hero', code: 'delivery_failed', target: { view: 'ops' as const, entry: 'mail-hero' } },
+      { ...GEMINI_ITEM, source: 'links', code: 'backup_stale', target: { view: 'ops' as const, entry: 'links' } },
+    ]
+    const home = {
+      ...base.home,
+      attention: {
+        level: 'critical' as const,
+        items,
+        info: [],
+        held: [GEMINI_ITEM],
+        control_unavailable_count: 2,
+      },
+    }
+    await showHome({ ...base, home })
+    const user = userEvent.setup()
+    const strip = screen.getByRole('region', { name: /1 项故障 · 3 项需关注/ })
+
+    expect(within(strip).getByText(/2 项提醒暂不能关闭：提醒控制存储已满/)).toBeInTheDocument()
+
+    const list = within(strip).getByRole('list', { name: '待处理项目' })
+    expect(within(list).getAllByRole('listitem')).toHaveLength(3)
+
+    const toggle = within(strip).getByRole('button', { name: '还有 1 项' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    await user.click(toggle)
+    expect(within(list).getAllByRole('listitem')).toHaveLength(4)
+    expect(toggle).toHaveTextContent('收起')
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+
+    await user.click(toggle)
+    expect(within(list).getAllByRole('listitem')).toHaveLength(3)
+
+    const tags = within(strip).getByRole('list', { name: '已暂停与提示' })
+    expect(within(tags).getByText(/已暂停：邮件 → 任务 › Todofy 摘要（模型预算超过 80%）/)).toBeInTheDocument()
+  })
 })
+

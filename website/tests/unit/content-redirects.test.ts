@@ -1,29 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { resolveRedirects } from "../../scripts/content/redirects";
-import { sha256 } from "../../src/lib/content/hash";
-import {
-  RedirectConfigSchema,
-  type Post,
-  type SnapshotRedirect,
-} from "../../src/lib/content/schema";
-
-function post(slug: string): Post {
-  const sourceKey = sha256(slug);
-  return {
-    sourceKey,
-    feedGuid: `urn:ziyixi:post:${sourceKey}`,
-    slug,
-    title: "Post",
-    summary: "Post summary",
-    language: "en",
-    publishedAt: "2026-01-01T00:00:00.000Z",
-    tags: [],
-    blocks: [],
-    toc: [],
-    media: [],
-  };
-}
+import { RedirectConfigSchema, type SnapshotRedirect } from "../../src/lib/content/schema";
+import { makePost } from "../support/deployment-contract";
 
 describe("literal redirect sources", () => {
   it("accepts a normalized literal path", () => {
@@ -66,7 +45,7 @@ describe("literal redirect sources", () => {
   });
 
   it("protects current article routes for configured and automatic redirects", () => {
-    const posts = [post("current")];
+    const posts = [makePost("current")];
     expect(() => resolveRedirects([{ from: "/blog/current", to: "/blog" }], posts, [])).toThrow(
       /shadows a public route/,
     );

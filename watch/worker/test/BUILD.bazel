@@ -168,19 +168,26 @@ proto_vitest_test(
     tags = ["unit"],
     tests = [":rules.test.ts"],
     deps = [
+        "//watch/worker/src:backup",
+        "//watch/worker/src:browser",
+        "//watch/worker/src:config",
         "//watch/worker/src:diff",
         "//watch/worker/src:etiquette",
         "//watch/worker/src:extract_charset",
         "//watch/worker/src:extract_entities",
         "//watch/worker/src:extract_feed",
+        "//watch/worker/src:extract_html",
         "//watch/worker/src:extract_jsonpath",
         "//watch/worker/src:extract_markdown",
         "//watch/worker/src:extract_number",
         "//watch/worker/src:extract_structured",
         "//watch/worker/src:health",
         "//watch/worker/src:limits",
+        "//watch/worker/src:module_group_39",
+        "//watch/worker/src:pipeline",
         "//watch/worker/src:robots",
         "//watch/worker/src:snapshot",
+        "//watch/worker/src:store",
         "//watch/worker/src:url-policy",
     ],
 )
@@ -293,6 +300,7 @@ workerd_vitest_test(
     project = "watch/worker",
     runner = vitest.vitest_test,
     tests = [":runtime/backup.test.ts"],
+    deps = COMMON_TEST_DEPS,
 )
 
 workerd_vitest_test(
@@ -361,14 +369,6 @@ workerd_vitest_test(
         "//proto/ts:wire-json",
         "//proto/watch/ui/v1:ts",
     ],
-)
-
-workerd_vitest_test(
-    name = "runtime_fake-net_test",
-    data = [":test_support"],
-    project = "watch/worker",
-    runner = vitest.vitest_test,
-    tests = [":runtime/fake-net.test.ts"],
 )
 
 workerd_vitest_test(

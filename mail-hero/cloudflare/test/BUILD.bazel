@@ -17,6 +17,7 @@ js_test(
     data = [
         ":action-reservation.test.mjs",
         ":migrations.mjs",
+        ":runtime-harness.mjs",
         "//mail-hero/cloudflare:edge_auth_link",
         "//mail-hero/cloudflare:migrations",
         "//mail-hero/cloudflare:node_modules/esbuild",
@@ -26,6 +27,53 @@ js_test(
         "//mail-hero/cloudflare/src:lib",
     ],
     entry_point = ":action-reservation.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "api-delivery-stats_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":api-delivery-stats.test.mjs",
+        ":native-env.mjs",
+        ":owner-api.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:module_group_12",
+        "//mail-hero/cloudflare/src:module_group_13",
+        "//mail-hero/cloudflare/src:native_alerts",
+        "//mail-hero/cloudflare/src:native_api",
+        "//mail-hero/cloudflare/src:native_security",
+        "//packages/edge-auth:lib",
+    ],
+    entry_point = ":api-delivery-stats.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "api-endpoints_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":api-endpoints.test.mjs",
+        ":native-env.mjs",
+        ":owner-api.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:module_group_12",
+        "//mail-hero/cloudflare/src:module_group_13",
+        "//mail-hero/cloudflare/src:native_alerts",
+        "//mail-hero/cloudflare/src:native_api",
+        "//mail-hero/cloudflare/src:native_capacity",
+        "//mail-hero/cloudflare/src:native_security",
+        "//packages/edge-auth:lib",
+    ],
+    entry_point = ":api-endpoints.test.mjs",
     node_options = ["--test"],
     tags = ["unit"],
 )
@@ -48,34 +96,24 @@ js_test(
 )
 
 js_test(
-    name = "backup-artifact-capacity_test",
+    name = "api-messages_test",
     chdir = "mail-hero/cloudflare",
     data = [
-        ":backup-artifact-capacity.test.mjs",
+        ":api-messages.test.mjs",
+        ":native-env.mjs",
+        ":owner-api.mjs",
         "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
         "//mail-hero/cloudflare:package_json",
         "//mail-hero/cloudflare:proto_link",
-        "//mail-hero/cloudflare/src:module_group_9",
-        "//mail-hero/cloudflare/src:native_backup-artifact-capacity",
+        "//mail-hero/cloudflare/src:module_group_12",
+        "//mail-hero/cloudflare/src:module_group_13",
+        "//mail-hero/cloudflare/src:native_alerts",
+        "//mail-hero/cloudflare/src:native_api",
+        "//mail-hero/cloudflare/src:native_security",
+        "//packages/edge-auth:lib",
     ],
-    entry_point = ":backup-artifact-capacity.test.mjs",
-    node_options = ["--test"],
-    tags = ["unit"],
-)
-
-js_test(
-    name = "backup-artifacts-runtime_test",
-    chdir = "mail-hero/cloudflare",
-    data = [
-        ":backup-artifacts-runtime.test.mjs",
-        "//mail-hero/cloudflare:edge_auth_link",
-        "//mail-hero/cloudflare:node_modules/esbuild",
-        "//mail-hero/cloudflare:node_modules/miniflare",
-        "//mail-hero/cloudflare:package_json",
-        "//mail-hero/cloudflare:proto_link",
-        "//mail-hero/cloudflare/src:lib",
-    ],
-    entry_point = ":backup-artifacts-runtime.test.mjs",
+    entry_point = ":api-messages.test.mjs",
     node_options = ["--test"],
     tags = ["unit"],
 )
@@ -89,6 +127,7 @@ js_test(
         "//mail-hero/cloudflare:package_json",
         "//mail-hero/cloudflare:proto_link",
         "//mail-hero/cloudflare/src:module_group_9",
+        "//mail-hero/cloudflare/src:native_backup-artifact-capacity",
     ],
     entry_point = ":backup-artifacts.test.mjs",
     node_options = ["--test"],
@@ -222,53 +261,12 @@ js_test(
 )
 
 js_test(
-    name = "native-api_test",
-    chdir = "mail-hero/cloudflare",
-    data = [
-        ":native-api.test.mjs",
-        ":native-env.mjs",
-        ":owner-api.mjs",
-        "//mail-hero/cloudflare:edge_auth_link",
-        "//mail-hero/cloudflare:migrations",
-        "//mail-hero/cloudflare:node_modules/jose",
-        "//mail-hero/cloudflare:package_json",
-        "//mail-hero/cloudflare:proto_link",
-        "//mail-hero/cloudflare/src:module_group_12",
-        "//mail-hero/cloudflare/src:module_group_13",
-        "//mail-hero/cloudflare/src:native_alerts",
-        "//mail-hero/cloudflare/src:native_api",
-        "//mail-hero/cloudflare/src:native_security",
-        "//packages/edge-auth:lib",
-    ],
-    entry_point = ":native-api.test.mjs",
-    node_options = ["--test"],
-    tags = ["unit"],
-)
-
-js_test(
-    name = "native-backup-artifacts-runtime_test",
-    chdir = "mail-hero/cloudflare",
-    data = [
-        ":native-backup-artifacts-runtime.test.mjs",
-        "//mail-hero/cloudflare:edge_auth_link",
-        "//mail-hero/cloudflare:migrations",
-        "//mail-hero/cloudflare:node_modules/esbuild",
-        "//mail-hero/cloudflare:node_modules/miniflare",
-        "//mail-hero/cloudflare:package_json",
-        "//mail-hero/cloudflare:proto_link",
-        "//mail-hero/cloudflare/src:lib",
-    ],
-    entry_point = ":native-backup-artifacts-runtime.test.mjs",
-    node_options = ["--test"],
-    tags = ["unit"],
-)
-
-js_test(
     name = "native-backup-runner-runtime_test",
     chdir = "mail-hero/cloudflare",
     data = [
         ":migrations.mjs",
         ":native-backup-runner-runtime.test.mjs",
+        ":runtime-harness.mjs",
         "//mail-hero/cloudflare:edge_auth_link",
         "//mail-hero/cloudflare:migrations",
         "//mail-hero/cloudflare:node_modules/esbuild",
@@ -299,6 +297,7 @@ js_test(
     data = [
         ":migrations.mjs",
         ":native-backup-runtime.test.mjs",
+        ":runtime-harness.mjs",
         "//mail-hero/cloudflare:edge_auth_link",
         "//mail-hero/cloudflare:migrations",
         "//mail-hero/cloudflare:node_modules/esbuild",
@@ -336,6 +335,7 @@ js_test(
     data = [
         ":migrations.mjs",
         ":native-bounded-runtime.test.mjs",
+        ":runtime-harness.mjs",
         "//mail-hero/cloudflare:edge_auth_link",
         "//mail-hero/cloudflare:migrations",
         "//mail-hero/cloudflare:node_modules/esbuild",
@@ -355,7 +355,9 @@ js_test(
     name = "native-large_test",
     chdir = "mail-hero/cloudflare",
     data = [
+        ":migrations.mjs",
         ":native-large.test.mjs",
+        ":runtime-harness.mjs",
         "//mail-hero/cloudflare:edge_auth_link",
         "//mail-hero/cloudflare:migrations",
         "//mail-hero/cloudflare:node_modules/esbuild",
@@ -375,6 +377,7 @@ js_test(
     data = [
         ":migrations.mjs",
         ":native-lifecycle-runtime.test.mjs",
+        ":runtime-harness.mjs",
         "//mail-hero/cloudflare:edge_auth_link",
         "//mail-hero/cloudflare:migrations",
         "//mail-hero/cloudflare:node_modules/esbuild",
@@ -413,6 +416,7 @@ js_test(
     data = [
         ":migrations.mjs",
         ":native-ops-runtime.test.mjs",
+        ":runtime-harness.mjs",
         "//mail-hero/cloudflare:edge_auth_link",
         "//mail-hero/cloudflare:migrations",
         "//mail-hero/cloudflare:node_modules/esbuild",
@@ -476,6 +480,7 @@ js_test(
         ":migrations.mjs",
         ":native-resolved-runtime.test.mjs",
         ":owner-api.mjs",
+        ":runtime-harness.mjs",
         "//mail-hero/cloudflare:edge_auth_link",
         "//mail-hero/cloudflare:migrations",
         "//mail-hero/cloudflare:node_modules/esbuild",
@@ -496,6 +501,7 @@ js_test(
         ":migrations.mjs",
         ":native-runtime.test.mjs",
         ":owner-api.mjs",
+        ":runtime-harness.mjs",
         "//contracts:mail-received-v1/fixtures/attachments_capacity.json_data",
         "//contracts:mail-received-v1/fixtures/attachments_metadata_limit.json_data",
         "//contracts:mail-received-v1/fixtures/attachments_stored_and_omitted.json_data",
@@ -543,6 +549,32 @@ js_test(
         "//mail-hero/cloudflare/src:native_ops-guard",
     ],
     entry_point = ":ops-golden.test.mjs",
+    node_options = ["--test"],
+    tags = ["unit"],
+)
+
+js_test(
+    name = "security_test",
+    chdir = "mail-hero/cloudflare",
+    data = [
+        ":native-env.mjs",
+        ":owner-api.mjs",
+        ":security.test.mjs",
+        "//mail-hero/cloudflare:edge_auth_link",
+        "//mail-hero/cloudflare:migrations",
+        "//mail-hero/cloudflare:node_modules/jose",
+        "//mail-hero/cloudflare:package_json",
+        "//mail-hero/cloudflare:proto_link",
+        "//mail-hero/cloudflare/src:lib",
+        "//mail-hero/cloudflare/src:module_group_12",
+        "//mail-hero/cloudflare/src:module_group_13",
+        "//mail-hero/cloudflare/src:native_alerts",
+        "//mail-hero/cloudflare/src:native_api",
+        "//mail-hero/cloudflare/src:native_index",
+        "//mail-hero/cloudflare/src:native_security",
+        "//packages/edge-auth:lib",
+    ],
+    entry_point = ":security.test.mjs",
     node_options = ["--test"],
     tags = ["unit"],
 )

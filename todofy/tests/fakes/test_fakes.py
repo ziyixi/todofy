@@ -2,6 +2,7 @@ import email.utils
 import socket
 import time
 from collections.abc import Iterator
+from pathlib import Path
 
 import httpx
 import pytest
@@ -15,6 +16,7 @@ from tests.fakes.server import (
     retry_after_http_date,
     retry_after_seconds,
 )
+from tests.runtime.harness import HOOKS_HOST, PROXY_IDLE_S, PUBLIC_HOST, Worker
 
 MODEL_BODY = {
     "model": "gemini-3.5-flash-lite",
@@ -169,3 +171,30 @@ def test_pass_serves_the_route_after_a_delay_and_only_then_the_queue(counter: Co
     assert time.monotonic() - started >= 0.2
     assert httpx.get(counter.url + "/items").status_code == 500
     assert PASS.status is None and counter.pending("GET", "/items") == 0
+
+
+def test_only_a_request_the_proxy_would_not_resend_after_a_pause_is_preceded_by_a_health_get(
+    fake: FakeServer, tmp_path: Path
+) -> None:
+    worker = Worker([], "", tmp_path, {})
+    worker.base_url = fake.url
+    with worker.client(PUBLIC_HOST) as client:
+        client.get("/a")
+        client.post("/b", content=b"{}")  # right after an answer: sent as it is
+        worker.answered_at -= 2 * PROXY_IDLE_S
+        client.get("/c")  # a GET the proxy resends itself
+        worker.answered_at -= 2 * PROXY_IDLE_S
+        client.post("/d", content=b"{}")
+    worker.answered_at -= 2 * PROXY_IDLE_S
+    assert worker.headers_only_status(HOOKS_HOST, "POST", "/e", {"content-length": "0"}) == 404
+    sent = [(r.method, r.path, r.headers["host"]) for r in fake.received()]
+    assert sent == [
+        ("GET", "/a", PUBLIC_HOST),
+        ("POST", "/b", PUBLIC_HOST),
+        ("GET", "/c", PUBLIC_HOST),
+        ("GET", "/health", HOOKS_HOST),
+        ("POST", "/d", PUBLIC_HOST),
+        ("GET", "/health", HOOKS_HOST),
+        ("POST", "/e", HOOKS_HOST),
+    ]
+

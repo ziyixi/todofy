@@ -1,17 +1,28 @@
 /**
  * The HTTP surface and the owner API in workerd (../../../docs/design.md §9): Access, Origin and CSRF in front of the
  * transcoder, the private headers, the old /api/v1 paths answering 410 RELOAD_REQUIRED, AIP-155 request IDs, AIP-154
- * etags, the value rules the IDL cannot hold, the review queue's answers, and ops-v1 over the service binding (counts
- * and codes only, the guard).
+ * etags, the value rules the IDL cannot hold, the review queue's answers, ops-v1 over the service binding (counts
+ * and codes only, the guard), automatic classification intervals, editable classification prompts, provider settings,
+ * and historical replay evaluation.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { URL as NodeURL } from 'node:url';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { create } from '@ziyixi/proto/protobuf';
+import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
 import { Label_GmailState, Label_Problem, LabelSchema } from '@ziyixi/proto/mailsort/ui/v2/label_pb';
-import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
-import { fromWire } from '@ziyixi/proto/wire-json';
+import { ClassificationPromptSchema } from '@ziyixi/proto/mailsort/ui/v2/prompt_pb';
+import { ReplayEvaluation_Outcome, ReplayEvaluation_State, ReplayEvaluationSchema } from '@ziyixi/proto/mailsort/ui/v2/replay_pb';
+import { ClassificationProvider, Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
+import { fromWire, toWire } from '@ziyixi/proto/wire-json';
 import { OpsStatusSchema } from '@ziyixi/proto/ops/v1/ops_pb';
+import { MAX_BODY_BYTES } from '../../src/limits.ts';
 import { MAILS, message } from '../fakes/fixtures.ts';
-import { HOUR, op, ORIGIN, reasonOf, rejection, startHarness, T0, type Harness } from './harness.ts';
+import { DAY, HOUR, MINUTE, op, ORIGIN, reasonOf, rejection, startHarness, T0, type Harness } from './harness.ts';
+import { checkGoogleCalls, deliver, modifies, setMode } from './helpers.ts';
+
+const PRIORITY_PROMPT = readFileSync(new NodeURL('../../../prompts/priority-classification.txt', import.meta.url), 'utf8');
+const PERSONAL_RULES = readFileSync(new NodeURL('../../../prompts/personal-rules.txt', import.meta.url), 'utf8');
 
 describe('the HTTP surface', () => {
   let h: Harness;
@@ -218,5 +229,360 @@ describe('the retired label consolidation', () => {
     expect(h.up.gmail.calls.filter((call) => call.method !== 'GET' && !call.url.includes('oauth2'))).toEqual([]);
     await h.sql(`UPDATE label_merge_jobs SET state = 'succeeded'`);
     expect(await h.api.initializePriorities({ requestId: op() })).toMatchObject({ completed: true });
+  });
+});
+
+describe('automatic classification interval', () => {
+  let h: Harness;
+  beforeEach(async () => { h = await startHarness(); });
+  afterEach(async () => { await h.dispose(); });
+
+  it('adopts the former idle hour once, persists the choice and reports the adjusted next batch', async () => {
+    await h.sql(`INSERT OR REPLACE INTO meta(key,value) VALUES('settings', ?),('next_model_at', ?)`,
+      JSON.stringify({ mode: 'off', classificationProvider: 'codex', dailyWriteLimit: 19, etag: 'old' }), String(T0 + HOUR));
+    expect((await h.api.getSettings({ name: 'settings' })).classificationIntervalMinutes).toBe(15);
+    expect(await h.sql(`SELECT value FROM meta WHERE key='next_model_at'`)).toEqual([{ value: String(T0 + HOUR) }]);
+    expect(await h.step(T0 + MINUTE)).toMatchObject({ next: T0 + 6 * MINUTE, code: 'off' });
+    const initial = await h.api.getSettings({ name: 'settings' });
+    expect(initial).toMatchObject({ mode: Mode.OFF, classificationProvider: ClassificationProvider.CODEX, classificationIntervalMinutes: 15, dailyWriteLimit: 19 });
+    await h.step(T0 + 2 * MINUTE);
+    expect(await h.api.getSettings({ name: 'settings' })).toEqual(initial);
+    expect(await h.sql(`SELECT value FROM meta WHERE key='next_model_at'`)).toEqual([{ value: String(T0 + 15 * MINUTE) }]);
+    const request = {
+      settings: create(SettingsSchema, { name: 'settings', classificationIntervalMinutes: 30, etag: initial.etag }),
+      updateMask: { paths: ['classification_interval_minutes', 'etag'] }, requestId: op(),
+    };
+    const saved = await h.api.updateSettings(request);
+    expect(saved).toMatchObject({ ...initial, availableModels: [], classificationIntervalMinutes: 30, etag: saved.etag });
+    expect(await h.api.updateSettings(request)).toEqual(saved);
+    expect(reasonOf(await rejection(h.api.updateSettings({ ...request, requestId: op() })))).toBe('ETAG_MISMATCH');
+    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).classifier).toMatchObject({
+      provider: ClassificationProvider.CODEX, classificationIntervalMinutes: 30, nextBatchTime: timestampFromMs(T0 + 30 * MINUTE),
+    });
+    const row = await h.sql<{ value: string }>(`SELECT value FROM meta WHERE key='settings'`);
+    expect(JSON.parse(row[0]?.value ?? '{}')).toMatchObject({ classificationIntervalMinutes: 30, mode: 'off', classificationProvider: 'codex' });
+    expect(h.up.gmail.calls).toEqual([]);
+    expect(h.up.claude.calls).toEqual([]);
+    expect(h.up.codex.calls).toEqual([]);
+  });
+
+  it('refuses unsupported intervals and changes the interval only when its mask names it', async () => {
+    const initial = await h.api.getSettings({ name: 'settings' });
+    for (const minutes of [0, 1, 10, 120, -5]) {
+      expect(reasonOf(await rejection(h.api.updateSettings({
+        settings: create(SettingsSchema, { name: 'settings', classificationIntervalMinutes: minutes, etag: initial.etag }),
+        updateMask: { paths: ['classification_interval_minutes'] }, requestId: op(),
+      })))).toBe('INVALID_SETTINGS');
+    }
+    expect(await h.api.getSettings({ name: 'settings' })).toEqual(initial);
+    const saved = await h.api.updateSettings({
+      settings: create(SettingsSchema, { name: 'settings', classificationIntervalMinutes: 5, classificationProvider: ClassificationProvider.CODEX, dailyWriteLimit: 22 }),
+      updateMask: { paths: ['daily_write_limit'] }, requestId: op(),
+    });
+    expect(saved).toMatchObject({ classificationIntervalMinutes: 15, classificationProvider: ClassificationProvider.CLAUDE, dailyWriteLimit: 22 });
+    for (const minutes of [5, 15, 30, 60]) {
+      const value = await h.api.updateSettings({
+        settings: create(SettingsSchema, { name: 'settings', classificationIntervalMinutes: minutes }),
+        updateMask: { paths: ['classification_interval_minutes'] }, requestId: op(),
+      });
+      expect(value.classificationIntervalMinutes).toBe(minutes);
+    }
+  });
+
+  it('keeps a pending retry deadline during default adoption and a later shorter interval save', async () => {
+    await h.sql(`INSERT OR REPLACE INTO meta(key,value) VALUES('settings','{"mode":"off"}'),('next_model_at',?)`, String(T0 + 10 * MINUTE));
+    await h.sql(`INSERT INTO pending(message_id,added_at,attempts,not_before) VALUES('synthetic-retry',?,1,?)`, T0, T0 + 10 * MINUTE);
+    await h.step(T0);
+    const current = await h.api.getSettings({ name: 'settings' });
+    expect(current.classificationIntervalMinutes).toBe(15);
+    await h.api.updateSettings({
+      settings: create(SettingsSchema, { name: 'settings', classificationIntervalMinutes: 5, etag: current.etag }),
+      updateMask: { paths: ['classification_interval_minutes'] }, requestId: op(),
+    });
+    expect(await h.sql(`SELECT value FROM meta WHERE key='next_model_at'`)).toEqual([{ value: String(T0 + 10 * MINUTE) }]);
+    expect(await h.sql(`SELECT attempts,not_before FROM pending`)).toEqual([{ attempts: 1, not_before: T0 + 10 * MINUTE }]);
+    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).classifier).toMatchObject({ classificationIntervalMinutes: 5, nextBatchTime: timestampFromMs(T0 + 10 * MINUTE) });
+    expect(h.up.gmail.calls).toEqual([]);
+  });
+});
+
+describe('editable classification prompt', () => {
+  let h: Harness;
+  afterEach(async () => { checkGoogleCalls(h); await h.dispose(); });
+  const get = () => h.api.getClassificationPrompt({ name: 'classificationPrompt' });
+  async function save(baseText: string, personalRules: string, etag = 'initial', requestId = op()) {
+    return h.api.updateClassificationPrompt({ classificationPrompt: create(ClassificationPromptSchema, { name: 'classificationPrompt', baseText, personalRules, etag }), updateMask: { paths: ['base_text', 'personal_rules', 'etag'] }, requestId });
+  }
+  async function ready() {
+    h = await startHarness();
+    await h.step(T0);
+    await setMode(h, Mode.LIVE);
+    await h.api.initializePriorities({ requestId: op() });
+  }
+  const input = (id: number) => ({ ...MAILS.bankEn, id: `abc${id.toString(16).padStart(13, '0')}` });
+
+  it('reads defaults without persisting and saves both texts while off, with request replay and stale-etag checks', async () => {
+    h = await startHarness();
+    await setMode(h, Mode.OFF);
+    const initial = await get();
+    expect(initial).toMatchObject({ baseText: PRIORITY_PROMPT, personalRules: PERSONAL_RULES, etag: 'initial' });
+    expect(initial.updateTime).toBeUndefined();
+    expect(await h.sql(`SELECT value FROM meta WHERE key = 'classification_prompt'`)).toEqual([]);
+    const requestId = op();
+    const saved = await save('Synthetic base', '', 'initial', requestId);
+    expect(saved).toMatchObject({ baseText: 'Synthetic base', personalRules: '' });
+    expect(saved.etag).not.toBe('initial');
+    expect(saved.updateTime).toBeDefined();
+    expect(await save('Different retry input', 'ignored', 'initial', requestId)).toEqual(saved);
+    expect(reasonOf(await rejection(save('Stale', 'rules')))).toBe('ETAG_MISMATCH');
+    expect(await get()).toEqual(saved);
+    expect(h.up.gmail.calls).toEqual([]);
+    expect(h.up.claude.calls).toEqual([]);
+  });
+
+  it('validates UTF-8 size and masks, accepts escaped prompt bodies above 16KiB, and keeps owner/CSRF boundaries', async () => {
+    h = await startHarness();
+    expect(reasonOf(await rejection(save(' ', 'rules')))).toBe('BAD_REQUEST');
+    expect(reasonOf(await rejection(save('中'.repeat(4097), '')))).toBe('BAD_REQUEST');
+    const noMask = h.api.updateClassificationPrompt({ classificationPrompt: create(ClassificationPromptSchema, { name: 'classificationPrompt', baseText: 'Synthetic base' }), requestId: op() });
+    expect(reasonOf(await rejection(noMask))).toBe('BAD_REQUEST');
+    const largeEscaped = '"'.repeat(10000);
+    expect(new TextEncoder().encode(JSON.stringify({ base_text: largeEscaped })).length).toBeGreaterThan(16 * 1024);
+    expect((await save(largeEscaped, '')).baseText).toBe(largeEscaped);
+    const csrf = await h.fetch('/api/v2/classificationPrompt?update_mask=base_text', { method: 'PATCH', headers: { origin: ORIGIN, 'content-type': 'application/json' }, body: '{}' });
+    expect(csrf.status).toBe(403);
+    const outside = await h.fetch('/api/v2/classificationPrompt', { headers: { 'cf-ray': 'synthetic' } });
+    expect(outside.status).toBeGreaterThanOrEqual(400);
+    const tooLarge = await h.mutate('PATCH', '/api/v2/classificationPrompt?update_mask=base_text', { name: 'classificationPrompt', base_text: 'x'.repeat(MAX_BODY_BYTES) });
+    expect(tooLarge.status).toBe(400);
+  });
+
+  it('uses saved prompt text on the next request without rejudging prior mail', async () => {
+    await ready();
+    deliver(h, input(1), T0 + MINUTE);
+    await h.step(T0 + 2 * MINUTE);
+    expect(h.up.claude.systems[0]?.map(block => block.text)).toEqual([PRIORITY_PROMPT, PERSONAL_RULES]);
+    expect(h.up.claude.systems[0]?.every(block => !block.cache)).toBe(true);
+    await save('New synthetic base', 'New synthetic rules');
+    deliver(h, input(2), T0 + HOUR);
+    await h.step(T0 + HOUR + 2 * MINUTE);
+    expect(h.up.claude.systems[1]?.map(block => block.text)).toEqual(['New synthetic base', 'New synthetic rules']);
+    expect(h.up.claude.systems[1]?.every(block => !block.cache)).toBe(true);
+    expect(h.up.claude.calls.flat().map(email => email.id)).toEqual([input(1).id, input(2).id]);
+  });
+
+  it('never asks for a prompt cache, even for a backlog, and still records reported cache writes/reads within total input and cost', async () => {
+    await ready();
+    h.up.claude.cacheWriteTokens = 6000;
+    for (let id = 1; id <= 11; id++) deliver(h, input(id), T0 + MINUTE);
+    await h.step(T0 + 2 * MINUTE);
+    expect(h.up.claude.calls[0]).toHaveLength(10);
+    h.up.claude.cacheWriteTokens = 0;
+    h.up.claude.cacheReadTokens = 6000;
+    await h.step(T0 + 3 * MINUTE);
+    expect(h.up.claude.calls[1]).toHaveLength(1);
+    expect(h.up.claude.systems.flat().every(block => !block.cache)).toBe(true);
+    expect(await h.sql(`SELECT value FROM meta WHERE key = 'claude_prompt_cache_at'`)).toEqual([]);
+    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).claudeBudget).toMatchObject({ inputTokens: 14400, cacheWriteTokens: 6000, cacheReadTokens: 6000, outputTokens: 240, spentUsd: 0.0456 });
+    expect((await h.opsStatus())['counters']).toMatchObject({ claude_cache_write_tokens: 6000, claude_cache_read_tokens: 6000 });
+  });
+
+  it('records billed cache usage even when a batch answer is invalid', async () => {
+    await ready();
+    h.up.claude.cacheWriteTokens = 6000;
+    h.up.claude.badItems = true;
+    for (let id = 1; id <= 11; id++) deliver(h, input(id), T0 + MINUTE);
+    expect(await h.step(T0 + 2 * MINUTE)).toMatchObject({ code: 'claude_bad_answer', decided: 0 });
+    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).claudeBudget).toMatchObject({ cacheWriteTokens: 6000, spentUsd: 0.0372 });
+  });
+});
+
+describe('classification provider settings and status', () => {
+  let h: Harness;
+  beforeEach(async () => { h = await startHarness(); });
+  afterEach(async () => { await h.dispose(); });
+
+  it('defaults legacy settings to Codex and preserves mode, limits and existing work when switching', async () => {
+    await h.sql(`INSERT OR REPLACE INTO meta (key, value) VALUES ('settings', ?), ('next_model_at', ?), ('claude_limited_month', '2026-10'), ('claude_error', 'claude_spend_limit')`,
+      JSON.stringify({ mode: 'live', runWriteLimit: 3, dailyWriteLimit: 19, etag: 'legacy' }), String(T0 + HOUR));
+    const before = await h.api.getSettings({ name: 'settings' });
+    expect(before.classificationProvider).toBe(ClassificationProvider.CODEX);
+    const requestId = op();
+    const request = {
+      settings: create(SettingsSchema, { name: 'settings', classificationProvider: ClassificationProvider.CLAUDE, mode: Mode.OFF, etag: before.etag }),
+      updateMask: { paths: ['classification_provider', 'etag'] }, requestId,
+    };
+    const saved = await h.api.updateSettings(request);
+    expect(saved).toEqual({ ...before, availableModels: [], classificationModel: 'claude-opus-5-5', classificationProvider: ClassificationProvider.CLAUDE, etag: saved.etag });
+    expect(saved.etag).not.toBe(before.etag);
+    expect(await h.api.getSettings({ name: 'settings' })).toEqual({ ...saved, availableModels: before.availableModels });
+    expect(await h.api.updateSettings(request)).toEqual(saved);
+    expect(reasonOf(await rejection(h.api.updateSettings({ ...request, requestId: op() })))).toBe('ETAG_MISMATCH');
+    const stored = await h.sql<{ value: string }>(`SELECT value FROM meta WHERE key = 'settings'`);
+    expect(JSON.parse(stored[0]?.value ?? '{}')).toMatchObject({ classificationProvider: 'claude', mode: 'live', runWriteLimit: 3, dailyWriteLimit: 19 });
+    expect(await h.sql(`SELECT value FROM meta WHERE key = 'next_model_at'`)).toEqual([{ value: String(T0) }]);
+    expect(await h.sql(`SELECT key FROM meta WHERE key IN ('claude_limited_month', 'claude_error') ORDER BY key`)).toEqual([{ key: 'claude_error' }, { key: 'claude_limited_month' }]);
+    expect((await h.api.getServiceStatus({ name: 'serviceStatus' })).unreadClassification).toBeUndefined();
+    expect(h.up.gmail.calls).toHaveLength(0);
+    expect(h.up.claude.calls).toHaveLength(0);
+  });
+
+  it('preserves a future schedule and deferred work when the selected provider stays the same', async () => {
+    await h.sql(`INSERT OR REPLACE INTO meta (key, value) VALUES ('settings', '{"classificationProvider":"codex","classificationIntervalMinutes":60}'), ('next_model_at', ?)`, String(T0 + HOUR));
+    await h.sql(`INSERT INTO pending (message_id, added_at, not_before, deferred) VALUES ('synthetic-held', ?, ?, ?)`, T0, T0 + HOUR, T0);
+    const current = await h.api.getSettings({ name: 'settings' });
+    await h.api.updateSettings({
+      settings: create(SettingsSchema, { name: 'settings', classificationProvider: ClassificationProvider.CODEX, etag: current.etag }),
+      updateMask: { paths: ['classification_provider', 'etag'] }, requestId: op(),
+    });
+    expect(await h.sql(`SELECT value FROM meta WHERE key = 'next_model_at'`)).toEqual([{ value: String(T0 + HOUR) }]);
+    expect(await h.sql(`SELECT not_before, deferred FROM pending`)).toEqual([{ not_before: T0 + HOUR, deferred: T0 }]);
+    expect(h.up.gmail.calls).toHaveLength(0);
+    expect(h.up.codex.calls).toHaveLength(0);
+    expect(h.up.claude.calls).toHaveLength(0);
+  });
+
+  it('refuses an unspecified provider and requires the provider in the update mask', async () => {
+    const before = await h.api.getSettings({ name: 'settings' });
+    const rejected = await rejection(h.api.updateSettings({
+      settings: create(SettingsSchema, { name: 'settings' }), updateMask: { paths: ['classification_provider'] }, requestId: op(),
+    }));
+    expect(reasonOf(rejected)).toBe('INVALID_SETTINGS');
+    expect(await h.api.getSettings({ name: 'settings' })).toEqual(before);
+    const saved = await h.api.updateSettings({
+      settings: create(SettingsSchema, { name: 'settings', classificationProvider: ClassificationProvider.CODEX, dailyWriteLimit: 22 }),
+      updateMask: { paths: ['daily_write_limit'] }, requestId: op(),
+    });
+    expect(saved.classificationProvider).toBe(ClassificationProvider.CLAUDE);
+    expect(saved.dailyWriteLimit).toBe(22);
+  });
+
+  it('reports selected Codex configuration and success separately from preserved Claude usage and refusal', async () => {
+    await h.sql(`INSERT OR REPLACE INTO meta (key, value) VALUES ('settings', ?), ('claude_error', 'claude_spend_limit'), ('claude_limited_month', '2026-10'),
+      ('codex_error', 'codex_503'), ('codex_last_request_at', ?), ('codex_last_success_at', ?), ('next_model_at', ?)`,
+    JSON.stringify({ classificationProvider: 'codex' }), String(T0), String(T0 - HOUR), String(T0 + HOUR));
+    await h.sql(`INSERT INTO claude_usage (day, requests, input_tokens, output_tokens, cost_micros) VALUES ('2026-10-01', 1, 500, 100, 20000000)`);
+    h.up.codex.configured = false;
+    const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
+    expect(status).toMatchObject({
+      decisionModel: 'gpt-6.1-sol',
+      classifier: {
+        provider: ClassificationProvider.CODEX, model: 'gpt-6.1-sol', effort: 'medium', configured: false,
+        nextBatchTime: timestampFromMs(T0 + HOUR), lastSuccessTime: timestampFromMs(T0 - HOUR),
+      },
+      claudeBudget: { model: 'claude-opus-5-5', spentUsd: 20, providerLimitReached: true, lastErrorCode: 'claude_spend_limit' },
+    });
+    expect(status.classifier?.lastErrorCode).not.toBe('claude_spend_limit');
+    expect(status.claudeBudget?.nextBatchTime).toBeUndefined();
+    // Model Router records Codex usage; Mailsort keeps no ledger of its own.
+    expect(status.codexUsage).toBeUndefined();
+  });
+
+  it('does not interpret a historical request timestamp as a successful answer', async () => {
+    await h.sql(`INSERT INTO meta (key, value) VALUES ('claude_last_request_at', ?), ('claude_error', 'claude_invalid')`, String(T0));
+    const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
+    expect(status.classifier).toMatchObject({ provider: ClassificationProvider.CLAUDE, model: 'claude-opus-5-5', effort: 'medium', configured: true, lastErrorCode: 'claude_invalid' });
+    expect(status.classifier?.lastSuccessTime).toBeUndefined();
+    expect(status.claudeBudget?.lastRequestTime).toEqual(timestampFromMs(T0));
+  });
+
+  it('saves a catalog model and effort without copying catalog state or altering mode, budgets or prompt', async () => {
+    const current = await h.api.getSettings({ name: 'settings' });
+    const prompt = await h.api.getClassificationPrompt({ name: 'classificationPrompt' });
+    const request = {
+      settings: create(SettingsSchema, { name: 'settings', classificationModel: 'openai/gpt-6.1-sol', classificationEffort: 'high', etag: current.etag }),
+      updateMask: { paths: ['classification_model', 'classification_effort', 'etag'] }, requestId: op(),
+    };
+    const saved = await h.api.updateSettings(request);
+    expect(saved).toMatchObject({ classificationProvider: ClassificationProvider.OPENAI, classificationModel: 'openai/gpt-6.1-sol', classificationEffort: 'high', mode: current.mode, dailyWriteLimit: current.dailyWriteLimit, runWriteLimit: current.runWriteLimit });
+    expect(await h.api.updateSettings(request)).toEqual(saved);
+    expect(await h.api.getSettings({ name: 'settings' })).toEqual({ ...saved, availableModels: current.availableModels });
+    const stored = JSON.parse((await h.sql<{ value: string }>(`SELECT value FROM meta WHERE key = 'settings'`))[0]?.value ?? '{}') as Record<string, unknown>;
+    expect(stored).toMatchObject({ classificationProvider: 'openai', classificationModel: 'openai/gpt-6.1-sol', classificationEffort: 'high' });
+    expect(stored).not.toHaveProperty('availableModels');
+    expect(await h.api.getClassificationPrompt({ name: 'classificationPrompt' })).toEqual(prompt);
+    expect(h.up.api.calls).toHaveLength(0);
+    expect(h.up.gmail.calls).toHaveLength(0);
+  });
+
+  it.each([
+    ['openai/gpt-6-astra', 'high'], ['openai/missing', 'medium'], ['openai/gpt-6.1-sol', 'ultra'], ['', 'medium'],
+  ])('rejects unavailable routes and unsupported efforts: %s / %s', async (model, effort) => {
+    const before = await h.api.getSettings({ name: 'settings' });
+    expect(reasonOf(await rejection(h.api.updateSettings({
+      settings: create(SettingsSchema, { name: 'settings', classificationModel: model, classificationEffort: effort, etag: before.etag }),
+      updateMask: { paths: ['classification_model', 'classification_effort'] }, requestId: op(),
+    })))).toBe('INVALID_SETTINGS');
+    expect(await h.api.getSettings({ name: 'settings' })).toEqual(before);
+  });
+
+  it.each([true, false])('reports Router catalog configuration (%s) without a model call', async configured => {
+    h.up.codex.configured = configured;
+    await h.sql(`INSERT OR REPLACE INTO meta (key, value) VALUES ('settings', '{"classificationProvider":"codex"}')`);
+    const status = await h.api.getServiceStatus({ name: 'serviceStatus' });
+    expect(status.classifier).toMatchObject({ provider: ClassificationProvider.CODEX, configured, lastErrorCode: configured ? '' : 'codex_not_configured' });
+    expect(h.up.gmail.calls).toHaveLength(0);
+    expect(h.up.codex.calls).toHaveLength(0);
+  });
+});
+
+describe('historical priority replay', () => {
+  let h: Harness;
+  const NOW = T0 + DAY;
+  async function setup(): Promise<void> {
+    h = await startHarness();
+    await h.step(T0);
+    await h.clock(NOW);
+  }
+
+  afterEach(async () => { checkGoogleCalls(h); await h.dispose(); });
+
+  it('refuses a new replay with a clear retired-feature error and creates no job', async () => {
+    await setup();
+    const error = await rejection(h.api.startReplayEvaluation({ name: 'replayEvaluation', requestId: op() }));
+    expect(reasonOf(error)).toBe('MODEL_FEATURE_RETIRED');
+    expect((error as Error).message).toContain('historical results remain readable');
+    expect(await h.sql(`SELECT * FROM replay`)).toEqual([]);
+    expect(h.up.claude.calls).toEqual([]);
+    expect(modifies(h)).toEqual([]);
+    expect(reasonOf(await rejection(h.api.getReplayEvaluation({ name: 'replayEvaluation' })))).toBe('NOT_FOUND');
+  });
+
+  it('reads a completed historical result without replacing its rows or calling either model', async () => {
+    await setup();
+    await h.sql(`INSERT INTO replay (job_id, message_id, state, create_time, done_time) VALUES ('historical-job', '', 'succeeded', ?, ?)`, T0, T0 + MINUTE);
+    await h.sql(`INSERT INTO replay (job_id, message_id, state, owner_label, as_of, outcome, label, create_time, done_time, top_option, top_p, runner_up_p, view2_p, combined, authenticated, trust)
+      VALUES ('historical-job', 'abc0000000000011', 'evaluated', 'p3', ?, 'label', 'p3', ?, ?, 'p3', 0.8, 0.15, 0.9, 0.85, 1, 0)`, T0, T0, T0 + MINUTE);
+    await h.sql(`INSERT INTO replay (job_id, message_id, state, owner_label, as_of, outcome, reason, create_time, done_time, authenticated, trust)
+      VALUES ('historical-job', 'abc0000000000012', 'evaluated', 'p2', ?, 'unsure', 'model_unavailable', ?, ?, 1, 0)`, T0 + 1, T0, T0 + MINUTE);
+    const rows = await h.sql(`SELECT * FROM replay ORDER BY message_id`);
+    const summary = await h.api.getReplayEvaluation({ name: 'replayEvaluation' });
+    expect(summary).toMatchObject({ state: ReplayEvaluation_State.SUCCEEDED, totalCount: 2, evaluatedCount: 2, autoCount: 1, autoMatchCount: 1, unsureCount: 1, reasonCounts: { model_unavailable: 1 } });
+    expect(summary.cases).toMatchObject([
+      { ownerLabel: 'labels/p3', outcome: ReplayEvaluation_Outcome.LABEL, topLabel: 'labels/p3', topProbability: 0.8, secondViewProbability: 0.9, combinedProbability: 0.85 },
+      { ownerLabel: 'labels/p2', outcome: ReplayEvaluation_Outcome.UNSURE, reason: 'model_unavailable' },
+    ]);
+    expect(JSON.stringify(toWire(ReplayEvaluationSchema, summary))).not.toContain('abc0000000000011');
+    expect(reasonOf(await rejection(h.api.startReplayEvaluation({ name: 'replayEvaluation', requestId: op() })))).toBe('MODEL_FEATURE_RETIRED');
+    await h.step(NOW + MINUTE);
+    expect(await h.sql(`SELECT * FROM replay ORDER BY message_id`)).toEqual(rows);
+    expect(await h.api.getReplayEvaluation({ name: 'replayEvaluation' })).toEqual(summary);
+    expect(h.up.claude.calls).toEqual([]);
+    expect(modifies(h)).toEqual([]);
+  });
+
+  it('leaves an interrupted historical replay readable without resuming its pending mail', async () => {
+    await setup();
+    await h.sql(`INSERT INTO replay (job_id, message_id, state, create_time) VALUES ('interrupted-job', '', 'running', ?)`, T0);
+    await h.sql(`INSERT INTO replay (job_id, message_id, state, owner_label, as_of, create_time) VALUES ('interrupted-job', 'abc0000000000013', 'pending', 'p1', ?, ?)`, T0 + MINUTE, T0);
+    const rows = await h.sql(`SELECT * FROM replay ORDER BY message_id`);
+    const before = h.up.gmail.calls.length;
+    await h.step(NOW + MINUTE);
+    expect(h.up.gmail.calls.slice(before).some(call => call.url.includes('/messages/abc0000000000013'))).toBe(false);
+    expect(h.up.claude.calls).toEqual([]);
+    expect(await h.sql(`SELECT * FROM replay ORDER BY message_id`)).toEqual(rows);
+    expect(await h.api.getReplayEvaluation({ name: 'replayEvaluation' })).toMatchObject({ state: ReplayEvaluation_State.RUNNING, totalCount: 1, evaluatedCount: 0 });
+    expect(await h.sql(`SELECT id FROM review`)).toEqual([]);
+    expect(modifies(h)).toEqual([]);
   });
 });

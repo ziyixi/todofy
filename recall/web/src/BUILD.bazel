@@ -29,9 +29,11 @@ COMMON_TEST_DEPS = [
     ":src__sessions",
     ":src__views__common",
     ":src__views__diagnostic",
+    "//proto/recall/ingest/v1:ts",
     "//proto/recall/ui/v1:ts",
     "//proto/ts:field-mask",
     "//proto/ts:filter",
+    "//proto/ts:http-client",
     "//proto/ts:http-transcoder",
     "//proto/ts:protobuf",
     "//proto/ts:protobuf-wkt",
@@ -74,8 +76,6 @@ copied_source_files(
         "check-layout.test.ts",
         "components.ts",
         "day.ts",
-        "devices.test.ts",
-        "diagnostic.test.ts",
         "dom.ts",
         "format.ts",
         "health.ts",
@@ -89,7 +89,6 @@ copied_source_files(
         "sessions.ts",
         "settings.test.ts",
         "timeline.test.ts",
-        "tokens.test.ts",
         "views/common.ts",
         "views/devices.ts",
         "views/diagnostic.ts",
@@ -308,45 +307,6 @@ proto_vitest_test(
 )
 
 proto_vitest_test(
-    name = "src__devices_test",
-    config = "//recall/web:test_config",
-    data = COMMON_TEST_DATA,
-    project = "recall/web",
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = [":devices.test.ts"],
-    deps = COMMON_TEST_DEPS,
-)
-
-proto_vitest_test(
-    name = "src__diagnostic_test",
-    config = "//recall/web:test_config",
-    data = [
-        "//recall/web:node_modules/jsdom",
-        "//recall/web:node_modules/vite",
-        "//recall/web:package_json",
-        "//recall/web:test_config",
-        "//recall/web/src/test:source_setup_ts",
-    ],
-    project = "recall/web",
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = [":diagnostic.test.ts"],
-    deps = [
-        ":src__components",
-        ":src__day",
-        ":src__dom",
-        ":src__format",
-        ":src__views__diagnostic",
-        "//proto/recall/ingest/v1:ts",
-        "//proto/recall/ui/v1:ts",
-        "//proto/ts:protobuf",
-        "//proto/ts:protobuf-wkt",
-        "//recall/web:node_modules/vitest",
-    ],
-)
-
-proto_vitest_test(
     name = "src__page_test",
     config = "//recall/web:test_config",
     data = COMMON_TEST_DATA,
@@ -442,17 +402,6 @@ proto_vitest_test(
     deps = COMMON_TEST_DEPS,
 )
 
-proto_vitest_test(
-    name = "src__tokens_test",
-    config = "//recall/web:test_config",
-    data = COMMON_TEST_DATA,
-    project = "recall/web",
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = [":tokens.test.ts"],
-    deps = COMMON_TEST_DEPS,
-)
-
 source_audit_files(
     exclude = SOURCE_AUDIT_EXCLUDES,
     patterns = ["**"],
@@ -464,15 +413,12 @@ test_suite(
     tests = [
         ":src__app_test",
         ":src__check-layout_test",
-        ":src__devices_test",
-        ":src__diagnostic_test",
         ":src__page_test",
         ":src__query_test",
         ":src__search_test",
         ":src__sessions_test",
         ":src__settings_test",
         ":src__timeline_test",
-        ":src__tokens_test",
         "//recall/web/src/test:check",
     ],
 )
@@ -483,15 +429,12 @@ test_suite(
     tests = [
         ":src__app_test",
         ":src__check-layout_test",
-        ":src__devices_test",
-        ":src__diagnostic_test",
         ":src__page_test",
         ":src__query_test",
         ":src__search_test",
         ":src__sessions_test",
         ":src__settings_test",
         ":src__timeline_test",
-        ":src__tokens_test",
         "//recall/web/src/test:unit_tests",
     ],
 )

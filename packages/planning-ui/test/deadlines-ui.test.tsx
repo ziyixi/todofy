@@ -8,7 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { FocusView } from "../src/FocusView";
 import { PlanView, type PlanViewProps } from "../src/PlanView";
@@ -20,14 +20,6 @@ import type { PlanningTask, PlusActions, PlusData, View } from "../src/model";
 // The fixture's today is Tuesday 2026-10-13.
 const TODAY = "2026-10-13";
 const on = (days: number) => addDays(TODAY, days);
-beforeAll(() => {
-  HTMLDialogElement.prototype.showModal = function () {
-    this.setAttribute("open", "");
-  };
-  HTMLDialogElement.prototype.close = function () {
-    this.removeAttribute("open");
-  };
-});
 beforeEach(() => {
   vi.useFakeTimers({ now: Date.parse(`${TODAY}T12:00:00Z`), toFake: ["Date"] });
 });

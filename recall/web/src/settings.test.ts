@@ -8,11 +8,21 @@
  * shorter window asked first, 永久, the etag it shares with the lists); the owner's two lists (add to either, a pattern moving between them, remove, only the lists with
  * the etag, a stale etag, the server's refusal, the built-in lists) and the build.
  */
+import { HttpEncodeError, HttpResponseError, RpcStatusError } from '@ziyixi/proto/http-client'
 import { create } from '@ziyixi/proto/protobuf'
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
-import { DropboxBackupSchema, MachineTokenSchema } from '@ziyixi/proto/recall/ui/v1/status_pb'
-import { at, FakeServer, HOUR, MINUTE, NOW } from './test/fakeServer.ts'
+import { CaptureDiagnosticSchema } from '@ziyixi/proto/recall/ingest/v1/diagnostic_pb'
+import { CaptureDiagnosticReportSchema, DeviceStatusSchema, DropboxBackupSchema, MachineTokenSchema, ServiceStatusSchema } from '@ziyixi/proto/recall/ui/v1/status_pb'
+import { Code, parseStatus, RpcError, statusBody } from '@ziyixi/proto/rpc-status'
+import { api, ApiError, errorMessage, listAll, toApiError, withRetry } from './api.ts'
+import type { ViewContext } from './app.ts'
+import { addDays, dayKey, dayStart, hourStart, parseDay } from './day.ts'
+import { ago, clock, compact, count, dateText, dayTitle, duration, monthText, ms, shortWhen, span } from './format.ts'
+import { backupLate, behindText, consumerName, late, statusParts, STORAGE_HIGH_MIB } from './health.ts'
+import { at, FakeServer, HOUR, MINUTE, NOW, settle, visit } from './test/fakeServer.ts'
 import { buttonNamed, open, testHost, toastText, type, urlParams } from './test/helpers.ts'
+import { captureDiagnosticCard } from './views/diagnostic.ts'
+import { paintTokens } from './views/tokens.ts'
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
 async function settled(): Promise<void> {
@@ -514,3 +524,405 @@ describe('a failure', () => {
     expect(root.querySelector('.status-line')?.textContent).toBe('最近连接 3 分钟前Dropbox 已备份')
   })
 })
+
+describe('采集诊断卡片', () => {
+  it('shows a received pending-stage report without treating it as capture success', () => {
+    const now = Date.UTC(2026, 9, 12)
+    const diagnostic = create(CaptureDiagnosticSchema, {
+      runId: '00000000-0000-4000-8000-0000000000dd',
+      startTime: timestampFromMs(now - 60_000), reportTime: timestampFromMs(now),
+      steps: [{ stage: 'active_tabs', state: 'pending' }, {
+        stage: 'probe_context', state: 'returned', visibility: 'visible', storedVisibility: 'hidden', senderIdentity: 'missing',
+      }], tabEventCount: 2, alarmEventCount: 1,
+    })
+    const report = create(CaptureDiagnosticReportSchema, { deviceId: 'phone', receiveTime: timestampFromMs(now), diagnostic })
+    const device = create(DeviceStatusSchema, { deviceId: 'phone', label: 'Synthetic phone' })
+    const diagCard = captureDiagnosticCard(report, [device], now)
+    expect(diagCard?.textContent).toContain('Synthetic phone')
+    expect(diagCard?.textContent).toContain('不代表采集成功')
+    expect(diagCard?.textContent).toContain('读取活动标签 · 等待回调')
+    expect(diagCard?.textContent).toContain('页面 可见 · 记忆状态 不可见 · 消息身份 未提供')
+    expect(diagCard?.querySelector('details')?.open).toBe(false)
+    expect(captureDiagnosticCard(undefined, [], now)).toBeNull()
+  })
+})
+
+describe('口令列表与改名', () => {
+  const named = 'machineTokens/00000000-0000-4000-8000-0000000000bb'
+  const secret = `recall_ingest_${'S'.repeat(43)}`
+
+  function setup() {
+    const box = document.createElement('div')
+    const toast = document.createElement('div')
+    toast.id = 'toast'
+    document.body.append(box, toast)
+    const ctx: ViewContext = {
+      main: box, host: testHost(), go: () => Promise.resolve(), replace: () => undefined, back: () => undefined,
+      status: () => Promise.resolve(create(ServiceStatusSchema)), onLeave: () => undefined, keep: () => undefined, restored: () => undefined,
+    }
+    return { box, ctx }
+  }
+
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it('lists named and shared uploads together with one name line and a folded export credential', () => {
+    const { box, ctx } = setup()
+    paintTokens(ctx, box, [
+      create(MachineTokenSchema, { name: named, label: '日常浏览', createTime: timestampFromMs(NOW) }),
+      create(MachineTokenSchema, { name: 'machineTokens/ingest', createTime: timestampFromMs(NOW) }),
+      create(MachineTokenSchema, { name: 'machineTokens/export', label: '归档读取', createTime: timestampFromMs(NOW) }),
+    ])
+    const rows = box.querySelectorAll(':scope > .token-list > li')
+    expect([...rows].map((row) => row.querySelector('.row-title')?.textContent)).toEqual(['日常浏览', '共享插件口令'])
+    expect([...rows].map((row) => row.querySelector('.token-meta')?.textContent)).toEqual(['上传口令 · 刚刚生成', '共享上传口令 · 刚刚生成'])
+    expect(box.querySelector('h3')).toBeNull()
+    expect([...rows].every((row) => row.querySelector('.menu-items')?.hasAttribute('hidden'))).toBe(true)
+    expect(box.querySelector('details')?.open).toBe(false)
+    expect(box.querySelector('details .row-title')?.textContent).toBe('归档读取')
+    expect(box.textContent).toContain('一个口令可用于多台设备')
+  })
+
+  it.each([named, 'machineTokens/ingest', 'machineTokens/export'])('renames %s without replacing its one-time visible secret', async (name) => {
+    const { box, ctx } = setup()
+    const token = create(MachineTokenSchema, { name, label: '原名称', createTime: timestampFromMs(NOW) })
+    const update = vi.spyOn(api, 'updateMachineToken').mockResolvedValue(create(MachineTokenSchema, { ...token, label: '新名称' }))
+    const regenerate = vi.spyOn(api, 'regenerateMachineToken')
+    paintTokens(ctx, box, [token], { name, token: secret })
+    buttonNamed(box, '原名称的更多操作').click()
+    buttonNamed(box, '改名').click()
+    const form = box.querySelector<HTMLFormElement>('.token-rename:not([hidden])')!
+    form.querySelector('input')!.value = ' 新名称 '
+    buttonNamed(form, '保存名称').click()
+    await vi.waitFor(() => { expect(box.querySelector('.row-title')?.textContent).toBe('新名称') })
+    expect(update).toHaveBeenCalledOnce()
+    const request = update.mock.calls[0]?.[0]
+    expect(request?.machineToken).toEqual({ name, label: '新名称' })
+    expect(request?.updateMask).toEqual({ paths: ['label'] })
+    expect(request?.requestId).toMatch(/^[0-9a-f-]{36}$/u)
+    expect(regenerate).not.toHaveBeenCalled()
+    expect(box.querySelector<HTMLInputElement>('.token-once input')?.value).toBe(secret)
+  })
+
+  it('renames an existing Worker-configured shared token without generating another credential', async () => {
+    const { box, ctx } = setup()
+    const token = create(MachineTokenSchema, { name: 'machineTokens/ingest', workerSecret: true })
+    const update = vi.spyOn(api, 'updateMachineToken').mockResolvedValue(create(MachineTokenSchema, { ...token, label: '现有浏览器' }))
+    const regenerate = vi.spyOn(api, 'regenerateMachineToken')
+    paintTokens(ctx, box, [token])
+    const row = box.querySelector(':scope > .token-list .shared-token')!
+    expect(row?.querySelector('.row-title')?.textContent).toBe('共享插件口令')
+    expect(row?.querySelector('.token-meta')?.textContent).toContain('Worker 配置')
+    buttonNamed(row, '共享插件口令的更多操作').click()
+    const actions = [...row.querySelectorAll('.menu-items button')].map((item) => item.textContent)
+    expect(actions).toEqual(['改名', '生成可管理口令'])
+    buttonNamed(row, '改名').click()
+    const form = row.querySelector<HTMLFormElement>('.token-rename')!
+    form.querySelector('input')!.value = '现有浏览器'
+    buttonNamed(form, '保存名称').click()
+    await vi.waitFor(() => { expect(box.querySelector('.shared-token .row-title')?.textContent).toBe('现有浏览器') })
+    expect(update).toHaveBeenCalledOnce()
+    expect(regenerate).not.toHaveBeenCalled()
+    expect(box.querySelector('.shared-token .hint')?.textContent).toContain('Worker 密钥')
+  })
+
+  it('keeps the name and secret on cancel or an empty rename', () => {
+    const { box, ctx } = setup()
+    const update = vi.spyOn(api, 'updateMachineToken')
+    paintTokens(ctx, box, [create(MachineTokenSchema, { name: named, label: '日常浏览', createTime: timestampFromMs(NOW) })], { name: named, token: secret })
+    buttonNamed(box, '日常浏览的更多操作').click()
+    buttonNamed(box, '改名').click()
+    const form = box.querySelector<HTMLFormElement>('.token-rename')!
+    const input = form.querySelector('input')!
+    input.value = '不保存'
+    buttonNamed(form, '取消').click()
+    expect(form.hidden).toBe(true)
+    expect(input.value).toBe('日常浏览')
+    buttonNamed(box, '日常浏览的更多操作').click()
+    buttonNamed(box, '改名').click()
+    input.value = '  '
+    buttonNamed(form, '保存名称').click()
+    expect(update).not.toHaveBeenCalled()
+    expect(form.hidden).toBe(false)
+    expect(box.querySelector<HTMLInputElement>('.token-once input')?.value).toBe(secret)
+  })
+
+  it('keeps the edit and visible secret when the server rejects a name', async () => {
+    const { box, ctx } = setup()
+    vi.spyOn(api, 'updateMachineToken').mockRejectedValue(new ApiError(400, 'INVALID_ARGUMENT', '名称不对'))
+    paintTokens(ctx, box, [create(MachineTokenSchema, { name: named, label: '日常浏览', createTime: timestampFromMs(NOW) })], { name: named, token: secret })
+    buttonNamed(box, '日常浏览的更多操作').click()
+    buttonNamed(box, '改名').click()
+    const form = box.querySelector<HTMLFormElement>('.token-rename')!
+    form.querySelector('input')!.value = '新名称'
+    buttonNamed(form, '保存名称').click()
+    await vi.waitFor(() => { expect(document.querySelector('#toast')?.textContent).toBe('名称不对') })
+    expect(form.hidden).toBe(false)
+    expect(buttonNamed(form, '保存名称').disabled).toBe(false)
+    expect(box.querySelector<HTMLInputElement>('.token-once input')?.value).toBe(secret)
+    expect(box.querySelector('.row-title')?.textContent).toBe('日常浏览')
+  })
+})
+
+describe('同名连接与移除空连接', () => {
+  const NEW = '00000000-0000-4000-8000-000000000001'
+  const OLD = '00000000-0000-4000-8000-000000000002'
+  const EMPTY = '00000000-0000-4000-8000-000000000003'
+
+  function connections(): FakeServer {
+    const fake = new FakeServer()
+    fake.status = { devices: [
+      create(DeviceStatusSchema, { deviceId: OLD, label: 'iPhone · Orion', mobile: true, extensionVersion: '1', hasRecords: true, lastHeartbeatTime: timestampFromMs(NOW - 2 * 365 * 24 * HOUR) }),
+      create(DeviceStatusSchema, { deviceId: EMPTY, label: 'iPhone · Orion', mobile: true, extensionVersion: '2', hasRecords: false, lastHeartbeatTime: timestampFromMs(NOW - HOUR) }),
+      create(DeviceStatusSchema, { deviceId: NEW, label: 'iPhone · Orion', mobile: true, extensionVersion: '3', hasRecords: true, lastHeartbeatTime: timestampFromMs(NOW) }),
+    ] }
+    fake.visits = [visit('old-page', [['09:00', '09:10']], { deviceId: OLD, deviceLabel: 'iPhone · Orion' })]
+    return fake
+  }
+
+  it('folds same-name installs under the latest without hiding historical device IDs from the timeline', async () => {
+    const fake = connections()
+    fake.status = { ...fake.status, devices: fake.status.devices?.map((device) => device.deviceId === NEW ? create(DeviceStatusSchema, { ...device, extensionVersion: '1' }) : device) }
+    const root = await open(fake, '/settings')
+    const groups = root.querySelectorAll('.device-groups > li')
+    expect(groups).toHaveLength(1)
+    expect(groups[0]?.querySelector('.facts')?.textContent).toContain('版本 1')
+    const history = groups[0]?.querySelector('details')
+    expect(history?.open).toBe(false)
+    expect(history?.querySelector('summary')?.textContent).toBe('同名旧连接（2）')
+    const oldLink = history?.querySelector<HTMLAnchorElement>(`a[href="/?device=${OLD}"]`)
+    expect(oldLink).not.toBeNull()
+    oldLink?.click()
+    await settle()
+    expect(root.querySelector<HTMLSelectElement>('#timeline-device')?.value).toBe(OLD)
+    expect(root.querySelector('.day-summary')?.textContent).toContain('1 个页面')
+    expect(fake.searches('/api/v1/pages/-/visits').at(-1)?.searchParams.get('device_id')).toBe(OLD)
+    expect([...root.querySelectorAll('#timeline-device option')].map((node) => node.textContent)).toEqual([
+      '全部设备', 'iPhone · Orion · 1 · 000002', 'iPhone · Orion · 2', 'iPhone · Orion · 1 · 000001',
+    ])
+  })
+
+  it('removes an empty test connection without deleting another installation’s records', async () => {
+    const fake = connections()
+    const host = testHost(false)
+    const root = await open(fake, '/settings', host)
+    buttonNamed(root, '移除空连接 iPhone · Orion 2').click()
+    expect(host.asked).toEqual([])
+    expect(fake.calls.filter((item) => item.method === 'DELETE')).toHaveLength(0)
+    buttonNamed(root, '确认移除').click()
+    await settle()
+    const call = fake.calls.find((item) => item.method === 'DELETE')
+    expect(call?.path).toMatch(new RegExp(`/api/v1/devices/${EMPTY}\\?request_id=[0-9a-f-]{36}$`))
+    expect(call?.headers['x-csrf-token']).toBe('1')
+    expect(fake.status.devices?.map((item) => item.deviceId)).toEqual([OLD, NEW])
+    expect(fake.visits).toHaveLength(1)
+    expect(root.querySelector('.device-history')?.textContent).toContain('版本 1')
+    expect(root.querySelector('.device-history')?.textContent).not.toContain('版本 2')
+  })
+
+  it('offers no empty-connection removal for recorded, pending or legacy unknown state', async () => {
+    const fake = connections()
+    const pending = create(DeviceStatusSchema, { deviceId: EMPTY, label: 'Pending', hasRecords: false, queuedCount: 2 })
+    const unknown = create(DeviceStatusSchema, { deviceId: NEW, label: 'Old server' })
+    fake.status = { devices: [fake.status.devices![0]!, pending, unknown] }
+    const root = await open(fake, '/settings')
+    expect(root.querySelectorAll('.device-actions button')).toHaveLength(0)
+  })
+
+  it('cancels inline removal without a request or native confirmation', async () => {
+    const fake = connections()
+    const host = testHost(false)
+    const root = await open(fake, '/settings', host)
+    const clear = buttonNamed(root, '移除空连接 iPhone · Orion 2')
+    clear.click()
+    expect(clear.hidden).toBe(true)
+    buttonNamed(root, '取消').click()
+    expect(clear.hidden).toBe(false)
+    expect(host.asked).toEqual([])
+    expect(fake.calls.filter((item) => item.method === 'DELETE')).toHaveLength(0)
+    expect(fake.status.devices).toHaveLength(3)
+  })
+
+  it('keeps inline removal usable after a server refusal and only retries on another click', async () => {
+    const fake = connections()
+    const root = await open(fake, '/settings')
+    buttonNamed(root, '移除空连接 iPhone · Orion 2').click()
+    fake.status = { ...fake.status, devices: fake.status.devices?.map((item) => item.deviceId === EMPTY ? create(DeviceStatusSchema, { ...item, queuedCount: 1 }) : item) }
+    buttonNamed(root, '确认移除').click()
+    await settle()
+    expect(toastText(root)).toBe('这个连接有记录或待上传内容，不能移除')
+    expect(buttonNamed(root, '确认移除').disabled).toBe(false)
+    expect(fake.calls.filter((item) => item.method === 'DELETE')).toHaveLength(1)
+    await settle()
+    expect(fake.calls.filter((item) => item.method === 'DELETE')).toHaveLength(1)
+    fake.status = { ...fake.status, devices: fake.status.devices?.map((item) => item.deviceId === EMPTY ? create(DeviceStatusSchema, { ...item, queuedCount: 0 }) : item) }
+    buttonNamed(root, '确认移除').click()
+    await settle()
+    expect(fake.calls.filter((item) => item.method === 'DELETE')).toHaveLength(2)
+    expect(fake.status.devices?.map((item) => item.deviceId)).toEqual([OLD, NEW])
+    expect(fake.visits).toHaveLength(1)
+  })
+})
+
+describe('day, format, health, and api helpers', () => {
+  it('parses and steps local days, rejecting impossible calendar dates', () => {
+    expect(parseDay(' 2026-10-09 ')).toBe('2026-10-09')
+    expect(parseDay('2026/2/5')).toBe('2026-02-05')
+    expect(parseDay('2024-02-29')).toBe('2024-02-29')
+    expect(parseDay('2026-02-29')).toBeNull()
+    expect(parseDay('2026-13-01')).toBeNull()
+    expect(parseDay('not-a-date')).toBeNull()
+
+    const start = dayStart('2026-10-09')
+    expect(dayKey(start)).toBe('2026-10-09')
+    expect(addDays('2026-10-09', 1)).toBe('2026-10-10')
+    expect(addDays('2026-10-01', -1)).toBe('2026-09-30')
+    expect(hourStart('2026-10-09', 14) - start).toBe(14 * HOUR)
+  })
+
+  it('formats dates, durations, spans, relative times, and compact counts', () => {
+    const now = new Date(2026, 9, 9, 14, 20).getTime()
+    const earlierToday = new Date(2026, 9, 9, 9, 5).getTime()
+    const lastYear = new Date(2025, 2, 1, 10, 0).getTime()
+    expect(ms(undefined)).toBeNull()
+    expect(ms(timestampFromMs(now))).toBe(now)
+    expect(dateText(earlierToday, now)).toBe('10月9日')
+    expect(dateText(lastYear, now)).toBe('2025年3月1日')
+    expect(dayTitle(earlierToday, now)).toBe('10月9日 周五')
+    expect(clock(earlierToday)).toBe('09:05')
+    expect(shortWhen(earlierToday, now)).toBe('今天 09:05')
+    expect(shortWhen(lastYear, now)).toBe('2025年3月1日')
+    expect(monthText(lastYear)).toBe('2025年3月')
+    expect(duration(25)).toBe('25 秒')
+    expect(duration(28 * 60)).toBe('28 分')
+    expect(duration(2 * 3600)).toBe('2 小时')
+    expect(duration(4 * 3600 + 12 * 60)).toBe('4 小时 12 分')
+    expect(span(10_000)).toBe('1 分钟')
+    expect(span(5 * HOUR)).toBe('5 小时')
+    expect(span(72 * HOUR)).toBe('3 天')
+    expect(ago(now - 30_000, now)).toBe('刚刚')
+    expect(ago(now - 3 * MINUTE, now)).toBe('3 分钟前')
+    expect(count(20_000)).toBe('20,000')
+    expect(compact(9_876)).toBe('9,876')
+    expect(compact(220_000)).toBe('22.0 万')
+    expect(compact(1_234_567)).toBe('123 万')
+  })
+
+  it('truncates behindText at 500+, retires 30-day silent desktop devices, and warns at STORAGE_HIGH_MIB', () => {
+    expect(behindText(12)).toBe('12 条')
+    expect(behindText(500)).toBe('500+ 条')
+    expect(behindText(999)).toBe('500+ 条')
+    expect(consumerName('nas')).toBe('NAS')
+    expect(consumerName('backup-disk')).toBe('backup-disk')
+    expect(late(null, NOW)).toBe(false)
+    expect(late(NOW - 25 * HOUR, NOW)).toBe(true)
+    expect(backupLate(timestampFromMs(NOW - 48 * HOUR), timestampFromMs(NOW - 2 * HOUR), NOW)).toBe(false)
+    expect(backupLate(timestampFromMs(NOW - 48 * HOUR), timestampFromMs(NOW - 30 * HOUR), NOW)).toBe(true)
+
+    const retiredDesktop = create(DeviceStatusSchema, {
+      deviceId: 'retired',
+      label: 'Old Mac',
+      stale: true,
+      mobile: false,
+      lastHeartbeatTime: timestampFromMs(NOW - 31 * 24 * HOUR),
+    })
+    const activeStaleDesktop = create(DeviceStatusSchema, {
+      deviceId: 'active-stale',
+      label: 'Work Mac',
+      stale: true,
+      mobile: false,
+      lastHeartbeatTime: timestampFromMs(NOW - 2 * 24 * HOUR),
+    })
+    const statusWithRetired = create(ServiceStatusSchema, {
+      devices: [retiredDesktop],
+      dropboxBackup: { connected: true, pendingCount: 0 },
+      storageUsedMib: STORAGE_HIGH_MIB,
+    })
+    const partsRetired = statusParts(statusWithRetired, NOW)
+    expect(partsRetired.map((el) => [el.textContent, el.className])).toEqual([
+      ['最近连接 31 天前', ''],
+      ['Dropbox 已备份', ''],
+      ['存储接近上限', 'problem'],
+    ])
+
+    const statusWithActiveStale = create(ServiceStatusSchema, {
+      devices: [retiredDesktop, activeStaleDesktop],
+      dropboxBackup: { connected: true, pendingCount: 500, oldestPendingTime: timestampFromMs(NOW - 30 * HOUR), connectTime: timestampFromMs(NOW - 48 * HOUR) },
+      storageUsedMib: STORAGE_HIGH_MIB - 1,
+    })
+    const partsStale = statusParts(statusWithActiveStale, NOW)
+    expect(partsStale.map((el) => [el.textContent, el.className])).toEqual([
+      ['Work Mac 2 天没有连接', 'problem'],
+      ['Dropbox 落后 500+ 条', 'problem'],
+    ])
+  })
+
+  it('maps RPC, encode, and response failures via toApiError, retries transient errors, and paginates listAll', async () => {
+    const existing = new ApiError(400, 'BAD_REQUEST', '已有错误')
+    expect(toApiError(existing)).toBe(existing)
+    expect(existing.transient).toBe(false)
+    expect(errorMessage(existing)).toBe('已有错误')
+    expect(errorMessage(new Error('other'))).toBe('出了点问题，请稍后重试')
+
+    const etagStatus = parseStatus(
+      409,
+      statusBody(new RpcError(Code.ABORTED, 'ETAG_MISMATCH', 'stale'), {
+        domain: 'recall.ziyixi.science',
+        localized: { locale: 'zh-CN', message: '服务端文案' },
+      }),
+    )!
+    expect(toApiError(new RpcStatusError(etagStatus))).toMatchObject({
+      status: 409,
+      reason: 'ETAG_MISMATCH',
+      message: '设置已在别处修改，已载入最新内容',
+      transient: false,
+    })
+
+    const localizedStatus = parseStatus(
+      400,
+      statusBody(new RpcError(Code.FAILED_PRECONDITION, 'DEVICE_NOT_EMPTY', 'not empty'), {
+        domain: 'recall.ziyixi.science',
+        localized: { locale: 'zh-CN', message: '设备非空' },
+      }),
+    )!
+    expect(toApiError(new RpcStatusError(localizedStatus))).toMatchObject({
+      status: 400,
+      reason: 'DEVICE_NOT_EMPTY',
+      message: '设备非空',
+    })
+
+    expect(toApiError(new HttpEncodeError('bad mask'))).toMatchObject({ status: 400, reason: 'BAD_REQUEST', message: '输入有误', transient: false })
+    expect(toApiError(new HttpResponseError(502, '<html>'))).toMatchObject({
+      status: 502,
+      reason: 'BAD_RESPONSE',
+      message: '服务返回了无法识别的响应（HTTP 502）',
+      transient: true,
+    })
+    expect(toApiError('unexpected')).toMatchObject({ status: 0, reason: 'BAD_RESPONSE', transient: true })
+
+    let attempts = 0
+    const recovered = await withRetry(async () => {
+      attempts += 1
+      if (attempts === 1) throw new ApiError(503, 'UNAVAILABLE', 'busy')
+      return 'ok'
+    }, 1)
+    expect([recovered, attempts]).toEqual(['ok', 2])
+
+    let badAttempts = 0
+    await expect(
+      withRetry(async () => {
+        badAttempts += 1
+        throw new ApiError(500, 'INTERNAL', 'bug')
+      }, 1),
+    ).rejects.toThrow('bug')
+    expect(badAttempts).toBe(1)
+
+    const pages: Record<string, { items: number[]; next: string }> = {
+      '': { items: [1, 2], next: 'p2' },
+      p2: { items: [3], next: 'p3' },
+      p3: { items: [4], next: '' },
+    }
+    expect(await listAll((token) => Promise.resolve(pages[token]!), 2)).toEqual([1, 2, 3])
+    expect(await listAll((token) => Promise.resolve(pages[token]!), 5)).toEqual([1, 2, 3, 4])
+  })
+})
+

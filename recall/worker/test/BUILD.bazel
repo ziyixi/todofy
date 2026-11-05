@@ -75,10 +75,8 @@ js_library(
 copied_source_files(
     name = "types_srcs",
     srcs = [
-        "api-tokens.test.ts",
         "archive.test.ts",
         "denylist.test.ts",
-        "devices.test.ts",
         "dropbox.test.ts",
         "feed.test.ts",
         "golden/ops-v1.json",
@@ -140,34 +138,6 @@ copied_source_files(
     ],
 )
 
-workspace_link(
-    name = "api-tokens_test_edge_auth_link",
-    src = "//packages/edge-auth:pkg",
-    project = "recall/worker",
-)
-
-proto_vitest_test(
-    name = "api-tokens_test",
-    config = "//recall/worker:test_config",
-    data = [
-        ":api-tokens_test_edge_auth_link",
-        ":sqlite.ts",
-        "//recall/worker:node_modules/vitest",
-        "//recall/worker:package_json",
-    ],
-    project = "recall/worker",
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = [":api-tokens.test.ts"],
-    deps = [
-        "//proto/recall/ui/v1:ts",
-        "//proto/ts:protobuf",
-        "//recall/worker/src:api",
-        "//recall/worker/src:store",
-        "//recall/worker/src:tokens",
-    ],
-)
-
 proto_vitest_test(
     name = "archive_test",
     config = "//recall/worker:test_config",
@@ -222,21 +192,6 @@ proto_vitest_test(
     tags = ["unit"],
     tests = [":denylist.test.ts"],
     deps = ["//recall/shared:denylist"],
-)
-
-proto_vitest_test(
-    name = "devices_test",
-    config = "//recall/worker:test_config",
-    data = [
-        ":sqlite.ts",
-        "//recall/worker:node_modules/vitest",
-        "//recall/worker:package_json",
-    ],
-    project = "recall/worker",
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = [":devices.test.ts"],
-    deps = ["//recall/worker/src:store"],
 )
 
 proto_vitest_test(
@@ -426,9 +381,20 @@ proto_vitest_test(
     tags = ["unit"],
     tests = [":tokens.test.ts"],
     deps = [
+        "//proto/recall/ingest/v1:ts",
+        "//proto/recall/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//recall/shared:url",
+        "//recall/worker/src:api",
+        "//recall/worker/src:backup",
+        "//recall/worker/src:blobs",
+        "//recall/worker/src:dropbox",
+        "//recall/worker/src:ingest",
         "//recall/worker/src:limits",
         "//recall/worker/src:machine",
         "//recall/worker/src:module_group_23",
+        "//recall/worker/src:settings",
         "//recall/worker/src:store",
         "//recall/worker/src:tokens",
     ],
@@ -509,7 +475,7 @@ workerd_vitest_test(
     project = "recall/worker",
     runner = vitest.vitest_test,
     tests = [":runtime/connections.test.ts"],
-    deps = COMMON_TEST_DEPS,
+    deps = COMMON_TEST_DEPS_2,
 )
 
 workerd_vitest_test(
@@ -531,24 +497,6 @@ workerd_vitest_test(
     ],
     tests = [":runtime/cpu.test.ts"],
     deps = COMMON_TEST_DEPS,
-)
-
-workerd_vitest_test(
-    name = "runtime_devices_test",
-    data = COMMON_TEST_DATA_2,
-    project = "recall/worker",
-    runner = vitest.vitest_test,
-    tests = [":runtime/devices.test.ts"],
-    deps = COMMON_TEST_DEPS,
-)
-
-workerd_vitest_test(
-    name = "runtime_diagnostic_test",
-    data = COMMON_TEST_DATA_2,
-    project = "recall/worker",
-    runner = vitest.vitest_test,
-    tests = [":runtime/diagnostic.test.ts"],
-    deps = COMMON_TEST_DEPS_2,
 )
 
 workerd_vitest_test(

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DOCUMENT_MAX_BYTES, utf8Bytes } from '../../shared/url.ts';
 import { captureDelay, captureDue, readTab, storeCapture } from '../src/capture.ts';
 import { reconcile } from '../src/focus.ts';
-import { readPage, type PageText } from '../src/page-text.ts';
+import { isPageText, readPage, type PageText } from '../src/page-text.ts';
 import { lastError } from '../src/store.ts';
 import { harness, MINUTE, SECOND, T0, WINDOW_ID_NONE, type Harness } from './fake-chrome.ts';
 import { queuedDocuments } from './helpers.ts';
@@ -254,4 +254,16 @@ describe('readPage (the capture script)', () => {
     expect(utf8Bytes(read.text)).toBe(DOCUMENT_MAX_BYTES);
     expect(readPage(fakeDocument({ body: null }), 'b1')).toMatchObject({ text: '', description: '' });
   });
+
+  it('validates PageText shape with isPageText against arbitrary script return values', () => {
+    const valid = readPage(fakeDocument({ title: 'T', description: 'D', body: 'Body' }), 'b1');
+    expect(isPageText(valid)).toBe(true);
+    expect(isPageText(null)).toBe(false);
+    expect(isPageText('string')).toBe(false);
+    expect(isPageText({ ...valid, build: 123 })).toBe(false);
+    expect(isPageText({ ...valid, url: null })).toBe(false);
+    expect(isPageText({ ...valid, textTruncated: 'no' })).toBe(false);
+    expect(isPageText({ ...valid, hasPasswordField: undefined })).toBe(false);
+  });
 });
+

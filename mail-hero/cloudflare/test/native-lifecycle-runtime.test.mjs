@@ -1,17 +1,14 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFile, readdir, mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { build } from 'esbuild'
-import { Miniflare, convertV4MiniflareOptions } from 'miniflare'
-import { migrationStatements } from './migrations.mjs'
-const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
+import { startRuntime } from './runtime-harness.mjs'
 
 test('workerd lifecycle: migrated D1, R2 expiry journal and durable capacity settlement', { timeout: 60000 }, async () => {
-  const temp = await mkdtemp(join(tmpdir(), 'mailhero-lifecycle-'))
-  const bundle = await build({ stdin: { contents: `
+  const { mf, db, close } = await startRuntime({
+    prefix: 'mailhero-lifecycle-',
+    name: 'lifecycle-runtime',
+    entry: {
+      sourcefile: 'lifecycle-runtime.ts',
+      contents: `
     import { DurableObject } from 'cloudflare:workers';
     import { CapacityLedger } from './src/native/capacity';
     import { expireRawContent, runLifecycle } from './src/native/lifecycle';
@@ -28,18 +25,14 @@ test('workerd lifecycle: migrated D1, R2 expiry journal and durable capacity set
       const x=await request.json();
       if(x.action==='raw') return Response.json({changed:await expireRawContent(env,x.id,x.version,fn=>fn())});
       return Response.json(await runLifecycle(env,{withMutation:fn=>fn(),deleteContent:async()=>{throw new Error('unexpected full deletion')}}));
-    }};`, resolveDir: root, sourcefile: 'lifecycle-runtime.ts', loader: 'ts' }, bundle: true, format: 'esm', platform: 'neutral', conditions: ['browser'], external: ['cloudflare:workers'], write: false })
-  const mf = new Miniflare(convertV4MiniflareOptions({ name: 'lifecycle-runtime', modules: true, script: bundle.outputFiles[0].text,
-    compatibilityDate: '2026-09-07', host: '127.0.0.1', port: 0,
-    d1Databases: { DB: 'lifecycle' }, d1Persist: join(temp, 'd1'), r2Buckets: ['MAIL_STORE','BACKUP_STORE'], r2Persist: join(temp,'r2'),
-    durableObjects: { COORDINATOR: { className: 'LifecycleLedger', useSQLite: true } }, durableObjectsPersist: join(temp,'do') }))
+    }};`,
+    },
+    d1Databases: { DB: 'lifecycle' },
+    r2Buckets: ['MAIL_STORE', 'BACKUP_STORE'],
+    durableObjects: { COORDINATOR: { className: 'LifecycleLedger', useSQLite: true } },
+  })
   try {
-    await mf.ready
-    const db = await mf.getD1Database('DB'), store = await mf.getR2Bucket('MAIL_STORE'), backup = await mf.getR2Bucket('BACKUP_STORE')
-    for (const name of (await readdir(join(root,'migrations'))).filter(name=>name.endsWith('.sql')).sort()) {
-      const sql = await readFile(join(root,'migrations',name),'utf8')
-      await db.batch(migrationStatements(sql).map(s=>db.prepare(s)))
-    }
+    const store = await mf.getR2Bucket('MAIL_STORE'), backup = await mf.getR2Bucket('BACKUP_STORE')
     const id = crypto.randomUUID(), raw = `raw/${id}.eml`, parsed = `parsed/${id}/message.json`, date = new Date().toISOString()
     await store.put(raw,'raw fixture'); await store.put(parsed,'{"text":"synthetic"}')
     await db.prepare(`INSERT INTO messages(id,received_at,last_received_at,envelope_from,envelope_recipient,raw_key,size_bytes,content_bytes,receive_mode,parse_state,parsed_key,retention_policy_version,raw_retention_days,content_retention_days)
@@ -57,5 +50,5 @@ test('workerd lifecycle: migrated D1, R2 expiry journal and durable capacity set
     response = await mf.dispatchFetch('http://localhost/',{method:'POST',body:JSON.stringify({action:'raw',id,version:2})})
     assert.equal((await response.json()).changed,false)
     assert.equal((await db.prepare('SELECT logical_bytes FROM app_settings').first()).logical_bytes,20)
-  } finally { await mf.dispose(); await rm(temp,{recursive:true,force:true}) }
+  } finally { await close() }
 })

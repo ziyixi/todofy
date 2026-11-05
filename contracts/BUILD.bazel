@@ -1,5 +1,6 @@
 load("@aspect_rules_js//js:defs.bzl", "js_library")
 load("@aspect_rules_ts//ts:defs.bzl", "ts_project")
+load("@npm//:tsx/package_json.bzl", tsx = "bin")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES", "source_audit_files")
 
 package(default_visibility = ["//visibility:public"])
@@ -18,6 +19,7 @@ exports_files(_ASSETS)
 exports_files([
     "ops-v1/ops-v1.ts",
     "ops-v1/validate.mjs",
+    "ops-v1/validate.test.mjs",
 ])
 
 ts_project(
@@ -43,6 +45,19 @@ js_library(
 js_library(
     name = "ops-v1/validate",
     srcs = ["ops-v1/validate.mjs"],
+)
+
+tsx.tsx_test(
+    name = "ops_v1_validate_test",
+    args = [
+        "--test",
+        "contracts/ops-v1/validate.test.mjs",
+    ],
+    data = [
+        "ops-v1/ops-v1.schema.json",
+        "ops-v1/validate.test.mjs",
+        ":ops-v1/validate",
+    ],
 )
 
 js_library(
@@ -86,6 +101,10 @@ source_audit_files(
 
 test_suite(
     name = "check",
-    tests = [":ops_v1_types_typecheck_test", "//contracts/storage-objects-v1:check"],
+    tests = [
+        ":ops_v1_types_typecheck_test",
+        ":ops_v1_validate_test",
+        "//contracts/storage-objects-v1:check",
+    ],
     visibility = ["//visibility:public"],
 )

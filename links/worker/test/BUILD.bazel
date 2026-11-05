@@ -110,6 +110,7 @@ proto_vitest_test(
         "//contracts:ops-v1/fixtures/OpsStatus/links-degraded.json_data",
         "//contracts:ops-v1/fixtures/OpsStatus/links-ok.json_data",
         "//contracts:ops-v1/ops-v1.schema.json_data",
+        "//links/worker:edge_auth_types_link",
         "//links/worker:node_modules/vitest",
         "//links/worker:package_json",
     ],
@@ -119,6 +120,10 @@ proto_vitest_test(
     tests = [":ops-status.test.ts"],
     deps = [
         "//contracts:ops-v1/validate",
+        "//links/worker/src:auth",
+        "//links/worker/src:backup",
+        "//links/worker/src:backup-runner",
+        "//links/worker/src:http",
         "//links/worker/src:ops-status",
     ],
 )
@@ -265,17 +270,6 @@ workerd_vitest_test(
     project = "links/worker",
     runner = vitest.vitest_test,
     tests = [":runtime/redirect.test.ts"],
-)
-
-workerd_vitest_test(
-    name = "runtime_schema_test",
-    data = [
-        ":test_support",
-        "//links:config",
-    ],
-    project = "links/worker",
-    runner = vitest.vitest_test,
-    tests = [":runtime/schema.test.ts"],
 )
 
 js_library(

@@ -2,7 +2,7 @@
 // static content script, never in incognito, the committed key's stable ID, and the build-time version valid by
 // Chrome's rule (5 January 09:03 and 31 December 23:59 included).
 import { describe, expect, it } from 'vitest';
-import { buildManifest, EXTENSION_ID, extensionIdOf, isChromeVersion, readTemplate, versionOf } from '../scripts/manifest.mjs';
+import { buildManifest, buildOrionManifest, EXTENSION_ID, extensionIdOf, isChromeVersion, readTemplate, versionOf } from '../scripts/manifest.mjs';
 
 /** Chrome's order of versions: part by part, as integers. */
 function compareVersions(a, b) {
@@ -50,6 +50,20 @@ describe('the manifest', () => {
     expect(manifest.version).toBe('2026.1010.900');
     expect(manifest.version_name).toBe('abc1234');
   });
+
+  it('builds the Orion MV2 manifest with nonpersistent background scripts and merged host permissions', () => {
+    const orion = buildOrionManifest(readTemplate(), { version: '2026.1010.900', versionName: 'abc1234' });
+    expect(orion.manifest_version).toBe(2);
+    expect(orion.version).toBe('2026.1010.900');
+    expect(orion.version_name).toBe('abc1234');
+    expect(orion.minimum_chrome_version).toBeUndefined();
+    expect(orion.host_permissions).toBeUndefined();
+    expect(orion.action).toBeUndefined();
+    expect(orion.permissions).toEqual(['tabs', 'webNavigation', 'alarms', 'storage', 'unlimitedStorage', '<all_urls>']);
+    expect(orion.background).toEqual({ scripts: ['sw.js'], persistent: false });
+    expect(orion.browser_action).toBeDefined();
+    expect(extensionIdOf(orion.key)).toBe(EXTENSION_ID);
+  });
 });
 
 describe('the version', () => {
@@ -70,3 +84,4 @@ describe('the version', () => {
     expect(compareVersions('2026.105.1000', '2026.105.959')).toBe(1);
   });
 });
+

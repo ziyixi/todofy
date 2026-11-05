@@ -1,23 +1,10 @@
 import { dragTask, beginTaskDrag, dropTaskOn } from "./drag";
+import { createResource } from "./seed";
 import { expect, test, type APIRequestContext } from "@playwright/test";
 
-async function creator(request: APIRequestContext, resource = "tasks") {
-  const { token } = await (await request.get("/api/tasks/csrf")).json();
-  return async (task: Record<string, unknown>) => {
-    const response = await request.post(
-      `/api/tasks/v1/${resource}?request_id=${crypto.randomUUID()}`,
-      {
-        headers: { "x-csrf-token": token, origin: "http://127.0.0.1:8798" },
-        data: task,
-      },
-    );
-    expect(response.status()).toBe(200);
-    return response.json() as Promise<{
-      id: string;
-      title: string;
-      name: string;
-    }>;
-  };
+function creator(request: APIRequestContext, resource = "tasks") {
+  return (task: Record<string, unknown>) =>
+    createResource(request, resource, task);
 }
 
 test("subtasks start folded and load only on expansion, with nested steps, editing and completion", async ({

@@ -1,9 +1,8 @@
-import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
-import { createMcpHandler, McpServer, type CallToolResult } from '@modelcontextprotocol/server';
-import { afterEach, expect, it } from 'vitest';
+import { expect, it } from 'vitest';
 import { registerWatchTools, type WatchToolEnv } from '../src/watch.ts';
-import { WorkStore, type WorkStorage } from '../src/work-store.ts';
+import { WorkStore } from '../src/work-store.ts';
 import type { WorkCreateInput } from '../src/work-model.ts';
+import { createTestWorkStorage, createToolCaller, uuid } from './harness.ts';
 
 const WATCH = 'watches/synthetic-watch';
 const CHANGE = `${WATCH}/changes/0000000000000001`;
@@ -12,14 +11,7 @@ const AT = '2026-10-22T12:00:00Z';
 const settings = { display_name: 'Synthetic registration', uri: 'https://example.org/synthetic',
   intent: 'Tell the owner when synthetic registration opens',
   source: { html: { include_selectors: ['main'] } }, trigger: { text_appears: { text: 'Registration is open' } } };
-const handlers: ReturnType<typeof createMcpHandler>[] = [];
-const databases: DatabaseSync[] = [];
-afterEach(async () => {
-  await Promise.all(handlers.splice(0).map(handler => handler.close()));
-  for (const database of databases.splice(0)) database.close();
-});
 
-function uuid(value: number) { return `00000000-0000-4000-8000-${String(value).padStart(12, '0')}`; }
 function watch(overrides: Record<string, unknown> = {}) {
   return { ...settings, name: WATCH, etag: 'revision-one', state: 'active', notify_policy: 'digest', latest_snapshot: SNAPSHOT, ...overrides };
 }
@@ -31,31 +23,7 @@ interface NativeRequest {
 }
 
 function tools(backend: (request: NativeRequest) => Response | Promise<Response>) {
-  const database = new DatabaseSync(':memory:');
-  databases.push(database);
-  const sql = {
-    exec(query: string, ...bindings: SqlStorageValue[]) {
-      if (query.trimStart().startsWith('CREATE')) { database.exec(query); return { toArray: () => [] }; }
-      const values = bindings.map(value => value instanceof ArrayBuffer ? new Uint8Array(value) : value) satisfies SQLInputValue[];
-      const rows = database.prepare(query).all(...values);
-      return { toArray: () => rows };
-    },
-  } as unknown as SqlStorage;
-  let transaction = 0;
-  const storage: WorkStorage = { sql, transactionSync<T>(action: () => T): T {
-    const savepoint = `watch_test_${String(++transaction)}`;
-    database.exec(`SAVEPOINT ${savepoint}`);
-    try {
-      const result = action();
-      database.exec(`RELEASE ${savepoint}`);
-      return result;
-    } catch (error) {
-      database.exec(`ROLLBACK TO ${savepoint}`);
-      database.exec(`RELEASE ${savepoint}`);
-      throw error;
-    }
-  } };
-  const work = new WorkStore(storage);
+  const work = new WorkStore(createTestWorkStorage());
   const seen: NativeRequest[] = [];
   const env: WatchToolEnv = { WATCH: { async fetch(request: Request) {
     const url = new URL(request.url);
@@ -65,26 +33,10 @@ function tools(backend: (request: NativeRequest) => Response | Promise<Response>
     return backend(call);
   } } as unknown as Fetcher };
   let preparations = 0;
-  const handler = createMcpHandler(() => {
-    const server = new McpServer({ name: 'synthetic-watch', version: '1' }, { capabilities: { tools: {} } });
+  const call = createToolCaller('synthetic-watch', server => {
     registerWatchTools(server, env, work, () => { preparations++; return Promise.resolve(); });
-    return server;
-  }, { legacy: 'reject' });
-  handlers.push(handler);
-  return { work, seen, preparations: () => preparations,
-    async call(name: string, args: Record<string, unknown> = {}) {
-      const response = await handler.fetch(new Request('https://mcp.example.org/mcp', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream',
-          'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': 'tools/call', 'Mcp-Name': name },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args,
-          _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28',
-            'io.modelcontextprotocol/clientCapabilities': {},
-            'io.modelcontextprotocol/clientInfo': { name: 'synthetic', version: '1' } } } }),
-      }));
-      return response.json<{ result?: CallToolResult; error?: { code: number; message: string } }>();
-    },
-  };
+  });
+  return { work, seen, preparations: () => preparations, call };
 }
 
 function createWork(work: WorkStore, number: number, fields: Partial<WorkCreateInput> = {}) {
@@ -317,3 +269,61 @@ it('keeps missing screenshots and source errors explicit without reading another
   expect(reply.result?.content.some(item => item.type === 'image')).toBe(false);
   expect(client.seen).toHaveLength(1);
 });
+
+it('rejects watch_create at the 32-link limit before preparing or calling Watch', async () => {
+  const client = tools(() => { throw new Error('Full work must not reach the source'); });
+  const links = Array.from({ length: 32 }, (_, index) => ({ type: 'watch' as const, ref: `watches/existing-${String(index)}` }));
+  const full = createWork(client.work, 60, { links });
+  const reply = await client.call('watch_create', { work_id: full.id, request_id: uuid(61), ...settings });
+  expect(reply.error?.message ?? reply.result?.isError).toBeTruthy();
+  expect(JSON.stringify(reply)).toContain('WORK_LINK_LIMIT');
+  expect(client.preparations()).toBe(0);
+  expect(client.seen).toEqual([]);
+});
+
+it('pauses the newly created watch when linking fails because the work closed in flight', async () => {
+  let workId = '';
+  const createdName = `watches/w-${uuid(71)}`;
+  const client = tools(request => {
+    if (request.path === '/api/v1/watches') {
+      // Simulate the work closing while createWatch is in flight so work.checkpoint() rejects.
+      const current = client.work.get({ work_id: workId }).work;
+      client.work.checkpoint({
+        work_id: workId,
+        request_id: uuid(72),
+        etag: current.etag,
+        changes: { state: 'done', result: 'Finished while createWatch was in flight' },
+      });
+      return Response.json(watch({ name: createdName, notify_policy: 'none' }));
+    }
+    expect([request.method, request.path]).toEqual(['POST', `/api/v1/${createdName}:pause`]);
+    return Response.json(watch({ name: createdName, state: 'paused', notify_policy: 'none' }));
+  });
+  const open = createWork(client.work, 70);
+  workId = open.id;
+  const reply = await client.call('watch_create', { work_id: open.id, request_id: uuid(71), ...settings });
+  expect(reply.error?.message ?? reply.result?.isError).toBeTruthy();
+  expect(JSON.stringify(reply)).toContain('WATCH_LINK_FAILED');
+  expect(client.seen.map(call => [call.method, call.path])).toEqual([
+    ['POST', '/api/v1/watches'],
+    ['POST', `/api/v1/${createdName}:pause`],
+  ]);
+  expect(client.work.get({ work_id: open.id }).work.links).toEqual([]);
+});
+
+it('requests an immediate watch_control check without requiring etag or mutating work links', async () => {
+  const client = tools(request => {
+    expect([request.method, request.path]).toEqual(['POST', '/api/v1/watches/synthetic-watch:check']);
+    expect(request.body).toEqual({ request_id: uuid(81) });
+    return Response.json(watch({ state: 'active', etag: 'revision-checked' }));
+  });
+  const owner = createWork(client.work, 80, { links: [{ type: 'watch', ref: WATCH, owned: true }] });
+  const reply = await client.call('watch_control', { name: WATCH, action: 'check', request_id: uuid(81) });
+  expect(reply.result?.structuredContent).toMatchObject({ name: WATCH, state: 'active', etag: 'revision-checked' });
+  expect(client.seen.map(call => [call.method, call.path])).toEqual([['POST', '/api/v1/watches/synthetic-watch:check']]);
+  expect(client.work.get({ work_id: owner.id }).work).toMatchObject({
+    etag: '1',
+    links: [{ type: 'watch', ref: WATCH, owned: true, stop_state: 'unconfirmed' }],
+  });
+});
+

@@ -109,6 +109,7 @@ proto_vitest_test(
         "//website/src/lib/content:translations",
         "//website/src/lib/content:url",
         "//website/src/lib/content:validate",
+        "//website/tests/support:deployment_contract",
     ],
 )
 
@@ -140,6 +141,7 @@ proto_vitest_test(
         "//website/src/lib/content:translations",
         "//website/src/lib/content:url",
         "//website/src/lib/content:validate",
+        "//website/tests/support:deployment_contract",
     ],
 )
 
@@ -193,34 +195,6 @@ proto_vitest_test(
         "//website/src/lib/content:url",
         "//website/src/lib/content:validate",
         "//website/src/lib/images:config",
-    ],
-)
-
-proto_vitest_test(
-    name = "content-mode_test",
-    config = "//website:vitest_config",
-    data = [
-        "//website:package_metadata",
-        "//website:vitest_config",
-        "//website/content:data",
-    ],
-    project = "website",
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = [":content-mode.test.ts"],
-    deps = [
-        "//website:node_modules/katex",
-        "//website:node_modules/vitest",
-        "//website:node_modules/zod",
-        "//website/scripts/content:mode",
-        "//website/scripts/content:types",
-        "//website/src/lib/content:date",
-        "//website/src/lib/content:equation",
-        "//website/src/lib/content:errors",
-        "//website/src/lib/content:redirect-path",
-        "//website/src/lib/content:schema",
-        "//website/src/lib/content:slug",
-        "//website/src/lib/content:url",
     ],
 )
 
@@ -293,6 +267,9 @@ proto_vitest_test(
         "//website:node_modules/katex",
         "//website:node_modules/vitest",
         "//website:node_modules/zod",
+        "//website/scripts/content:args",
+        "//website/scripts/content:mode",
+        "//website/scripts/content:types",
         "//website/src/lib/content:date",
         "//website/src/lib/content:equation",
         "//website/src/lib/content:errors",
@@ -305,6 +282,7 @@ proto_vitest_test(
         "//website/src/lib/content:translations",
         "//website/src/lib/content:url",
         "//website/src/lib/content:validate",
+        "//website/tests/support:deployment_contract",
     ],
 )
 
@@ -334,6 +312,7 @@ proto_vitest_test(
         "//website/src/lib/content:slug",
         "//website/src/lib/content:stable-json",
         "//website/src/lib/content:url",
+        "//website/tests/support:deployment_contract",
     ],
 )
 
@@ -363,6 +342,7 @@ proto_vitest_test(
         "//website/src/lib/content:slug",
         "//website/src/lib/content:stable-json",
         "//website/src/lib/content:url",
+        "//website/tests/support:deployment_contract",
     ],
 )
 
@@ -404,6 +384,7 @@ proto_vitest_test(
         "//website/src/lib/content:translations",
         "//website/src/lib/content:url",
         "//website/src/lib/content:validate",
+        "//website/tests/support:deployment_contract",
     ],
 )
 
@@ -420,7 +401,21 @@ proto_vitest_test(
     runner = vitest.vitest_test,
     tags = ["unit"],
     tests = [":deployment-contract.test.ts"],
-    deps = ["//website:node_modules/vitest"],
+    deps = [
+        "//website:node_modules/katex",
+        "//website:node_modules/vitest",
+        "//website:node_modules/zod",
+        "//website/src/lib/content:date",
+        "//website/src/lib/content:equation",
+        "//website/src/lib/content:errors",
+        "//website/src/lib/content:hash",
+        "//website/src/lib/content:redirect-path",
+        "//website/src/lib/content:schema",
+        "//website/src/lib/content:slug",
+        "//website/src/lib/content:stable-json",
+        "//website/src/lib/content:url",
+        "//website/tests/support:deployment_contract",
+    ],
 )
 
 proto_vitest_test(
@@ -634,32 +629,6 @@ proto_vitest_test(
 )
 
 proto_vitest_test(
-    name = "publication-schema_test",
-    config = "//website:vitest_config",
-    data = [
-        "//website:package_metadata",
-        "//website:vitest_config",
-        "//website/content:data",
-    ],
-    project = "website",
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = [":publication-schema.test.ts"],
-    deps = [
-        "//website:node_modules/katex",
-        "//website:node_modules/vitest",
-        "//website:node_modules/zod",
-        "//website/src/lib/content:date",
-        "//website/src/lib/content:equation",
-        "//website/src/lib/content:errors",
-        "//website/src/lib/content:redirect-path",
-        "//website/src/lib/content:schema",
-        "//website/src/lib/content:slug",
-        "//website/src/lib/content:url",
-    ],
-)
-
-proto_vitest_test(
     name = "publication-state-route_test",
     config = "//website:vitest_config",
     data = [
@@ -698,6 +667,7 @@ proto_vitest_test(
         "//website/src/lib/content:translations",
         "//website/src/lib/content:url",
         "//website/src/lib/content:validate",
+        "//website/tests/support:deployment_contract",
     ],
 )
 
@@ -730,6 +700,7 @@ proto_vitest_test(
         "//website/src/lib/content:translations",
         "//website/src/lib/content:url",
         "//website/src/lib/content:validate",
+        "//website/tests/support:deployment_contract",
     ],
 )
 
@@ -742,6 +713,7 @@ proto_vitest_test(
         "//website/content:data",
         "//website/relay/src:env_ts_source",
         "//website/relay/src:github_ts_source",
+        "//website/relay/src:index_ts_source",
         "//website/relay/src:request_ts_source",
         "//website/relay/src:status_ts_source",
     ],
@@ -858,22 +830,33 @@ proto_vitest_test(
         "//website:node_modules/smol-toml",
         "//website:node_modules/vitest",
         "//website:node_modules/zod",
+        "//website/content:site_config",
+        "//website/scripts/bazel:snapshot",
+        "//website/scripts/bazel:source-identity",
+        "//website/scripts/content:validate",
+        "//website/scripts/release:cli",
         "//website/scripts/release:cloudflare",
         "//website/scripts/release:content-sync",
+        "//website/scripts/release:green-commit",
         "//website/scripts/release:payload",
         "//website/scripts/release:steps",
+        "//website/scripts/release:verify",
         "//website/scripts/release:worker-config",
         "//website/src/lib/content:date",
         "//website/src/lib/content:equation",
         "//website/src/lib/content:errors",
         "//website/src/lib/content:hash",
+        "//website/src/lib/content:heading",
         "//website/src/lib/content:publication-state",
+        "//website/src/lib/content:reader",
         "//website/src/lib/content:redirect-path",
         "//website/src/lib/content:registry",
         "//website/src/lib/content:schema",
         "//website/src/lib/content:slug",
         "//website/src/lib/content:stable-json",
+        "//website/src/lib/content:translations",
         "//website/src/lib/content:url",
+        "//website/src/lib/content:validate",
     ],
 )
 
@@ -952,24 +935,6 @@ proto_vitest_test(
 )
 
 proto_vitest_test(
-    name = "video-embed_test",
-    config = "//website:vitest_config",
-    data = [
-        "//website:package_metadata",
-        "//website:vitest_config",
-        "//website/content:data",
-    ],
-    project = "website",
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = [":video-embed.test.ts"],
-    deps = [
-        "//website:node_modules/vitest",
-        "//website/src/lib/content:video-embed",
-    ],
-)
-
-proto_vitest_test(
     name = "bazel-snapshot_test",
     config = "//website:vitest_config",
     data = [
@@ -1012,7 +977,6 @@ test_suite(
         ":blog-translations-ui_test",
         ":content-block-validation_test",
         ":content-media-transaction_test",
-        ":content-mode_test",
         ":content-prepare_test",
         ":content-primitives_test",
         ":content-redirects_test",
@@ -1025,7 +989,6 @@ test_suite(
         ":notion-pagination_test",
         ":notion-withdrawal_test",
         ":playwright-config_test",
-        ":publication-schema_test",
         ":publication-state-route_test",
         ":publication-state_test",
         ":relay-sync_test",
@@ -1035,7 +998,6 @@ test_suite(
         ":release-steps_test",
         ":release-verify_test",
         ":static-export_test",
-        ":video-embed_test",
     ],
     visibility = ["//visibility:public"],
 )

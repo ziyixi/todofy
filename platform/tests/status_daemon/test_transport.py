@@ -18,7 +18,8 @@ from personal_cloud.status_daemon.reader import (
     ReadError,
     read_json,
 )
-from personal_cloud.status_daemon.server import Cache, Service, create_app
+from personal_cloud.status_daemon import server as daemon_server
+from personal_cloud.status_daemon.server import Cache, Service, _offset, create_app
 from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb
 from ziyixi_proto.rpc_status import RpcError
 from ziyixi_proto.wire_json import from_wire
@@ -420,6 +421,91 @@ class API(unittest.TestCase):
                 (405, "UNIMPLEMENTED"),
             )
         self.assertEqual(self.reads, 0)
+
+    def test_node_status_plan_query_validation_and_dispatch_fallbacks(self):
+        expected_plan = pb.ReconcilePlan(
+            name="reconcilePlan",
+            state="clean",
+            observed_at="2026-04-06T00:00:00Z",
+            changes=(),
+        )
+        service = Service(self.cache, ("newsletter",))
+        service.plan = lambda: expected_plan
+        status = service.get("/api/v1/nodeStatus")
+        self.assertEqual(status.reconcile_plan, expected_plan)
+        for invalid_url in (
+            "/api/v1/nodeStatus#frag",
+            "/api/v1/workloads?" + ("a" * 2049),
+            "/api/v1/nodeStatus?extra=1",
+            "/api/v1/workloads?unknown=1",
+        ):
+            with self.assertRaises(RpcError) as error:
+                service.get(invalid_url)
+            self.assertEqual(error.exception.code, "INVALID_ARGUMENT")
+        for bad_token in ("not-base64!", "e30", "djE6MA", "djE6Mg"):
+            with self.assertRaises(RpcError):
+                _offset(bad_token, 2)
+
+        class Router:
+            def authorize(self, _headers):
+                pass
+
+            def handle(self, method, target, _headers, _read_body):
+                if method == "GET" and target == "/api/v1/reconcilePlan":
+                    return 200, {"name": "reconcilePlan", "state": "clean"}
+                raise RuntimeError("private internal exception")
+
+            def close(self):
+                pass
+
+        with TestClient(
+            create_app(service, Router()), raise_server_exceptions=False
+        ) as client:
+            ok = client.get(
+                "/api/v1/reconcilePlan",
+                headers={"Authorization": "Bearer synthetic-machine"},
+            )
+            self.assertEqual(ok.status_code, 200)
+            failed = client.post(
+                "/api/v1/releases",
+                json={"x": 1},
+                headers={"Authorization": "Bearer synthetic-machine"},
+            )
+            self.assertEqual(
+                (failed.status_code, failed.json()["error"]["status"]),
+                (500, "INTERNAL"),
+            )
+            self.assertNotIn("private", failed.text)
+
+    def test_daemon_entrypoint_validates_config_and_serves(self):
+        config = Configuration(
+            "vps", "personal-cloud", (CONFIG,), "example/project"
+        )
+        router = Mock(summary=Mock(), plan=Mock())
+        with (
+            patch("builtins.open", unittest.mock.mock_open(read_data="{}")),
+            patch.object(daemon_server, "configuration", return_value=config),
+            patch.object(daemon_server, "Reader") as reader_cls,
+            patch.object(daemon_server.uvicorn, "run") as run_mock,
+        ):
+            self.assertEqual(
+                daemon_server.main(lambda _cfg, _svc: router), 0
+            )
+            run_mock.assert_called_once()
+        with (
+            patch("builtins.open", unittest.mock.mock_open(read_data="{}")),
+            patch.object(daemon_server, "configuration", return_value=config),
+            patch.object(daemon_server, "Reader") as reader_cls,
+        ):
+            self.assertEqual(
+                daemon_server.main(
+                    lambda _cfg, _svc: (_ for _ in ()).throw(ValueError("bad"))
+                ),
+                1,
+            )
+            reader_cls.return_value.close.assert_called_once_with()
+        with patch("builtins.open", side_effect=OSError("missing")):
+            self.assertEqual(daemon_server.main(), 1)
 
 
 class StreamingAPI(unittest.IsolatedAsyncioTestCase):

@@ -6,7 +6,7 @@
  * acknowledge, and a scripted preview. Every request must be a same-origin /api path. `loseNextResponse` commits the
  * next matching request and then fails its fetch, as a dropped connection would.
  */
-import { vi } from 'vitest'
+import { expect, vi } from 'vitest'
 import { updatePaths } from '@ziyixi/proto/field-mask'
 import { HttpTranscoder, type ServiceHandlers, type ShapeOf } from '@ziyixi/proto/http-transcoder'
 import { clone, create, type MessageInitShape } from '@ziyixi/proto/protobuf'
@@ -28,6 +28,7 @@ import {
   type ServiceStatus,
 } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb'
 import { fromWire, toWire } from '@ziyixi/proto/wire-json'
+import { mountApp } from '../app.ts'
 
 export interface Call {
   readonly method: string
@@ -242,3 +243,32 @@ export class FakeServer {
     return this.calls.filter((call) => call.method !== 'GET' && (suffix === undefined || (call.path.split('?')[0] ?? '').endsWith(suffix)))
   }
 }
+
+export const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+/** Waits until `check` holds, at most `ms` of real time (withRetry pauses 800 ms before its repeat). */
+export async function until(check: () => boolean, ms = 3000): Promise<void> {
+  const end = Date.now() + ms
+  while (!check() && Date.now() < end) await settle()
+  expect(check(), document.body.textContent ?? '').toBe(true)
+}
+
+export async function mount(server: FakeServer, path: string): Promise<HTMLElement> {
+  server.install()
+  window.history.replaceState(null, '', path)
+  const root = document.createElement('div')
+  document.body.append(root)
+  await mountApp(root, { now: () => NOW, confirm: () => true })
+  return root
+}
+
+export function buttons(scope: ParentNode, label: string): HTMLButtonElement[] {
+  return [...scope.querySelectorAll<HTMLButtonElement>('button')].filter((candidate) => candidate.textContent === label)
+}
+
+export function button(scope: ParentNode, label: string): HTMLButtonElement {
+  const found = buttons(scope, label)[0]
+  if (found === undefined) throw new Error(`no button ${label}`)
+  return found
+}
+

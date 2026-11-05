@@ -7,24 +7,11 @@ import {
   type Page,
 } from "@playwright/test";
 import { reachesTodofy } from "./planning-stub";
+import { createResource } from "./seed";
 
-async function writer(request: APIRequestContext) {
-  const { token } = await (await request.get("/api/tasks/csrf")).json();
-  return async (resource: string, value: Record<string, unknown>) => {
-    const response = await request.post(
-      `/api/tasks/v1/${resource}?request_id=${crypto.randomUUID()}`,
-      {
-        headers: { "x-csrf-token": token, origin: "http://127.0.0.1:8798" },
-        data: value,
-      },
-    );
-    expect(response.status()).toBe(200);
-    return response.json() as Promise<{
-      id: string;
-      name: string;
-      title: string;
-    }>;
-  };
+function writer(request: APIRequestContext) {
+  return (resource: string, value: Record<string, unknown>) =>
+    createResource(request, resource, value);
 }
 
 async function bounds(link: Locator) {

@@ -2,23 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import { hashContentSnapshot, sha256 } from "../../src/lib/content/hash";
 import { buildCandidateRegistry, emptyContentRegistry } from "../../src/lib/content/registry";
-import {
-  CONTENT_SCHEMA_VERSION,
-  type ContentSnapshot,
-  type Post,
-} from "../../src/lib/content/schema";
+import type { Post } from "../../src/lib/content/schema";
+import { makePost as buildPost, makeSnapshot } from "../support/deployment-contract";
 
 function makePost(slug: string, identity = "article-one", text = "Visible text"): Post {
-  const sourceKey = sha256(identity);
-  return {
-    sourceKey,
-    feedGuid: `urn:ziyixi:post:${sourceKey}`,
-    slug,
-    title: "Synthetic post",
-    summary: "A summary for a synthetic post.",
-    language: "en",
-    publishedAt: "2025-02-03T00:00:00.000Z",
-    tags: [],
+  return buildPost(slug, {
+    sourceKey: sha256(identity),
     blocks: [
       {
         id: "synthetic-paragraph",
@@ -27,30 +16,18 @@ function makePost(slug: string, identity = "article-one", text = "Visible text")
         children: [],
       },
     ],
-    toc: [],
-    media: [],
-  };
-}
-
-function snapshot(post: Post): ContentSnapshot {
-  return {
-    schemaVersion: CONTENT_SCHEMA_VERSION,
-    sourceMode: "fixture",
-    posts: [post],
-    media: [],
-    redirects: [],
-  };
+  });
 }
 
 describe("content hash", () => {
   it("changes when visible content changes", () => {
-    expect(hashContentSnapshot(snapshot(makePost("article", "same", "before")))).not.toBe(
-      hashContentSnapshot(snapshot(makePost("article", "same", "after"))),
+    expect(hashContentSnapshot(makeSnapshot([makePost("article", "same", "before")]))).not.toBe(
+      hashContentSnapshot(makeSnapshot([makePost("article", "same", "after")])),
     );
   });
 
   it("is deterministic for an identical normalized snapshot", () => {
-    const value = snapshot(makePost("article"));
+    const value = makeSnapshot([makePost("article")]);
     expect(hashContentSnapshot(value)).toBe(hashContentSnapshot(structuredClone(value)));
   });
 });

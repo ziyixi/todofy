@@ -4,6 +4,7 @@ import {
   type APIRequestContext,
   type Page,
 } from "@playwright/test";
+import { seedTask } from "./seed";
 
 test.use({ serviceWorkers: "block", timezoneId: "America/Los_Angeles" });
 
@@ -35,17 +36,7 @@ async function createTask(
   title: string,
   fields: Record<string, unknown> = {},
 ): Promise<SavedTask> {
-  const csrf = await request.get("/api/tasks/csrf");
-  const { token } = await csrf.json();
-  const response = await request.post(
-    `/api/tasks/v1/tasks?request_id=${crypto.randomUUID()}`,
-    {
-      headers: { "x-csrf-token": token, origin: "http://127.0.0.1:8798" },
-      data: { title, ...fields },
-    },
-  );
-  expect(response.status(), await response.text()).toBe(200);
-  return response.json();
+  return seedTask<SavedTask>(request, { title, ...fields });
 }
 async function savedTask(
   request: APIRequestContext,

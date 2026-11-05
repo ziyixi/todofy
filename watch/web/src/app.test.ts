@@ -3,30 +3,7 @@ import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
 import { Change_State, Change_SuppressionReason } from '@ziyixi/proto/watch/ui/v1/change_pb'
 import { FailureReason, Watch_State, WatchHealthSchema, WatchHealth_Outcome } from '@ziyixi/proto/watch/ui/v1/watch_pb'
 import { BackupRestore_State, BackupRestoreSchema, PreviewWatchResponseSchema } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb'
-import { mountApp } from './app.ts'
-import { change, FakeServer, NOW, watch } from './test/fakeServer.ts'
-
-const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
-
-async function until(check: () => boolean): Promise<void> {
-  for (let i = 0; i < 300 && !check(); i += 1) await settle()
-  expect(check(), document.body.textContent ?? '').toBe(true)
-}
-
-async function mount(server: FakeServer, path: string): Promise<HTMLElement> {
-  server.install()
-  window.history.replaceState(null, '', path)
-  const root = document.createElement('div')
-  document.body.append(root)
-  await mountApp(root, { now: () => NOW, confirm: () => true })
-  return root
-}
-
-function button(scope: ParentNode, label: string): HTMLButtonElement {
-  const found = [...scope.querySelectorAll<HTMLButtonElement>('button')].find((candidate) => candidate.textContent === label)
-  if (found === undefined) throw new Error(`no button ${label}`)
-  return found
-}
+import { button, change, FakeServer, mount, NOW, until, watch } from './test/fakeServer.ts'
 
 const text = (root: HTMLElement) => root.textContent ?? ''
 

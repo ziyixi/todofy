@@ -1,22 +1,5 @@
-import { expect, test, type APIRequestContext } from "@playwright/test";
-
-async function createResource(
-  request: APIRequestContext,
-  kind: string,
-  fields: Record<string, unknown>,
-) {
-  const csrf = await request.get("/api/tasks/csrf");
-  const { token } = await csrf.json();
-  const result = await request.post(
-    `/api/tasks/v1/${kind}?request_id=${crypto.randomUUID()}`,
-    {
-      headers: { "x-csrf-token": token, origin: "http://127.0.0.1:8798" },
-      data: fields,
-    },
-  );
-  expect(result.status()).toBe(200);
-  return result.json();
-}
+import { expect, test } from "@playwright/test";
+import { createResource } from "./seed";
 
 test("named colors persist on projects, labels and filters and keep their visual identity", async ({
   page,

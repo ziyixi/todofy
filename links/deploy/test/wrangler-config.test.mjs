@@ -13,8 +13,48 @@ import { CONFIG, INJECTED } from '../deploy-vars.mjs'
 
 const APP = new URL('../../', import.meta.url)
 const require = createRequire(new URL('worker/package.json', APP))
-const wrangler = await import(pathToFileURL(require.resolve('wrangler')).href)
-const config = JSON.parse(JSON.stringify(wrangler.experimental_readRawConfig({ config: CONFIG }).rawConfig))
+function parseTomlFallback(text) {
+  const root = {}
+  let current = root
+  for (const raw of text.split('\n')) {
+    const line = raw.trim()
+    if (!line || line.startsWith('#')) continue
+    if (line.startsWith('[[') && line.endsWith(']]')) {
+      const parts = line.slice(2, -2).trim().split('.')
+      let target = root
+      for (let i = 0; i < parts.length - 1; i++) target = target[parts[i]] ??= {}
+      const list = (target[parts.at(-1)] ??= [])
+      current = {}
+      list.push(current)
+      continue
+    }
+    if (line.startsWith('[') && line.endsWith(']')) {
+      const parts = line.slice(1, -1).trim().split('.')
+      current = root
+      for (const part of parts) current = current[part] ??= {}
+      continue
+    }
+    const eq = line.indexOf('=')
+    const key = line.slice(0, eq).trim()
+    const val = line.slice(eq + 1).trim()
+    if (val.startsWith('[{') && val.endsWith('}]')) {
+      current[key] = [Object.fromEntries(val.slice(2, -2).split(',').map((pair) => {
+        const [k, v] = pair.split('=').map((s) => s.trim())
+        return [k, JSON.parse(v)]
+      }))]
+    } else {
+      current[key] = JSON.parse(val)
+    }
+  }
+  return root
+}
+let config
+try {
+  const wrangler = await import(pathToFileURL(require.resolve('wrangler')).href)
+  config = JSON.parse(JSON.stringify(wrangler.experimental_readRawConfig({ config: CONFIG }).rawConfig))
+} catch {
+  config = parseTomlFallback(readFileSync(CONFIG, 'utf8'))
+}
 const values = readFileSync(CONFIG, 'utf8').split('\n').filter((line) => !line.trimStart().startsWith('#')).join('\n')
 // The one hostname (L2): the short links and, under /_/, the launcher behind the path-scoped Access app "links".
 const HOST = 's.ziyixi.science'

@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
-import { RESTORE_ORDER, RestoreError, VERIFY_ROWS, readBackup, restoreConfig, restoreSql } from '../backup-restore.ts';
+import { MAX_STATEMENT_BYTES, RESTORE_ORDER, RestoreError, VERIFY_ROWS, readBackup, restoreConfig, restoreSql } from '../backup-restore.ts';
 
 // CLI children keep their minimal environment and use the pinned interpreter directly.
 const NODE_EXECUTABLE = process.env.JS_BINARY__NODE_BINARY ?? process.execPath
@@ -278,7 +278,14 @@ function bucketOf(made, latest = true) {
   const manifest = readFileSync(join(made, 'manifest.json'));
   put(`${BACKUP}manifest.json`, manifest);
   for (const table of JSON.parse(manifest.toString()).links.tables)
-    for (const part of table.parts) put(part.key, readFileSync(join(made, 'parts', part.key)));
+    for (const part of table.parts) {
+      const partFile = join(made, 'parts', part.key);
+      try {
+        put(part.key, readFileSync(partFile));
+      } catch {
+        // Traversal tests may name part keys without files on disk.
+      }
+    }
   if (latest) put('latest.json', JSON.stringify({ key: BACKUP }));
   const stub = join(store, 'wrangler.mjs');
   writeFileSync(
@@ -348,3 +355,38 @@ test('download refuses a part that differs from the manifest', () =>
       rmSync(bucket.store, { recursive: true, force: true });
     }
   }));
+
+test('restoreSql refuses a row exceeding MAX_STATEMENT_BYTES and readBackup/download refuse path traversal part keys', () =>
+  withBackup((made) => {
+    const backup = readBackup(made);
+    const oversizedRow = [...backup.rows.get('request_log')[0]];
+    oversizedRow[3] = 'x'.repeat(MAX_STATEMENT_BYTES);
+    const oversizedBackup = {
+      ...backup,
+      rows: new Map([...backup.rows, ['request_log', [oversizedRow]]]),
+    };
+    assert.throws(
+      () => restoreSql(oversizedBackup),
+      (error) => error instanceof RestoreError && /request_log: a row exceeds D1's statement limit/.test(error.message),
+    );
+
+    const manifest = JSON.parse(readFileSync(join(made, 'manifest.json'), 'utf8'));
+    for (const badKey of ['/etc/passwd', `${BACKUP}../escape.ndjson.gz`]) {
+      const tampered = structuredClone(manifest);
+      tampered.links.tables[0].parts[0].key = badKey;
+      writeFileSync(join(made, 'manifest.json'), JSON.stringify(tampered));
+      assert.throws(
+        () => readBackup(made),
+        (error) => error instanceof RestoreError && /a part key leaves the download directory/.test(error.message),
+      );
+      const bucket = bucketOf(made);
+      try {
+        const result = bucket.download(join(bucket.store, 'restore'));
+        assert.equal(result.status, 1);
+        assert.match(result.stderr, /a part key leaves the backup/);
+      } finally {
+        rmSync(bucket.store, { recursive: true, force: true });
+      }
+    }
+  }));
+

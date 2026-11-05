@@ -699,3 +699,99 @@ test('a completion receipt stored before focus_day existed still replays', async
   });
   expect(await refusal(other)).toBe('INVALID_ARGUMENT');
 });
+
+async function refusedPrecondition(response: Response) {
+  expect(response.status).toBe(400);
+  const body = await response.json<{ error: { status: string; details: { reason?: string }[] } }>();
+  expect(body.error.status).toBe('FAILED_PRECONDITION');
+  expect(body.error.details.some((detail) => detail.reason === 'PRECONDITION_FAILED')).toBe(true);
+}
+
+test('new queue writes reject ordinary outcomes and accept Steps, Standalone actions and Quick tasks', async () => {
+  await harness.db.prepare("DELETE FROM day_steps WHERE day='2030-10-21'").run();
+  const outcome = await ok<WireTask>(
+    await harness.mutate('POST', `/api/tasks/v1/tasks?request_id=${randomUUID()}`, {
+      title: 'Synthetic ordinary outcome',
+    }),
+  );
+  await refusedPrecondition(await move({ task_id: outcome.id, destination_day: '2030-10-21' }));
+  expect((await harness.db.prepare('SELECT task_id FROM day_steps WHERE task_id=?').bind(outcome.id).all()).results).toEqual(
+    [],
+  );
+  const step = await ok<WireTask>(
+    await harness.mutate('POST', `/api/tasks/v1/tasks?request_id=${randomUUID()}`, {
+      title: 'Synthetic executable Step',
+      parent_id: outcome.id,
+      kind: 'step',
+    }),
+  );
+  const standalone = await ok<WireTask>(
+    await harness.mutate('POST', `/api/tasks/v1/tasks?request_id=${randomUUID()}`, {
+      title: 'Synthetic Standalone action',
+      planning_flags: ['task'],
+    }),
+  );
+  const quick = await ok<WireTask>(
+    await harness.mutate('POST', `/api/tasks/v1/tasks?request_id=${randomUUID()}`, {
+      title: 'Synthetic Quick task',
+      planning_flags: ['quick'],
+    }),
+  );
+  for (const item of [step, standalone, quick]) {
+    await ok(await move({ task_id: item.id, destination_day: '2030-10-21' }));
+  }
+  expect(
+    (
+      await harness.db
+        .prepare("SELECT task_id FROM day_steps WHERE day='2030-10-21' AND deleted_at IS NULL ORDER BY position")
+        .all()
+    ).results.map((row) => row['task_id']),
+  ).toEqual([step.id, standalone.id, quick.id]);
+});
+
+test('a successful exact receipt replays after reclassification and deletion without restoring the queue', async () => {
+  const item = await ok<WireTask>(
+    await harness.mutate('POST', `/api/tasks/v1/tasks?request_id=${randomUUID()}`, {
+      title: 'Synthetic replayed action',
+      planning_flags: ['task'],
+    }),
+  );
+  const requestId = randomUUID();
+  const request = { task_id: item.id, destination_day: '2030-10-22' };
+  const first = await ok(await move(request, requestId));
+  const changed = await ok<WireTask>(
+    await harness.mutate(
+      'PATCH',
+      `/api/tasks/v1/${item.name}?request_id=${randomUUID()}&etag=${item.etag}&update_mask=planning_flags`,
+      { planning_flags: [] },
+    ),
+  );
+  await refusedPrecondition(await move(request));
+  expect(await ok(await move(request, requestId))).toEqual(first);
+  await ok(
+    await harness.mutate('DELETE', `/api/tasks/v1/${item.name}?request_id=${randomUUID()}&etag=${changed.etag}`),
+  );
+  expect(await ok(await move(request, requestId))).toEqual(first);
+  expect(
+    (await harness.db.prepare('SELECT task_id FROM day_steps WHERE task_id=? AND deleted_at IS NULL').bind(item.id).all())
+      .results,
+  ).toEqual([]);
+});
+
+test('an old queue entry can still be removed after it loses executable classification', async () => {
+  const item = await ok<WireTask>(
+    await harness.mutate('POST', `/api/tasks/v1/tasks?request_id=${randomUUID()}`, {
+      title: 'Synthetic old queued outcome',
+    }),
+  );
+  await harness.db
+    .prepare("INSERT INTO day_steps(day,task_id,position,created_at,updated_at) VALUES('2030-10-23',?,1,1,1)")
+    .bind(item.id)
+    .run();
+  await ok(await move({ task_id: item.id, source_day: '2030-10-23' }));
+  expect(
+    (await harness.db.prepare('SELECT task_id FROM day_steps WHERE task_id=? AND deleted_at IS NULL').bind(item.id).all())
+      .results,
+  ).toEqual([]);
+});
+

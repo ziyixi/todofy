@@ -1,49 +1,39 @@
 import { describe, expect, it } from "vitest";
 
+import { assertKnownArguments, parseCliArguments } from "../../scripts/content/args";
+import { assertModeBoundary, parseExplicitSource } from "../../scripts/content/mode";
 import { parseContentDate } from "../../src/lib/content/date";
 import { sha256 } from "../../src/lib/content/hash";
-import type { ContentSnapshot } from "../../src/lib/content/schema";
+import { PublicationSchema, type ContentSnapshot } from "../../src/lib/content/schema";
 import { validateSlug } from "../../src/lib/content/slug";
 import { validateHttpsOrigin, validatePublicHref } from "../../src/lib/content/url";
 import { validateContentSnapshotWithOptions } from "../../src/lib/content/validate";
+import { makePost, makeSnapshot } from "../support/deployment-contract";
 
 function snapshotWithHref(href: string): ContentSnapshot {
-  const sourceKey = sha256("internal-link-test");
-  return {
-    schemaVersion: 1,
-    sourceMode: "fixture",
-    posts: [
-      {
-        sourceKey,
-        feedGuid: `urn:ziyixi:post:${sourceKey}`,
-        slug: "link-check",
-        title: "Link check",
-        summary: "A representative internal link validation record.",
-        language: "en",
-        publishedAt: "2026-01-01T00:00:00.000Z",
-        tags: [],
-        blocks: [
-          {
-            id: "known-heading",
-            type: "heading",
-            level: 2,
-            anchor: "known-heading",
-            richText: [{ text: "Known heading" }],
-          },
-          {
-            id: "link-paragraph",
-            type: "paragraph",
-            richText: [{ text: "Target", href }],
-            children: [],
-          },
-        ],
-        toc: [{ id: "known-heading", text: "Known heading", level: 2 }],
-        media: [],
-      },
-    ],
-    media: [],
-    redirects: [],
-  };
+  return makeSnapshot([
+    makePost("link-check", {
+      sourceKey: sha256("internal-link-test"),
+      title: "Link check",
+      summary: "A representative internal link validation record.",
+      blocks: [
+        {
+          id: "known-heading",
+          type: "heading",
+          level: 2,
+          anchor: "known-heading",
+          richText: [{ text: "Known heading" }],
+        },
+        {
+          id: "link-paragraph",
+          type: "paragraph",
+          richText: [{ text: "Target", href }],
+          children: [],
+        },
+      ],
+      toc: [{ id: "known-heading", text: "Known heading", level: 2 }],
+    }),
+  ]);
 }
 
 describe("content date rules", () => {
@@ -222,5 +212,84 @@ describe("slug and URL rules", () => {
       expect.objectContaining({ code: "BROKEN_INTERNAL_LINK" }),
     );
     expect(() => validateContentSnapshotWithOptions(snapshot, { allowCvPath: true })).not.toThrow();
+  });
+});
+
+describe("explicit content modes and CLI arguments", () => {
+  it("does not infer a source from credentials", () => {
+    expect(() => parseExplicitSource(undefined)).toThrow(/content source is required/i);
+    expect(parseExplicitSource("empty")).toBe("empty");
+  });
+
+  it("allows empty without Notion and requires credentials for notion", () => {
+    expect(() => assertModeBoundary("empty", { forRelease: false })).not.toThrow();
+    expect(() => assertModeBoundary("notion", { forRelease: false })).toThrow(
+      /requires NOTION_TOKEN/,
+    );
+  });
+
+  it("forbids fixture at the trusted release boundary", () => {
+    expect(() =>
+      assertModeBoundary("fixture", {
+        forRelease: true,
+        notionToken: "unused",
+        notionDataSourceId: "unused",
+      }),
+    ).toThrow(/cannot be used/);
+  });
+
+  it("parses --key=value and --flag CLI args and rejects positional or unknown options", () => {
+    const parsed = parseCliArguments(["--source=empty", "--allow-empty"]);
+    expect(parsed.values.get("source")).toBe("empty");
+    expect(parsed.flags.has("allow-empty")).toBe(true);
+    expect(() => assertKnownArguments(parsed, ["source"], ["allow-empty"])).not.toThrow();
+    expect(() => assertKnownArguments(parsed, [], ["allow-empty"])).toThrowError(
+      expect.objectContaining({ code: "UNKNOWN_ARGUMENT" }),
+    );
+    expect(() => assertKnownArguments(parsed, ["source"], [])).toThrowError(
+      expect.objectContaining({ code: "UNKNOWN_ARGUMENT" }),
+    );
+    expect(() => parseCliArguments(["positional"])).toThrowError(
+      expect.objectContaining({ code: "INVALID_ARGUMENT" }),
+    );
+    expect(() => parseCliArguments(["--empty="])).toThrowError(
+      expect.objectContaining({ code: "INVALID_ARGUMENT" }),
+    );
+    expect(() => parseCliArguments(["--=value"])).toThrowError(
+      expect.objectContaining({ code: "INVALID_ARGUMENT" }),
+    );
+  });
+});
+
+describe("publication resources", () => {
+  const publication = {
+    id: "pyfk-conference",
+    title: "PyFK",
+    authors: [{ name: "Ziyi Xi", siteOwner: true }],
+    venue: "AGU Fall Meeting",
+    year: 2021,
+    homeAuthors: "Z. Xi et al.",
+  };
+
+  it.each(["Publisher", "Code"] as const)(
+    "supports a publication without a DOI when it has a %s link",
+    (label) => {
+      expect(() =>
+        PublicationSchema.parse({
+          ...publication,
+          links: [{ label, url: "https://example.com/pyfk" }],
+        }),
+      ).not.toThrow();
+    },
+  );
+
+  it("rejects a publication without any DOI or resource", () => {
+    expect(() => PublicationSchema.parse({ ...publication, links: [] })).toThrow(/resource link/);
+  });
+
+  it("retains the DOI-only fallback for existing publications", () => {
+    expect(() =>
+      PublicationSchema.parse({ ...publication, doi: "10.1234/example", links: [] }),
+    ).not.toThrow();
   });
 });

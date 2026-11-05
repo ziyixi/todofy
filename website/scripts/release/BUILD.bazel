@@ -88,6 +88,7 @@ js_library(
         ":verify",
         ":worker-config",
         "//website/content:site_config",
+        "//website/scripts/bazel:snapshot",
         "//website/scripts/bazel:source-identity",
         "//website/src/lib/content:publication-state",
         "//website/src/lib/content:reader",

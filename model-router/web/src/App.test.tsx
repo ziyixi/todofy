@@ -78,7 +78,7 @@ test('embeddings do not make the reported text usage incomplete', async () => {
   expect(rows.getByRole('rowheader', { name: /bge-m3/ }).closest('tr')).not.toHaveTextContent('次未计入')
 })
 
-test('request pagination and filters use bounded API calls and reset to the first page', async () => {
+test('request pagination and filters switch dropdowns, use bounded API calls, and reset to defaults', async () => {
   const user = userEvent.setup()
   const listRequests = vi
     .fn()
@@ -87,22 +87,49 @@ test('request pagination and filters use bounded API calls and reset to the firs
   window.history.replaceState(null, '', '/#/requests')
   renderApp(<App api={api} />)
   await screen.findByRole('button', { name: /synthetic-app/ })
+  expect(screen.queryByRole('button', { name: '重置筛选' })).not.toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: '下一页' }))
   await waitFor(() =>
     expect(listRequests).toHaveBeenLastCalledWith(expect.any(Object), 'next-synthetic-token'),
   )
   expect(screen.getByText('第 2 页')).toBeInTheDocument()
-  await user.type(screen.getByLabelText('应用'), 'other-synthetic-app')
+  await user.selectOptions(screen.getByLabelText('时间'), '30')
+  await user.type(screen.getByLabelText('应用'), '  other-synthetic-app  ')
+  await user.selectOptions(screen.getByLabelText('模型'), 'claude-opus-5-5')
   await user.selectOptions(screen.getByLabelText('状态'), 'failed')
   await user.click(screen.getByRole('button', { name: '应用筛选' }))
   await waitFor(() =>
     expect(listRequests).toHaveBeenLastCalledWith(
-      expect.objectContaining({ app: 'other-synthetic-app', state: 'failed' }),
+      expect.objectContaining({
+        days: 30,
+        app: 'other-synthetic-app',
+        model: 'claude-opus-5-5',
+        state: 'failed',
+      }),
       '',
     ),
   )
   expect(screen.getByText('第 1 页')).toBeInTheDocument()
   expect(screen.getByRole('button', { name: '上一页' })).toBeDisabled()
+
+  const resetButton = screen.getByRole('button', { name: '重置筛选' })
+  await user.click(resetButton)
+  await waitFor(() =>
+    expect(listRequests).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        days: 7,
+        app: '',
+        model: '',
+        state: '',
+      }),
+      '',
+    ),
+  )
+  expect(screen.getByLabelText('时间')).toHaveValue('7')
+  expect(screen.getByLabelText('应用')).toHaveValue('')
+  expect(screen.getByLabelText('模型')).toHaveValue('')
+  expect(screen.getByLabelText('状态')).toHaveValue('')
+  expect(screen.queryByRole('button', { name: '重置筛选' })).not.toBeInTheDocument()
 })
 
 test('opens a private request then copies it into Playground without submitting it', async () => {

@@ -87,9 +87,11 @@ copied_source_files(
         "Reader.tsx",
         "RunDetail.test.tsx",
         "RunDetail.tsx",
+        "Runs.test.tsx",
         "Runs.tsx",
         "Sources.test.tsx",
         "Sources.tsx",
+        "Timeline.test.tsx",
         "Timeline.tsx",
         "api.ts",
         "chart.test.ts",
@@ -461,6 +463,17 @@ proto_vitest_test(
 )
 
 proto_vitest_test(
+    name = "src__Runs_test",
+    config = "//newsletter-console/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "newsletter-console/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":Runs.test.tsx"],
+    deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
     name = "src__Sources_test",
     config = "//newsletter-console/web:test_config",
     data = COMMON_TEST_DATA,
@@ -469,6 +482,17 @@ proto_vitest_test(
     tags = ["unit"],
     tests = [":Sources.test.tsx"],
     deps = COMMON_TEST_DEPS,
+)
+
+proto_vitest_test(
+    name = "src__Timeline_test",
+    config = "//newsletter-console/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "newsletter-console/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":Timeline.test.tsx"],
+    deps = COMMON_TEST_DEPS + ["//proto/newsletter/ui/v1:ts"],
 )
 
 proto_vitest_test(
@@ -545,7 +569,9 @@ test_suite(
         ":src__Overview_test",
         ":src__Reader_test",
         ":src__RunDetail_test",
+        ":src__Runs_test",
         ":src__Sources_test",
+        ":src__Timeline_test",
         ":src__chart_test",
         ":src__format_test",
         "//newsletter-console/web/src/test:check",
@@ -563,7 +589,9 @@ test_suite(
         ":src__Overview_test",
         ":src__Reader_test",
         ":src__RunDetail_test",
+        ":src__Runs_test",
         ":src__Sources_test",
+        ":src__Timeline_test",
         ":src__chart_test",
         ":src__format_test",
         "//newsletter-console/web/src/test:unit_tests",

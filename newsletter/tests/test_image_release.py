@@ -1,6 +1,7 @@
 """Image-publication boundaries using fake Docker and synthetic files."""
 
 import importlib.util as util
+import io
 import json
 import os
 import pathlib
@@ -39,6 +40,114 @@ def probe():
 
 def test_probe_reads_json_each_with_read_only_snapshot(probe, tmp_path):
     probe.check_console_snapshot(tmp_path)
+
+
+def test_probe_check_console_policy_and_check_http(
+    probe, tmp_path, monkeypatch
+):
+    missing_policy = tmp_path / "missing-policy.json"
+    monkeypatch.setattr(probe.console_access, "POLICY_FILE", missing_policy)
+    monkeypatch.setattr(probe.console_access, "load_policy", lambda: None)
+    probe.check_console_policy(None)
+
+    audience = "c" * 64
+    monkeypatch.setattr(
+        probe.console_access,
+        "load_policy",
+        lambda: types.SimpleNamespace(audience=audience),
+    )
+    probe.check_console_policy(audience)
+    with pytest.raises(AssertionError):
+        probe.check_console_policy("d" * 64)
+
+    rendered = {
+        "html": '<p>MOCK</p><p>TODOFY / 与你有关</p><img src="cid:newsletter-chart">',
+        "text": "MOCK",
+        "chart_png": "YWJj",
+    }
+    rendered["render_hash"] = probe.contracts.content_hash(rendered)
+    preview_body = probe.rendering.preview_html(rendered).encode()
+    instruction_dir = pathlib.Path(
+        str(probe.resources.files("newsletter").joinpath("instructions"))
+    )
+    directions = [
+        {"name": item.name, "state": "collected"}
+        for item in probe.instructions.load_instructions(instruction_dir)
+    ]
+
+    class FakeResponse:
+        def __init__(self, body, *, status=200, headers=None):
+            self._stream = io.BytesIO(body)
+            self.status = status
+            self.headers = headers or {
+                "Cache-Control": "no-store",
+                "Content-Security-Policy": "sandbox allow-popups",
+            }
+
+        def read(self, *args):
+            return self._stream.read(*args)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    class FakeOpener:
+        def open(self, request, timeout=3):
+            url = request.full_url
+            if url.endswith("/healthz"):
+                return FakeResponse(json.dumps({"status": "ok"}).encode())
+            if url.endswith("/v1/runs"):
+                return FakeResponse(
+                    json.dumps({"id": "run-1", "state": "queued"}).encode()
+                )
+            if url.endswith("/v1/runs/run-1"):
+                return FakeResponse(
+                    json.dumps(
+                        {
+                            "id": "run-1",
+                            "state": "ready",
+                            "edition_id": "ed-1",
+                            "directions": directions,
+                        }
+                    ).encode()
+                )
+            if url.endswith("/v1/editions/ed-1"):
+                return FakeResponse(
+                    json.dumps(
+                        {
+                            "id": "ed-1",
+                            "state": "ready",
+                            "is_fixture": True,
+                            "delivery_state": "not_requested",
+                            "provider_message_id": "",
+                            "rendered": rendered,
+                        }
+                    ).encode()
+                )
+            if url.endswith("/v1/editions/ed-1/preview"):
+                return FakeResponse(preview_body)
+            raise AssertionError(f"Unexpected URL: {url}")
+
+    class FakeProcess:
+        def poll(self):
+            return None
+
+        def terminate(self):
+            pass
+
+        def wait(self, timeout=None):
+            return 0
+
+    monkeypatch.setattr(probe, "check_console", lambda *args: None)
+    monkeypatch.setattr(
+        probe.urllib_request, "build_opener", lambda *args: FakeOpener()
+    )
+    monkeypatch.setattr(
+        probe.subprocess, "Popen", lambda *args, **kwargs: FakeProcess()
+    )
+    probe.check_http(tmp_path, console_configured=True)
 
 
 @pytest.mark.parametrize("generated_kind", ["missing", "file", "directory"])

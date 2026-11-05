@@ -43,6 +43,7 @@ pytest_test(
     deps = [
         ":model_router_fake",
         ":server",
+        "//todofy/tests/runtime:runtime_harness",
         "@python_deps//httpx",
         "@python_deps//pytest_xdist",
     ],

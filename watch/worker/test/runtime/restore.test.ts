@@ -13,13 +13,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createHttpClient } from '@ziyixi/proto/http-client';
-import { BackupRestore_State, WatchUiService } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb';
+import { BackupRestore_State } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb';
 import { Watch_Fetcher, Watch_NotifyPolicy } from '@ziyixi/proto/watch/ui/v1/watch_pb';
 import type { Manifest } from '../../src/backup.ts';
 import { RESTORE_SEQUENCE_GAP } from '../../src/restore.ts';
 import { page } from '../fake-sites.ts';
-import { DAY, HOUR, MINUTE, op, reasonOf, rejection, startHarness, T0, type Harness } from './harness.ts';
+import { DAY, dump, HOUR, MINUTE, op, privateClient, reasonOf, rejection, startHarness, T0, type Harness } from './harness.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TOOL = join(HERE, '../../../tools/backup-restore.ts');
@@ -47,28 +46,9 @@ afterAll(async () => {
   await rm(work, { recursive: true, force: true });
 });
 
-function privateClient(harness: Harness) {
-  return createHttpClient(WatchUiService, (call) =>
-    harness.serviceFetch(call.url, { method: call.httpMethod, ...(call.body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: call.body }) }),
-  );
-}
-
 const shop = (n: number) => page('Synthetic kettle', `<p>The synthetic kettle costs ${String(100 - n)} coins today.</p><p>Stable footer line.</p>`);
 const alert = (n: number) => page('Synthetic tickets', `<p>Synthetic concert seats left: ${String(40 - n)} in the hall.</p>`);
 const spa = page('Synthetic app', '<p>Rendered by JavaScript: 42 synthetic items in stock.</p>');
-
-/** Every table of the store but the backup's own record, as SQL literals per row (BLOBs and types exactly). */
-async function dump(h: Harness): Promise<Record<string, string[]>> {
-  const out: Record<string, string[]> = {};
-  const names = await h.sql<{ name: string }>(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT GLOB '_cf_*' AND name NOT GLOB '__cf_*' ORDER BY name`);
-  for (const { name } of names) {
-    if (name === 'backup_evidence' || name === 'previews') continue;
-    const columns = (await h.sql<{ name: string }>(`PRAGMA table_info("${name}")`)).map((row) => row.name);
-    const rows = await h.sql(`SELECT ${columns.map((column) => `quote("${column}") AS "${column}"`).join(', ')} FROM "${name}"`);
-    out[name] = rows.map((row) => JSON.stringify(row)).filter((row) => !/"key":"'(backup|restore|schema_version)'"/.test(row)).sort();
-  }
-  return out;
-}
 
 async function backupJobOpen(h: Harness): Promise<boolean> {
   const [row] = await h.sql<{ value: string }>(`SELECT value FROM meta WHERE key = 'backup'`);

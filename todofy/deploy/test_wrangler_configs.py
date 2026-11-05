@@ -159,3 +159,52 @@ def test_api_upstreams_and_access_settings_stay_on_their_worker() -> None:
     assert not any(name.startswith(("GEMINI_", "TODOIST_")) for name in gateway)
     assert not any(name.startswith("ACCESS_") for name in core)
     assert "TODOFY_HOOKS_HOSTS" not in core
+    for shipped in (CORE, GATEWAY):
+        assert not shipped["vars"]["TODOFY_PUBLIC_HOST"].endswith(".localhost")
+
+
+CORE_TEST_CONFIG = ROOT / "wrangler.test.toml"
+GATEWAY_TEST_CONFIGS = ("gateway/wrangler.test.toml", "gateway/wrangler.test-auth.toml")
+CORE_SHAPE = (
+    "main",
+    "base_dir",
+    "compatibility_date",
+    "compatibility_flags",
+    "migrations",
+    "analytics_engine_datasets",
+    "services",
+)
+GATEWAY_SHAPE = (
+    "main",
+    "compatibility_date",
+    "assets",
+    "durable_objects",
+    "migrations",
+    "triggers",
+    "analytics_engine_datasets",
+)
+
+
+def test_core_test_config_matches_the_shipped_core() -> None:
+    config = tomllib.loads(CORE_TEST_CONFIG.read_text())
+    assert config["name"] == CORE["name"] == "todofy-core"
+    for key in CORE_SHAPE:
+        assert config[key] == CORE[key], key
+    # The shipped config names the production database; the test one a placeholder id.
+    [database] = config["d1_databases"]
+    [shipped] = CORE["d1_databases"]
+    for key in ("binding", "migrations_dir"):
+        assert database[key] == shipped[key], key
+    for key in ("assets", "durable_objects", "triggers", "routes"):
+        assert key not in config and key not in CORE, key
+    assert config["vars"]["TODOFY_PUBLIC_HOST"].endswith(".localhost")
+
+
+@pytest.mark.parametrize("name", GATEWAY_TEST_CONFIGS)
+def test_gateway_test_configs_match_the_shipped_gateway(name: str) -> None:
+    config = tomllib.loads((ROOT / name).read_text())
+    for key in GATEWAY_SHAPE:
+        assert config[key] == GATEWAY[key], key
+    assert "d1_databases" not in config and "d1_databases" not in GATEWAY
+    assert config["vars"]["TODOFY_PUBLIC_HOST"].endswith(".localhost")
+

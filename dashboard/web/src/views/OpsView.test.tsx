@@ -1,6 +1,6 @@
 import { screen, within } from '@testing-library/react'
 import type { OpsStatus } from '../../../worker/src/api-types.ts'
-import { degradedApps, guardShed, healthy, status, todofyUnreachable, withLinkOnly, type Scenario } from '../test/fixtures'
+import { GEMINI_ITEM, degradedApps, guardShed, healthy, oneWarning, status, todofyUnreachable, withLinkOnly, type Scenario } from '../test/fixtures'
 import { freezeClock, renderApp, serve } from '../test/harness'
 
 async function showOps(scenario: Scenario) {
@@ -155,4 +155,27 @@ describe('操作与记录', () => {
     expect(within(mail).getByText('推迟的任务：原件对账、保留期清理、金丝雀清理')).toBeInTheDocument()
     expect(within(within(region('应用详情')).getByRole('region', { name: 'Todofy' })).getByText(/上次下发降载设置失败：超时/)).toBeInTheDocument()
   })
+
+  it('shows digest items, disabled task inbox notice, and last creation error in the digest section', async () => {
+    const scenario = oneWarning()
+    scenario.ops = {
+      ...scenario.ops,
+      digest: {
+        ...scenario.ops.digest,
+        enabled: false,
+        last_error: 'timeout',
+        items: [GEMINI_ITEM],
+      },
+    }
+    await showOps(scenario)
+    const digest = region('运维摘要')
+    expect(within(digest).getByText('1 项')).toBeInTheDocument()
+    expect(within(digest).getByText('没有绑定 Tasks 的建任务入口（TASK_INBOX），不会创建摘要任务。')).toBeInTheDocument()
+    expect(within(digest).getByText(/上次创建失败：超时。下次定时检查会用同一请求重试/)).toBeInTheDocument()
+    const items = within(digest).getByRole('list', { name: '摘要项目' })
+    expect(within(items).getByText('Todofy：模型预算超过 80%')).toBeInTheDocument()
+    expect(within(items).getByText('gemini_budget_80')).toBeInTheDocument()
+    expect(within(items).getByText('percent')).toBeInTheDocument()
+  })
 })
+

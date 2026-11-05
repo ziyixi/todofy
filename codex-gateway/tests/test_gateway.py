@@ -1,11 +1,16 @@
 """Synthetic slim HTTP transport and pinned runtime configuration checks."""
 
 import asyncio
+import contextlib
 import json
 import os
 import pathlib
+import signal
+import sqlite3
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 import uuid
 from unittest.mock import patch
@@ -18,6 +23,8 @@ from ziyixi_proto.modelrouter.inference.v1.inference_pb import Generation
 from ziyixi_proto.rpc_status import RpcError
 from ziyixi_proto.wire_json import from_wire
 
+from codex_gateway import __main__ as server
+from codex_gateway import _launch
 from codex_gateway._launch import runtime_environment
 from codex_gateway.app import MAX_BODY_BYTES, create_app
 from codex_gateway.model_api import result_events
@@ -294,3 +301,184 @@ class EnvironmentTests(unittest.TestCase):
             FakeSdk(), pathlib.Path("/login"), pathlib.Path("/tmp/workspace")
         )
         self.assertEqual(config.env, {"CODEX_HOME": "/login"})
+
+
+class PrivateCliHome(unittest.TestCase):
+    def test_cli_state_is_private_and_auth_writes_reach_the_original_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            shared = pathlib.Path(directory) / "login"
+            shared.mkdir()
+            auth = shared / "auth.json"
+            auth.write_text("synthetic login")
+            auth.chmod(0o600)
+            inode = auth.stat().st_ino
+            cache = shared / "models_cache.json"
+            cache.write_text("newsletter cache")
+            skill = shared / "skills" / ".system" / "newsletter-skill" / "SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text("newsletter skill")
+            homes = []
+            app = object()
+
+            def run(actual_app, **options):
+                self.assertIs(actual_app, app)
+                self.assertFalse(options["access_log"])
+                home = pathlib.Path(os.environ["CODEX_HOME"])
+                homes.append(home)
+                self.assertNotEqual(home, shared)
+                self.assertTrue((home / "auth.json").is_symlink())
+                self.assertTrue(os.path.samefile(home / "auth.json", auth))
+                (home / "models_cache.json").write_text("gateway cache")
+                private_skill = (
+                    home / "skills" / ".system" / "gateway-skill" / "SKILL.md"
+                )
+                private_skill.parent.mkdir(parents=True)
+                private_skill.write_text("gateway skill")
+                with (
+                    contextlib.closing(
+                        sqlite3.connect(home / "state.sqlite")
+                    ) as database,
+                    database,
+                ):
+                    database.execute("CREATE TABLE synthetic (id INTEGER)")
+                # The pinned file store opens with truncate/write, preserving the inode.
+                with (home / "auth.json").open("w") as target:
+                    target.write("synthetic refreshed login")
+                self.assertEqual(auth.stat().st_ino, inode)
+                self.assertFalse((shared / "state.sqlite").exists())
+
+            with (
+                patch.dict(os.environ, {"CODEX_HOME": str(shared)}),
+                patch.object(server, "create_app", return_value=app) as create_app,
+                patch.object(server.uvicorn, "run", side_effect=run),
+            ):
+                server.main()
+                create_app.assert_called_once_with()
+                self.assertEqual(os.environ["CODEX_HOME"], str(shared))
+            self.assertEqual(len(homes), 1)
+            self.assertFalse(homes[0].exists())
+            self.assertEqual(auth.read_text(), "synthetic refreshed login")
+            self.assertEqual(cache.read_text(), "newsletter cache")
+            self.assertEqual(skill.read_text(), "newsletter skill")
+            self.assertEqual(set(shared.iterdir()), {auth, cache, shared / "skills"})
+
+    def test_server_failure_cleans_private_home_and_retains_shared_login(self):
+        with tempfile.TemporaryDirectory() as directory:
+            shared = pathlib.Path(directory)
+            auth = shared / "auth.json"
+            auth.write_text("synthetic login")
+            homes = []
+
+            def run(*args, **options):
+                homes.append(pathlib.Path(os.environ["CODEX_HOME"]))
+                raise RuntimeError("synthetic server failure")
+
+            with (
+                patch.dict(os.environ, {"CODEX_HOME": str(shared)}, clear=True),
+                patch.object(
+                    server, "create_app", return_value=object()
+                ) as create_app,
+                patch.object(server.uvicorn, "run", side_effect=run),
+                self.assertRaisesRegex(RuntimeError, "synthetic server failure"),
+            ):
+                server.main()
+            create_app.assert_called_once_with()
+            self.assertEqual(len(homes), 1)
+            self.assertFalse(homes[0].exists())
+            self.assertEqual(auth.read_text(), "synthetic login")
+            self.assertEqual(set(shared.iterdir()), {auth})
+
+
+def running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    status = pathlib.Path(f"/proc/{pid}/stat")
+    if sys.platform == "linux":
+        try:
+            stat = status.read_text()
+        except (FileNotFoundError, ProcessLookupError):
+            # Reaped before the open (ENOENT) or between the open and the read (ESRCH).
+            return False
+        return stat.split(")", 1)[1].strip().split()[0] != "Z"
+    return True
+
+
+class ProcessCleanupTests(unittest.TestCase):
+    def test_a_process_that_exits_during_the_status_read_is_not_running(self):
+        for error in (FileNotFoundError, ProcessLookupError):
+            with (
+                self.subTest(error=error.__name__),
+                patch.object(sys, "platform", "linux"),
+                patch.object(os, "kill"),
+                patch.object(pathlib.Path, "read_text", side_effect=error),
+            ):
+                self.assertFalse(running(12345))
+
+    def run_supervisor(self, directory: pathlib.Path, *, nested_parent: bool):
+        receipt = directory / "pids"
+        # Written whole, then renamed: the receipt never exists without both PIDs.
+        staged = directory / "pids.tmp"
+        child = (
+            "import os,pathlib,subprocess,sys,time; "
+            "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)']); "
+            f"staged=pathlib.Path({str(staged)!r}); "
+            "staged.write_text(str(os.getpid())+' '+str(child.pid)); "
+            f"os.replace(staged,{str(receipt)!r}); "
+            "time.sleep(60)"
+        )
+        launch = (
+            "import importlib.util,sys,types; "
+            f"spec=importlib.util.spec_from_file_location('launch',{_launch.__file__!r}); "
+            "module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module); "
+            "sys.modules['codex_cli_bin']=types.SimpleNamespace("
+            "bundled_codex_path=lambda:sys.executable,bundled_path_dir=lambda:None); "
+            f"sys.argv=['synthetic-launch','-c',{child!r}]; module.main()"
+        )
+        if nested_parent:
+            launch = (
+                "import subprocess,sys,time; "
+                f"subprocess.Popen([sys.executable,'-c',{launch!r}]); time.sleep(60)"
+            )
+        parent = subprocess.Popen(
+            [sys.executable, "-c", launch],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            deadline = time.monotonic() + 5
+            while not receipt.exists() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertTrue(
+                receipt.exists(), "Synthetic supervised process did not start"
+            )
+            pids = [int(value) for value in receipt.read_text().split()]
+            self.assertEqual(len(pids), 2)
+            self.assertTrue(all(running(pid) for pid in pids))
+            parent.send_signal(signal.SIGKILL if nested_parent else signal.SIGTERM)
+            parent.wait(timeout=5)
+            deadline = time.monotonic() + 5
+            while any(running(pid) for pid in pids) and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertFalse(any(running(pid) for pid in pids))
+        finally:
+            if parent.poll() is None:
+                parent.kill()
+                parent.wait(timeout=5)
+            if receipt.exists():
+                for pid in [int(value) for value in receipt.read_text().split()]:
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+
+    def test_sdk_process_termination_kills_descendants(self):
+        with tempfile.TemporaryDirectory(prefix="model-supervisor-test-") as directory:
+            self.run_supervisor(pathlib.Path(directory), nested_parent=False)
+
+    @unittest.skipUnless(sys.platform == "linux", "Linux parent-death signal")
+    def test_abrupt_server_parent_death_kills_model_descendants(self):
+        with tempfile.TemporaryDirectory(prefix="model-supervisor-test-") as directory:
+            self.run_supervisor(pathlib.Path(directory), nested_parent=True)

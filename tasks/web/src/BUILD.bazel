@@ -1453,6 +1453,23 @@ proto_vitest_test(
 )
 
 proto_vitest_test(
+    name = "src__gtd__model_test",
+    config = "//tasks/web:test_config",
+    data = COMMON_TEST_DATA_3,
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":gtd/model.test.ts"],
+    deps = [
+        ":src__gtd__model",
+        "//packages/planning-ui:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
     name = "src__launch_test",
     config = "//tasks/web:test_config",
     data = COMMON_TEST_DATA_2,
@@ -1463,6 +1480,30 @@ proto_vitest_test(
     deps = [
         ":src__launch",
         "//tasks/web:node_modules/@testing-library/react",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__mail-api_test",
+    config = "//tasks/web:test_config",
+    data = COMMON_TEST_DATA_3,
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":mail-api.test.ts"],
+    deps = [
+        ":src__api",
+        ":src__mail-api",
+        ":src__outdated",
+        "//packages/planning-ui:lib",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/todofy/mail/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+        "//tasks/shared:build",
         "//tasks/web:node_modules/react",
         "//tasks/web:node_modules/vitest",
     ],
@@ -1512,6 +1553,28 @@ proto_vitest_test(
         ":src__api",
         ":src__outdated",
         ":src__task-date-actions",
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+        "//tasks/shared:build",
+        "//tasks/web:node_modules/react",
+        "//tasks/web:node_modules/vitest",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__task-planning_test",
+    config = "//tasks/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "tasks/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":task-planning.test.ts"],
+    deps = [
+        ":src__api",
+        ":src__outdated",
+        ":src__task-planning",
         "//proto/tasks/ui/v1:ts",
         "//proto/ts:http-client",
         "//proto/ts:protobuf",

@@ -6,21 +6,13 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, beforeAll, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { TaskDependencies } from "../src/TaskDependencies";
 import { createPrototype } from "./fixture";
 import type { PlusActions } from "../src/model";
 
 // The fixture's tasks are synthetic; today is Tuesday 2026-10-13.
-beforeAll(() => {
-  HTMLDialogElement.prototype.showModal = function () {
-    this.setAttribute("open", "");
-  };
-  HTMLDialogElement.prototype.close = function () {
-    this.removeAttribute("open");
-  };
-});
 afterEach(() => {
   cleanup();
 });

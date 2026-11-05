@@ -1,13 +1,7 @@
 import { cleanup, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { FILTERS } from './Issues.tsx';
 import { fixture, serve, show, world } from './test/world.tsx';
-
-afterEach(() => {
-  cleanup();
-  vi.unstubAllGlobals();
-  window.location.hash = '';
-});
 
 const cards = async () => within(await screen.findByRole('list', { name: '2026年10月的期刊' })).getAllByRole('link');
 

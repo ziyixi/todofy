@@ -38,35 +38,10 @@ DESTINATION = {
 
 @pytest.fixture
 def rig(tmp_path):
-    store = newsletter_store.Store(tmp_path / "newsletter.sqlite3", "live")
-    journal = notion_journal.NotionJournal(store, DESTINATION)
-    journal.execute(
-        "INSERT INTO metadata VALUES('notion_v2_bootstrap_at',?)", (BOOTSTRAP,)
-    )
-    store.db.executescript("""
-        CREATE TABLE workflow_runs(
-            id TEXT PRIMARY KEY, definition TEXT NOT NULL);
-        CREATE TABLE workflow_artifacts(
-            id TEXT PRIMARY KEY, run_id TEXT NOT NULL, node_id TEXT NOT NULL,
-            item_id TEXT NOT NULL, body TEXT NOT NULL,
-            content_hash TEXT NOT NULL,
-            created_at TEXT NOT NULL);
-        CREATE TABLE publication_units(
-            run_id TEXT NOT NULL, story_id TEXT NOT NULL, mode TEXT NOT NULL,
-            issue_date TEXT NOT NULL, task TEXT NOT NULL, body TEXT NOT NULL,
-            digest TEXT NOT NULL, created_at TEXT NOT NULL,
-            PRIMARY KEY(run_id, story_id, mode, digest));
-        CREATE TABLE collection_runs(
-            id TEXT PRIMARY KEY, request_key TEXT NOT NULL);
-        CREATE TABLE candidate_history(id TEXT PRIMARY KEY, body TEXT NOT NULL);
-    """)
-    value = types.SimpleNamespace(
-        store=store,
-        journal=journal,
-        intake=notion_intake.NotionIntake(journal, include_personal=False),
-    )
-    yield value
-    store.close()
+    with notion_content.make_intake_rig(
+        tmp_path / "newsletter.sqlite3", DESTINATION, BOOTSTRAP
+    ) as value:
+        yield value
 
 
 def add_run(rig, run_id="run-one", *, request_key=None):

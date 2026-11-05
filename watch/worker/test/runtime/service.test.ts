@@ -1,20 +1,13 @@
 /** Private Watch API and cursor feed over real service bindings, SQLite and synthetic pages. */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { createHttpClient } from '@ziyixi/proto/http-client';
-import { WatchEvent_Kind, WatchUiService } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb';
+import { WatchEvent_Kind } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb';
 import { Watch_NotifyPolicy } from '@ziyixi/proto/watch/ui/v1/watch_pb';
 import { page } from '../fake-sites.ts';
-import { DAY, HOUR, MINUTE, op, reasonOf, rejection, resetWatches, startHarness, T0, type Harness } from './harness.ts';
+import { DAY, HOUR, MINUTE, op, privateClient, reasonOf, rejection, resetWatches, startHarness, T0, type Harness } from './harness.ts';
 
 let h: Harness;
 let clock = T0;
 let client: ReturnType<typeof privateClient>;
-
-function privateClient(harness: Harness) {
-  return createHttpClient(WatchUiService, call => harness.serviceFetch(call.url, {
-    method: call.httpMethod, ...(call.body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: call.body }),
-  }));
-}
 
 beforeAll(async () => { h = await startHarness({ tasks: true, evidence: true }); client = privateClient(h); });
 afterEach(async () => { await resetWatches(h); await h.sql('DELETE FROM intents'); await h.tasks({}); await h.tasksState(); });

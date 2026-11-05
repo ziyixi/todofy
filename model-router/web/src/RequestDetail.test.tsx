@@ -97,3 +97,37 @@ test('a detail fetch failure can be retried without losing the selected request 
   await user.click(screen.getByRole('button', { name: '重新读取' }))
   expect(await screen.findByText('Synthetic input')).toBeInTheDocument()
 })
+
+test('renders estimated_quota_units and handles CodeBlock clipboard copy success and failure', async () => {
+  const user = userEvent.setup()
+  const api = mockApi({
+    getRequest: vi.fn().mockResolvedValue({
+      ...record,
+      generation: {
+        ...generation,
+        usage: {
+          available: false,
+          billing_kind: 'platform_quota',
+          estimated_quota_units: 1.075,
+        },
+      },
+    }),
+  })
+  renderApp(<RequestDetail name={generation.name!} api={api} onClose={vi.fn()} onCopy={vi.fn()} />)
+  expect(await screen.findByText('平台配额估算')).toBeInTheDocument()
+  expect(screen.getByText('平台配额估算').nextElementSibling).toHaveTextContent('1.075')
+
+  const writeText = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('clipboard blocked'))
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText },
+  })
+
+  const copyInputButton = screen.getByRole('button', { name: '复制输入' })
+  await user.click(copyInputButton)
+  expect(writeText).toHaveBeenCalledWith('Synthetic input')
+  expect(screen.queryByText('无法复制，请选择文本后复制。')).not.toBeInTheDocument()
+
+  await user.click(copyInputButton)
+  expect(await screen.findByText('无法复制，请选择文本后复制。')).toBeInTheDocument()
+})

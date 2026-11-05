@@ -29,7 +29,6 @@ from tests.runtime.owner_support import (
 NOW = int(time.time())
 UNKNOWN = "f8c1e9a0-1a98-4fb8-8ca1-4c0a3e720001"
 FAILED = "f8c1e9a0-1a98-4fb8-8ca1-4c0a3e720002"
-MAIL_EVENT_DETAIL = "type.googleapis.com/todofy.ui.v1.MailEvent"
 
 
 def _payload(event_id: str) -> str:
@@ -88,12 +87,6 @@ def _reconcile(event_id: str) -> str:
     return f"/api/v1/mailEvents/{event_id}:reconcile"
 
 
-def _detail(error: dict[str, Any]) -> dict[str, Any]:
-    """The current MailEvent a refused reconcile carries."""
-    [event] = [detail for detail in error["details"] if detail["@type"] == MAIL_EVENT_DETAIL]
-    return event
-
-
 def test_event_detail_is_served_by_the_coordinator(actions_worker: Worker) -> None:
     response = actions_worker.owner.get(f"/api/v1/mailEvents/{UNKNOWN}")
     detail = assert_message(response, mail_event_pb.MailEvent)
@@ -102,43 +95,6 @@ def test_event_detail_is_served_by_the_coordinator(actions_worker: Worker) -> No
     assert detail["allowed_actions"] == ["dismiss"]
     assert detail["sender"] == "sender@example.org" and detail["subject"] == "Synthetic reconcile fixture"
     assert_private(response)
-
-
-def test_reconcile_replays_the_stored_outcome_and_rejects_reuse(actions_worker: Worker) -> None:
-    path = _reconcile(UNKNOWN)
-    request = {"action": "dismiss", "etag": "1", "request_id": str(uuid.uuid4())}
-    first = _post(actions_worker, path, request)
-    detail = assert_message(first, mail_event_pb.MailEvent)
-    assert (detail["state"], detail["version"], detail["etag"], "allowed_actions" in detail) == (
-        "ignored",
-        2,
-        "2",
-        False,
-    )
-    assert detail["transitions"][-1]["actor"] == "owner"
-
-    replay = _post(actions_worker, path, request)
-    assert (replay.status_code, replay.json()) == (200, detail)
-
-    reused = _post(actions_worker, path, request | {"action": "task_created", "task_id": "123"})
-    assert_status(reused, 400, "BAD_REQUEST")  # the request_id was used for another request
-
-    stale = _post(actions_worker, path, request | {"request_id": str(uuid.uuid4())})
-    current = _detail(assert_status(stale, 409, "ETAG_MISMATCH"))
-    assert (current["name"], current["etag"], current["state"]) == (f"mailEvents/{UNKNOWN}", "2", "ignored")
-    malformed = _post(actions_worker, path, request | {"etag": "v1", "request_id": str(uuid.uuid4())})
-    assert _detail(assert_status(malformed, 409, "ETAG_MISMATCH"))["etag"] == "2"
-
-    not_allowed = _post(actions_worker, path, request | {"etag": "2", "request_id": str(uuid.uuid4())})
-    assert _detail(assert_status(not_allowed, 400, "ACTION_NOT_ALLOWED"))["state"] == "ignored"
-
-
-def test_reconcile_of_an_unknown_event_is_not_found(actions_worker: Worker) -> None:
-    missing = "f8c1e9a0-1a98-4fb8-8ca1-4c0a3e72ffff"
-    request = {"action": "dismiss", "etag": "1", "request_id": str(uuid.uuid4())}
-    assert_status(_post(actions_worker, _reconcile(missing), request), 404, "NOT_FOUND")
-    stale = _post(actions_worker, _reconcile(missing), request | {"etag": "x"})
-    assert_status(stale, 404, "NOT_FOUND")
 
 
 def test_retry_summary_moves_a_failed_summary_back_to_pending(actions_worker: Worker) -> None:

@@ -158,6 +158,8 @@ def test_without_a_recorded_audience_nothing_is_baked(tmp_path):
 def test_a_recorded_audience_a_verifier_refuses_fails_the_build(tmp_path):
     config = _config(tmp_path, {"newsletter-console": "not-an-aud"})
     with pytest.raises(ValueError, match="Invalid Access audience"):
+        console_access.bake_policy(config)
+    with pytest.raises(ValueError, match="Invalid Access audience"):
         console_access.write_policy(config, tmp_path / "out.json")
 
 
@@ -169,7 +171,15 @@ def test_an_invalid_policy_file_is_no_policy(tmp_path, content):
     path = tmp_path / "console-access.json"
     path.write_bytes(content)
     assert console_access.load_policy(path) is None
-    path.write_bytes(b" " * 2000)
+    oversized = json.dumps(
+        {
+            "access_issuer": auth.ISSUER,
+            "access_audience": auth.AUDIENCE,
+            "padding": "x" * 1024,
+        }
+    ).encode()
+    assert len(oversized) > 1024
+    path.write_bytes(oversized)
     assert console_access.load_policy(path) is None
 
 

@@ -146,4 +146,41 @@ describe('signed claims', () => {
     expect(await verifySignedClaims(key, 'no-dot')).toBeNull();
     expect(await verifySignedClaims(key, 7 as never)).toBeNull();
   });
+
+  it('rejects tampered signatures, tampered payloads, non-signing keys, and non-object JSON payloads', async () => {
+    const key = await importHmacKeyHex('ab'.repeat(32));
+    const otherKey = await importHmacKeyHex('cd'.repeat(32));
+    if (key === null || otherKey === null) throw new Error('key');
+    const token = await signClaims(key, { kind: 'csrf', exp: 123 });
+    const [payload = '', signature = ''] = token.split('.');
+    const flippedSig = `${signature.slice(0, -1)}${signature.endsWith('A') ? 'B' : 'A'}`;
+    expect(await verifySignedClaims(key, `${payload}.${flippedSig}`)).toBeNull();
+    expect(await verifySignedClaims(key, `${payload}.`)).toBeNull();
+    expect(await verifySignedClaims(key, `.${signature}`)).toBeNull();
+    expect(await verifySignedClaims(key, `${token}=`)).toBeNull();
+    expect(await verifySignedClaims(otherKey, token)).toBeNull();
+    expect(await verifySignedClaims(key, `${base64UrlEncode(text('{"kind":"other"}'))}.${signature}`)).toBeNull();
+
+    const verifyOnlyKey = await crypto.subtle.importKey(
+      'raw',
+      new Uint8Array(32),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['verify'],
+    );
+    expect(await verifySignedClaims(verifyOnlyKey, token)).toBeNull();
+
+    for (const rawPayload of [
+      text('null'),
+      text('[1,2]'),
+      text('"str"'),
+      text('42'),
+      text('{not-json'),
+      new Uint8Array([0x7b, 0xff, 0x7d]),
+    ]) {
+      const encodedPayload = base64UrlEncode(rawPayload);
+      const mac = base64UrlEncode(new Uint8Array(await crypto.subtle.sign('HMAC', key, text(encodedPayload))));
+      expect(await verifySignedClaims(key, `${encodedPayload}.${mac}`)).toBeNull();
+    }
+  });
 });

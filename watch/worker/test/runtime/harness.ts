@@ -384,3 +384,27 @@ export async function watchRow(h: Harness, id: string): Promise<Record<string, u
   if (row === undefined) throw new Error(`no watch ${id}`);
   return row;
 }
+
+/** WatchUiService client over the private WatchApi service binding. */
+export function privateClient(harness: Harness): HttpClient<ShapeOf<typeof WatchUiService>> {
+  return createHttpClient(WatchUiService, (call) =>
+    harness.serviceFetch(call.url, {
+      method: call.httpMethod,
+      ...(call.body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: call.body }),
+    }),
+  );
+}
+
+/** Every table of the store but the backup's own record, as SQL literals per row (BLOBs and types exactly). */
+export async function dump(h: Pick<Harness, 'sql'>): Promise<Record<string, string[]>> {
+  const out: Record<string, string[]> = {};
+  const names = await h.sql<{ name: string }>(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT GLOB '_cf_*' AND name NOT GLOB '__cf_*' ORDER BY name`);
+  for (const { name } of names) {
+    if (name === 'backup_evidence' || name === 'previews') continue;
+    const columns = (await h.sql<{ name: string }>(`PRAGMA table_info("${name}")`)).map((row) => row.name);
+    const rows = await h.sql(`SELECT ${columns.map((column) => `quote("${column}") AS "${column}"`).join(', ')} FROM "${name}"`);
+    out[name] = rows.map((row) => JSON.stringify(row)).filter((row) => !/"key":"'(backup|restore|schema_version)'"/.test(row)).sort();
+  }
+  return out;
+}
+

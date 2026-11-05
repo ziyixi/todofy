@@ -1,6 +1,9 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { createMemoryRouter, RouterProvider } from 'react-router'
+import { describe, expect, it, vi } from 'vitest'
+import { CopyButton, Meter } from '../components/ui'
+import { RouteError } from './RouteError'
 import { overview, recommendationReport, setup, summaryReport } from '../test/fixtures'
 import { apiError, mockApi, renderApp } from '../test/harness'
 
@@ -162,3 +165,59 @@ describe('more page', () => {
     expect(within(main).getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(['/budget', '/health', '/setup'])
   })
 })
+
+describe('not found, route error and shared UI primitives', () => {
+  it('renders NotFoundPage for unknown paths with a link back to attention', async () => {
+    mockApi({})
+    renderApp('/unknown/route')
+    expect(await screen.findByText('没有这个页面')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '回到需要关注' })).toHaveAttribute('href', '/attention')
+  })
+
+  it('renders RouteError when a route component throws', () => {
+    function Broken(): never {
+      throw new Error('渲染崩溃')
+    }
+    const router = createMemoryRouter(
+      [{ path: '/', element: <Broken />, errorElement: <RouteError /> }],
+      { initialEntries: ['/'] },
+    )
+    render(<RouterProvider router={router} />)
+    expect(screen.getByRole('heading', { name: '页面出错了' })).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('渲染崩溃')
+    expect(screen.getByRole('button', { name: '重新加载' })).toBeInTheDocument()
+  })
+
+  it('applies ok, warn and danger tones on Meter thresholds', () => {
+    render(
+      <>
+        <Meter label="正常用量" value={50} max={100} detail="50%" />
+        <Meter label="预警用量" value={80} max={100} detail="80%" />
+        <Meter label="超额用量" value={120} max={100} detail="120%" />
+        <Meter label="零上限" value={10} max={0} detail="0%" />
+      </>,
+    )
+    expect(screen.getByRole('meter', { name: '正常用量' })).toHaveClass('tone-ok')
+    expect(screen.getByRole('meter', { name: '预警用量' })).toHaveClass('tone-warn')
+    const danger = screen.getByRole('meter', { name: '超额用量' })
+    expect(danger).toHaveClass('tone-danger')
+    expect(danger).toHaveAttribute('aria-valuenow', '100')
+    expect(screen.getByRole('meter', { name: '零上限' })).toHaveClass('tone-ok')
+  })
+
+  it('updates CopyButton label on clipboard success and handles clipboard failure', async () => {
+    const user = userEvent.setup()
+    const writeText = vi.fn().mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('denied'))
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+
+    render(<CopyButton value="evt-id-1" label="事件 ID" />)
+    const button = screen.getByRole('button', { name: '复制事件 ID' })
+    await user.click(button)
+    expect(writeText).toHaveBeenCalledWith('evt-id-1')
+    expect(screen.getByRole('button', { name: '已复制事件 ID' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '已复制事件 ID' }))
+    expect(screen.getByRole('button', { name: '复制事件 ID' })).toBeInTheDocument()
+  })
+})
+

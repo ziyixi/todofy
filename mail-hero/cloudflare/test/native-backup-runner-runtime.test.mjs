@@ -2,18 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
-import { build } from 'esbuild';
-import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
-import { migrationStatements } from './migrations.mjs';
+import { ROOT, buildWorker, createMiniflare, migrateD1 } from './runtime-harness.mjs';
 import { canonicalJSON } from '../src/native/backup.ts';
 import { nextNativeBackupAt } from '../src/native/native-backup-runner.ts';
 import { injectedVars } from '../../deploy/deploy-vars.mjs';
 
-const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
+const root = ROOT;
 const python = process.env.MAILHERO_TEST_PYTHON ? resolve(root, '../..', process.env.MAILHERO_TEST_PYTHON) : 'python3';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 test('daily UTC schedule rolls forward without a timer or local-time dependence', () => {
@@ -29,7 +26,9 @@ test('daily UTC schedule rolls forward without a timer or local-time dependence'
 // `platformAlarms` arms real Alarms instead, for the test of the platform Alarm alone, which then cannot tick by hand.
 async function harness(extra = {}, { platformAlarms = false } = {}) {
   const temporary = await mkdtemp(join(tmpdir(), 'mailhero-native-runner-'));
-  const bundled = await build({ stdin: { contents: `
+  const script = await buildWorker({
+    sourcefile: 'native-runner-test.ts',
+    contents: `
     import { MailCoordinator } from './src/native/coordinator';
     const PLATFORM_ALARMS=${platformAlarms ? 'true' : 'false'};
     export class TestCoordinator extends MailCoordinator {
@@ -141,9 +140,9 @@ async function harness(extra = {}, { platformAlarms = false } = {}) {
       }
     }
     export default {fetch(request,env) {return env.COORDINATOR.get(env.COORDINATOR.idFromName('inbox-v1')).fetch(request)}};
-  `, resolveDir: root, sourcefile: 'native-runner-test.ts', loader: 'ts' }, bundle: true, format: 'esm', platform: 'neutral', conditions: ['browser'], external: ['cloudflare:workers'], write: false });
-  const options = { name: 'native-backup-runner-test', modules: true, script: bundled.outputFiles[0].text,
-    compatibilityDate: '2026-09-07', host: '127.0.0.1', port: 0,
+  `,
+  });
+  const options = { name: 'native-backup-runner-test', script,
     resourcePersistencePath: join(temporary, 'resources'),
     d1Databases: { DB: 'native-backup-runner-db' }, d1Persist: join(temporary, 'd1'),
     r2Buckets: ['MAIL_STORE', 'BACKUP_STORE'], r2Persist: join(temporary, 'r2'),
@@ -153,12 +152,9 @@ async function harness(extra = {}, { platformAlarms = false } = {}) {
       NATIVE_BACKUP_ENABLED: 'true', NATIVE_BACKUP_AT_UTC: '04:17', ...extra },
     outboundService() { throw new Error('native backup must not contact any external service'); } };
   let mf;
-  async function start() { mf = new Miniflare(convertV4MiniflareOptions(options)); await mf.ready; }
+  async function start() { mf = createMiniflare(options); await mf.ready; }
   await start();
-  let db = await mf.getD1Database('DB');
-  for (const name of (await readdir(join(root, 'migrations'))).filter(name => name.endsWith('.sql')).sort()) {
-    await db.batch(migrationStatements(await readFile(join(root, 'migrations', name), 'utf8')).map(sql => db.prepare(sql)));
-  }
+  let db = await migrateD1(await mf.getD1Database('DB'));
   async function call(path, body) {
     const response = await mf.dispatchFetch(`http://localhost${path}`, { method: body === undefined ? 'GET' : 'POST',
       body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body) });

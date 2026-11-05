@@ -1,16 +1,21 @@
 """Synthetic recovery orchestration and metadata boundaries; no host or cluster writes."""
 
+import contextlib
 import copy
+import io
 import json
 import sqlite3
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from subprocess import CompletedProcess
 from unittest.mock import patch
 
 ROOT = Path(__file__).absolute().parents[3]
 sys.path.insert(0, str(ROOT / "tools/vps-bootstrap"))
+import install
+import reader
 import repair
 import repair_checks
 import repair_kube
@@ -414,6 +419,282 @@ class RuntimePreconditionTests(unittest.TestCase):
         values["cronjob"]["spec"]["suspend"] = False
         with self.assertRaisesRegex(BootstrapError, "REPAIR_DAILY_NOT_SUSPENDED"):
             self.runtime.daily_jobs()
+
+
+    def test_runtime_and_inputs_validate_bundle_resources_images_and_host_files(self):
+        newsletter_img = "ghcr.io/ziyixi/todofy-newsletter@sha256:" + "1" * 64
+        platform_img = "ghcr.io/ziyixi/todofy-platform@sha256:" + "2" * 64
+        images = {"newsletter": newsletter_img, "platform": platform_img}
+
+        def make_runtime_doc(source_sha: str):
+            items = []
+            for kind, name in sorted(repair_checks.RESOURCE_NAMES):
+                svc = "platform" if name.startswith("platform-") else "newsletter"
+                item = {
+                    "kind": kind,
+                    "metadata": {"name": name, "namespace": "personal-cloud"},
+                }
+                if kind == "Deployment":
+                    item["spec"] = {
+                        "replicas": 1,
+                        "template": {
+                            "spec": {
+                                "initContainers": [{"image": images[svc]}],
+                                "containers": [{"image": images[svc]}],
+                            }
+                        },
+                    }
+                elif kind == "CronJob":
+                    item["spec"] = {
+                        "suspend": name == "newsletter-daily",
+                        "jobTemplate": {
+                            "spec": {
+                                "template": {
+                                    "spec": {"containers": [{"image": images[svc]}]}
+                                }
+                            }
+                        },
+                    }
+                elif kind == "ConfigMap" and name != "platform-runtime-config":
+                    item["data"] = {
+                        "image": images[svc],
+                        "source_sha": source_sha,
+                        "request_id": repair_checks.identity(source_sha),
+                        "phase": "applying",
+                    }
+                items.append(item)
+            return {"kind": "List", "items": items}
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            old_dir, new_dir = root / "old", root / "new"
+            for d, sha in ((old_dir, repair_checks.PREVIOUS_SHA), (new_dir, SHA)):
+                (d / "units").mkdir(parents=True)
+                (d / "runtime.json").write_text(json.dumps(make_runtime_doc(sha)))
+                (d / "foundation.json").write_text(json.dumps({"items": []}))
+                for name in (
+                    "versions.json",
+                    "units/k3s.service",
+                    "units/k3s-config.yaml",
+                    "units/cloudflared-platform.service",
+                    "units/firewall.v4",
+                    "units/firewall.v6",
+                ):
+                    (d / name).write_text("fixed-host-content\n")
+
+            old_public = {
+                "source_sha": repair_checks.PREVIOUS_SHA,
+                "profile": PROFILE,
+                "images": images,
+            }
+            new_public = {
+                "source_sha": SHA,
+                "profile": PROFILE,
+                "images": images,
+            }
+            self.assertEqual(
+                repair_checks.runtime(new_dir, new_public)["kind"], "List"
+            )
+
+            bad_images = {**new_public, "images": {**images, "newsletter": "bad"}}
+            with self.assertRaisesRegex(BootstrapError, "REPAIR_IMAGES_INVALID"):
+                repair_checks.runtime(new_dir, bad_images)
+
+            unsuspended = make_runtime_doc(SHA)
+            for item in unsuspended["items"]:
+                if item["kind"] == "CronJob" and item["metadata"]["name"] == "newsletter-daily":
+                    item["spec"]["suspend"] = False
+            (new_dir / "runtime.json").write_text(json.dumps(unsuspended))
+            with self.assertRaisesRegex(BootstrapError, "REPAIR_RUNTIME_NOT_HELD"):
+                repair_checks.runtime(new_dir, new_public)
+
+            bad_cm = make_runtime_doc(SHA)
+            for item in bad_cm["items"]:
+                if item["kind"] == "ConfigMap" and item["metadata"]["name"] == "newsletter-release":
+                    item["data"]["phase"] = "ready"
+            (new_dir / "runtime.json").write_text(json.dumps(bad_cm))
+            with self.assertRaisesRegex(BootstrapError, "REPAIR_RELEASE_INVALID"):
+                repair_checks.runtime(new_dir, new_public)
+
+            (new_dir / "runtime.json").write_text(json.dumps(make_runtime_doc(SHA)))
+            with (
+                patch.object(
+                    repair_checks,
+                    "checksum",
+                    return_value=repair_checks.PREVIOUS_MANIFEST,
+                ),
+                patch.object(
+                    repair_checks,
+                    "load_bundle",
+                    side_effect=lambda d: old_public if Path(d) == old_dir else new_public,
+                ),
+                patch.object(repair_checks.host, "bootstrap_completed", return_value=True),
+            ):
+                prev, pub, old_rt, new_rt = repair_checks.inputs(old_dir, new_dir)
+                self.assertEqual(prev["source_sha"], repair_checks.PREVIOUS_SHA)
+                self.assertEqual(pub["source_sha"], SHA)
+                self.assertEqual(old_rt["kind"], "List")
+                self.assertEqual(new_rt["kind"], "List")
+
+                (new_dir / "units/k3s.service").write_text("changed\n")
+                with self.assertRaisesRegex(
+                    BootstrapError, "REPAIR_HOST_CONFIGURATION_CHANGED"
+                ):
+                    repair_checks.inputs(old_dir, new_dir)
+
+                (new_dir / "foundation.json").write_text(json.dumps({"items": [1]}))
+                with self.assertRaisesRegex(BootstrapError, "REPAIR_FOUNDATION_CHANGED"):
+                    repair_checks.inputs(old_dir, new_dir)
+
+
+class RepairCliTests(unittest.TestCase):
+    def test_fresh_install_also_requires_an_explicit_reader_flag(self):
+        for flag in ([], ["--grant-reader"]):
+            with (
+                self.subTest(flag=flag),
+                patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "install",
+                        "--bundle",
+                        "/bundle",
+                        "--credentials",
+                        "/private",
+                        *flag,
+                    ],
+                ),
+                patch.object(install, "install") as setup,
+                patch.object(
+                    install,
+                    "load_bundle",
+                    return_value={"profile": {"namespace": "personal-cloud"}},
+                ),
+                patch.object(
+                    reader, "install_reader", return_value="2027-10-03T00:00:00Z"
+                ) as grant,
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(install.main(), 0)
+                setup.assert_called_once_with(Path("/bundle"), Path("/private"))
+                if flag:
+                    grant.assert_called_once_with("personal-cloud")
+                else:
+                    grant.assert_not_called()
+
+    def test_reader_is_explicit_and_runs_only_after_successful_repair(self):
+        for flag in ([], ["--grant-reader"]):
+            with (
+                self.subTest(flag=flag),
+                patch.object(repair, "__file__", "/bundle/installer/repair.py"),
+                patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "repair",
+                        "--previous-bundle",
+                        "/old",
+                        "--bundle",
+                        "/bundle",
+                        *flag,
+                    ],
+                ),
+                patch.object(repair, "repair") as recover,
+                patch.object(
+                    repair,
+                    "load_bundle",
+                    return_value={"profile": {"namespace": "personal-cloud"}},
+                ),
+                patch.object(
+                    repair, "install_reader", return_value="2027-10-03T00:00:00Z"
+                ) as reader_fn,
+                contextlib.redirect_stdout(io.StringIO()) as output,
+            ):
+                self.assertEqual(repair.main(), 0)
+                recover.assert_called_once_with(Path("/old"), Path("/bundle"))
+                if flag:
+                    reader_fn.assert_called_once_with("personal-cloud")
+                    self.assertEqual(
+                        json.loads(output.getvalue()),
+                        {
+                            "event": "namespace_reader",
+                            "expires_at": "2027-10-03T00:00:00Z",
+                        },
+                    )
+                else:
+                    reader_fn.assert_not_called()
+                    self.assertEqual(output.getvalue(), "")
+
+    def test_failed_repair_cannot_issue_reader_credentials(self):
+        with (
+            patch.object(repair, "__file__", "/bundle/installer/repair.py"),
+            patch.object(
+                sys,
+                "argv",
+                [
+                    "repair",
+                    "--previous-bundle",
+                    "/old",
+                    "--bundle",
+                    "/bundle",
+                    "--grant-reader",
+                ],
+            ),
+            patch.object(
+                repair,
+                "repair",
+                side_effect=BootstrapError("REPAIR_ADMISSION_NOT_QUIET"),
+            ),
+            patch.object(repair, "install_reader") as reader_fn,
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
+            self.assertEqual(repair.main(), 1)
+            reader_fn.assert_not_called()
+            self.assertEqual(
+                json.loads(output.getvalue())["error_code"],
+                "REPAIR_ADMISSION_NOT_QUIET",
+            )
+
+    def test_retry_waits_for_previous_job_and_its_process_to_exit(self):
+        job = {"metadata": {"name": "repair-job", "annotations": {"script": "fixed"}}}
+        receipt = {
+            "version": 1,
+            "state": "frozen",
+            "request_key": "new",
+            "unknown": {},
+            "queued": {},
+        }
+        runtime = repair_kube.Runtime("personal-cloud")
+        calls = []
+
+        def call(args, **kwargs):
+            calls.append(args)
+            value = job if args[0] == "get" else receipt if args[0] == "logs" else {}
+            return CompletedProcess(args, 0, json.dumps(value).encode(), b"")
+
+        with (
+            patch.object(runtime, "call", side_effect=call),
+            patch.object(
+                runtime,
+                "get",
+                return_value={
+                    "status": {"conditions": [{"type": "Complete", "status": "True"}]}
+                },
+            ),
+            patch.object(repair_kube.cluster, "apply"),
+        ):
+            self.assertEqual(runtime.gate_job(job), receipt)
+        self.assertIn(
+            [
+                "delete",
+                "job",
+                "repair-job",
+                "--cascade=foreground",
+                "--wait=true",
+                "--timeout=60s",
+            ],
+            calls,
+        )
 
 
 if __name__ == "__main__":

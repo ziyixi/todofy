@@ -71,6 +71,7 @@ ts_project(
         ":node_modules/@ziyixi/task-dates",
         ":node_modules/vitest",
         ":typecheck_proto_link",
+        "//tasks/shared:colors",
         "//tasks/worker/src:index",
     ],
 )
@@ -105,6 +106,7 @@ eslint_test(
         ":tsconfig.json",
         ":typecheck_proto_link",
         "//:node_modules/@cloudflare/workers-types",
+        "//tasks/shared:colors",
         "//tasks/tools:backup_restore",
         "//tasks/worker/src:index",
         "//tasks/worker/test:lint_data",

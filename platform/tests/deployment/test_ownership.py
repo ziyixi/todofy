@@ -8,12 +8,12 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
-import yaml
 from personal_cloud.deployment.kubernetes import Client, DependencyUnavailable
 from personal_cloud.deployment.resources import Renderer
-from personal_cloud.status_daemon.config import Configuration, Workload
 from urllib3.response import HTTPResponse
 from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb
+
+from .fixtures import CONFIG, REQUEST, asset
 
 
 def fields(value, prefix=()):
@@ -78,41 +78,8 @@ class StatusOwnership(unittest.TestCase):
     def test_two_releases_preserve_suspension_and_tolerate_old_activated_ownership(
         self,
     ):
-        directory = Path(__file__).resolve().parents[2] / "k3s/newsletter"
-        names = yaml.safe_load((directory / "kustomization.yaml").read_text())[
-            "resources"
-        ]
-        asset = {
-            "apiVersion": "v1",
-            "kind": "List",
-            "items": [
-                item
-                for name in names
-                for item in yaml.safe_load_all((directory / name).read_text())
-            ],
-        }
-        config = Configuration(
-            "vps",
-            "personal-cloud",
-            (
-                Workload(
-                    "newsletter",
-                    "newsletter",
-                    "newsletter",
-                    "newsletter-release",
-                    "newsletter",
-                ),
-                Workload(
-                    "platform-runtime",
-                    "platform-runtime",
-                    "platform-runtime",
-                    "platform-release",
-                    "personal-cloud",
-                ),
-            ),
-            "example/project",
-        )
-        renderer = Renderer(config, asset=asset)
+        manifest_asset = asset()
+        renderer = Renderer(CONFIG, asset=manifest_asset)
         selected = {"newsletter-release", "platform-release", "newsletter-daily"}
         for legacy in (False, True):
             with (
@@ -122,7 +89,7 @@ class StatusOwnership(unittest.TestCase):
                 token = Path(temporary) / "token"
                 token.write_text("synthetic-projected-token-value")
                 active = Client(
-                    "personal-cloud", token_file=str(token), ca_file="synthetic-ca"
+                    CONFIG.namespace, token_file=str(token), ca_file="synthetic-ca"
                 )
                 self.addCleanup(active.close)
                 server = Ownership()
@@ -131,10 +98,10 @@ class StatusOwnership(unittest.TestCase):
                     autospec=True,
                     side_effect=server.request,
                 ):
-                    for source in asset["items"]:
+                    for source in manifest_asset["items"]:
                         if source["metadata"]["name"] in selected:
                             bootstrap = deepcopy(source)
-                            bootstrap["metadata"]["namespace"] = config.namespace
+                            bootstrap["metadata"]["namespace"] = CONFIG.namespace
                             active.apply(bootstrap)
                     if legacy:
                         for name in ("newsletter-release", "platform-release"):
@@ -150,9 +117,9 @@ class StatusOwnership(unittest.TestCase):
                                 workload_key=item.key,
                                 source_sha=generation * 40,
                                 image_digest="sha256:" + generation * 64,
-                                request_id="89f6feb1-4287-4f22-a374-76b9e9c2b1c0",
+                                request_id=REQUEST,
                             )
-                            for item in config.workloads
+                            for item in CONFIG.workloads
                         )
                         active.patch(
                             "CronJob", "newsletter-daily", {"spec": {"suspend": True}}

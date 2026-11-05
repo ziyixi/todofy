@@ -92,31 +92,16 @@ unittest_test(
     deps = [
         ":auth_fixtures",
         ":model_fixtures",
+        "//codex-gateway/src/codex_gateway:__main__",
         "//codex-gateway/src/codex_gateway:_launch",
         "//codex-gateway/src/codex_gateway:app",
         "//codex-gateway/src/codex_gateway:modelrouter",
+        "//codex-gateway/src/codex_gateway:package",
         "//codex-gateway/src/codex_gateway:runtime",
         "//proto:python_runtime",
         "//proto/modelrouter/inference/v1:python",
         "@python_deps//httpx",
         "@python_deps//openai_codex_cli_bin",
-    ],
-)
-
-unittest_test(
-    name = "test_home",
-    size = "small",
-    srcs = ["test_home.py"],
-    data = ["//codex-gateway:pyproject.toml"],
-    imports = [
-        ".",
-        "..",
-        "../src",
-    ],
-    modules = ["tests.test_home"],
-    deps = [
-        "//codex-gateway/src/codex_gateway:__main__",
-        "//codex-gateway/src/codex_gateway:package",
     ],
 )
 
@@ -133,28 +118,12 @@ unittest_test(
     modules = ["tests.test_modelrouter"],
     deps = [
         ":model_fixtures",
+        "//codex-gateway/src/codex_gateway:model_events",
         "//codex-gateway/src/codex_gateway:modelrouter",
         "//codex-gateway/src/codex_gateway:runtime",
         "//proto:python_runtime",
         "//proto/modelrouter/inference/v1:python",
         "@python_deps//openai_codex",
-    ],
-)
-
-unittest_test(
-    name = "test_process_cleanup",
-    size = "small",
-    srcs = ["test_process_cleanup.py"],
-    data = ["//codex-gateway:pyproject.toml"],
-    imports = [
-        ".",
-        "..",
-        "../src",
-    ],
-    modules = ["tests.test_process_cleanup"],
-    deps = [
-        "//codex-gateway/src/codex_gateway:_launch",
-        "//codex-gateway/src/codex_gateway:package",
     ],
 )
 
@@ -164,9 +133,7 @@ test_suite(
         ":test_access",
         ":test_failure_errors",
         ":test_gateway",
-        ":test_home",
         ":test_modelrouter",
-        ":test_process_cleanup",
     ],
 )
 

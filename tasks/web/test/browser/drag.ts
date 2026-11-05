@@ -66,3 +66,33 @@ export async function dragTask(
   await beginTaskDrag(page, source);
   await dropTaskOn(page, target, position);
 }
+
+export async function dragPlanHandle(
+  page: Page,
+  handle: Locator,
+  target: Locator,
+) {
+  // The previous drop has settled and its overlay is gone.
+  await expect(
+    page.locator("[data-dnd-overlay][data-dnd-dragging]"),
+  ).toHaveCount(0);
+  await expect(handle).toBeEnabled();
+  await expect(target).toBeVisible();
+  const source = (await handle.boundingBox())!;
+  const end = (await target.boundingBox())!;
+  await page.mouse.move(
+    source.x + source.width / 2,
+    source.y + source.height / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    source.x + source.width / 2 + 8,
+    source.y + source.height / 2,
+    { steps: 3 },
+  );
+  await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2, {
+    steps: 18,
+  });
+  await page.mouse.up();
+}
+

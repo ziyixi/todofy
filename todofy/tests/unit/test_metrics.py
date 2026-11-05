@@ -1,18 +1,26 @@
-"""core/metrics.py: data point shape, counters, percentiles, days and the API series."""
+"""core/metrics.py and runtime/metrics.py: data point shape, counters, percentiles, days, flush walk and the API series."""
 
+import asyncio
 import json
 import sqlite3
+import types
+from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 from ziyixi_proto.todofy.ui.v1 import history_pb
 from ziyixi_proto.wire_json import from_wire
 
+from tests.unit.host_support import D1, ObjectSql, stubbed_pyodide
 from todofy.core import metrics, owner_ui
 from todofy.core.metrics import Key, Step, StepPoint
 from todofy.core.sql import metrics as sql
 
 ROOT = Path(__file__).parents[2]
+NOW = int(datetime(2026, 9, 28, 12, tzinfo=UTC).timestamp())
+DAY = 86_400
 
 
 def test_data_point_fits_analytics_engine_limits():
@@ -132,3 +140,166 @@ def test_day_write_round_trips_through_json_each():
     ]
     db.execute(sql.EXPIRE_DAYS.sql, ("2026-09-29", 100))
     assert db.execute("SELECT count(*) FROM daily_metrics").fetchone() == (0,)
+
+
+# ---- runtime/metrics.py ----------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def runtime_metrics(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
+    with stubbed_pyodide(monkeypatch):
+        from todofy.runtime import metrics as rm
+
+        yield rm
+
+
+class Store:
+    """The object's ``ctx.storage.sql``: records ``exec`` calls, or fails every one."""
+
+    def __init__(self, fail: bool = False) -> None:
+        self.fail, self.calls = fail, []
+
+    def exec(self, *args: Any) -> None:
+        if self.fail:
+            raise RuntimeError("SQLITE_FULL")
+        self.calls.append(args)
+
+
+class Dataset:
+    def __init__(self, fail: bool = False) -> None:
+        self.fail, self.points = fail, []
+
+    def writeDataPoint(self, point: Any) -> None:
+        if self.fail:
+            raise RuntimeError("analytics engine down")
+        self.points.append(point)
+
+
+def _logged(capsys: pytest.CaptureFixture[str]) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.startswith("{")]
+
+
+def test_counters_and_data_point_are_written(runtime_metrics: Any) -> None:
+    env, store = types.SimpleNamespace(METRICS=Dataset()), Store()
+    runtime_metrics.record(env, store, StepPoint(Step.REPORT, "ok", attempts=2), 1_790_000_000)
+    assert len(env.METRICS.points) == 1
+    assert [call[1:] for call in store.calls] == [("2026-09-21", "gemini_calls", 2)]
+
+
+def test_a_failing_counter_write_is_only_logged(runtime_metrics: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    env = types.SimpleNamespace(METRICS=Dataset())
+    runtime_metrics.record(env, Store(fail=True), StepPoint(Step.REPORT, "ok", attempts=1), 1_790_000_000)
+    assert len(env.METRICS.points) == 1  # the data point went out before the counter failed
+    assert _logged(capsys) == [{"metrics": "count_failed", "error": "RuntimeError"}]
+
+
+def test_both_writes_failing_is_only_logged(runtime_metrics: Any, capsys: pytest.CaptureFixture[str]) -> None:
+    env = types.SimpleNamespace(METRICS=Dataset(fail=True))
+    point = StepPoint(Step.SUMMARY, "ok", model="m", tokens_in=5, tokens_out=5, attempts=1)
+    runtime_metrics.record(env, Store(fail=True), point, 1_790_000_000)
+    assert [entry["metrics"] for entry in _logged(capsys)] == ["write_failed", "count_failed"]
+    # Missing METRICS binding is a no-op.
+    runtime_metrics.write_point(types.SimpleNamespace(), point)
+
+
+def _init_store(rm: Any) -> ObjectSql:
+    store = ObjectSql()
+    for statement in rm.DO_SCHEMA:
+        store.exec(statement)
+    return store
+
+
+def _seed_event(
+    d1: D1, event_id: str, created_at: int, transitions: list[tuple[str | None, str, int]], canary: str | None = None
+) -> None:
+    d1.insert(
+        "mail_events",
+        source_id="mail-hero-personal",
+        event_id=event_id,
+        payload_hash="0" * 64,
+        state=transitions[-1][1],
+        created_at=created_at,
+        updated_at=transitions[-1][2],
+        canary_run_id=canary,
+    )
+    for from_state, to_state, at in transitions:
+        d1.insert(
+            "event_transitions",
+            source_id="mail-hero-personal",
+            event_id=event_id,
+            at=at,
+            from_state=from_state,
+            to_state=to_state,
+            actor="worker",
+        )
+
+
+def test_flush_baselines_then_walks_finished_days_and_resets_on_foreign_cursor(
+    runtime_metrics: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    d1 = D1()
+    store = _init_store(runtime_metrics)
+    env = types.SimpleNamespace(DB=d1, MAIL_SOURCE_ID="mail-hero-personal")
+    assert runtime_metrics.next_flush(store) == 0
+    runtime_metrics.set_next_flush(store, 123)
+    assert runtime_metrics.next_flush(store) == 123
+
+    # Day 0 (2026-09-26): initial flush baselines cursor at the newest transition and skips partial day.
+    day0 = metrics.day_start("2026-09-26") + 3600
+    _seed_event(d1, "e0", day0, [(None, "pending", day0)])
+    next_at = asyncio.run(runtime_metrics.flush(env, store, day0 + 60))
+    assert next_at == metrics.day_start("2026-09-26") + DAY + runtime_metrics.FLUSH_OFFSET
+
+    # Day 1 (2026-09-27): real mail completes, a straggler from 2026-09-26 arrives, a canary completes,
+    # and a transition on Day 2 (today, 2026-09-28) stops the walk at midnight.
+    day1 = metrics.day_start("2026-09-27") + 100
+    _seed_event(d1, "straggler", day0, [("pending", "complete", day0 + 120)])
+    _seed_event(d1, "e1", day1, [(None, "pending", day1), ("summarizing", "complete", day1 + 25)])
+    _seed_event(d1, "canary", day1, [(None, "pending", day1 + 5), ("summarizing", "complete", day1 + 10)], canary="c1")
+    _seed_event(d1, "today-e", NOW, [(None, "pending", NOW)])
+    runtime_metrics.record(env, store, StepPoint(Step.SUMMARY, "ok", model="m1", tokens_in=10, tokens_out=5, attempts=1), day1)
+
+    next_at = asyncio.run(runtime_metrics.flush(env, store, NOW))
+    assert next_at == metrics.day_start("2026-09-28") + DAY + runtime_metrics.FLUSH_OFFSET
+    # Flushing again on the same day has no open finished days.
+    assert asyncio.run(runtime_metrics.flush(env, store, NOW + 60)) == next_at
+
+    daily = asyncio.run(runtime_metrics.daily(d1, 2, NOW))["days"]
+    assert [d["day"] for d in daily] == ["2026-09-26", "2026-09-27"]
+    assert daily[0]["recorded"] is False
+    assert daily[1]["recorded"] is True
+    assert (daily[1]["mails_received"], daily[1]["mails_completed"], daily[1]["latency_p50_seconds"]) == (1, 1, 25)
+    assert daily[1]["gemini_tokens"] == {"m1": 15}
+
+    # Foreign/restored database: cursor no longer matches the row at that ID -> cursor_reset.
+    d1.sql("UPDATE event_transitions SET event_id = 'different' WHERE id = 4")
+    asyncio.run(runtime_metrics.flush(env, store, NOW))
+    assert _logged(capsys)[-1]["metrics"] == "cursor_reset"
+
+
+def test_walk_stops_after_max_pages_and_day_page_bounds(runtime_metrics: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    d1 = D1()
+    store = _init_store(runtime_metrics)
+    env = types.SimpleNamespace(DB=d1, MAIL_SOURCE_ID="mail-hero-personal")
+    # Baseline on an empty ledger (cursor = 0, flushed_day = 2026-09-25).
+    day_base = metrics.day_start("2026-09-25") + 60
+    asyncio.run(runtime_metrics.flush(env, store, day_base))
+
+    monkeypatch.setattr(runtime_metrics, "WALK_PAGE", 1)
+    monkeypatch.setattr(runtime_metrics, "WALK_PAGES", 2)
+    day1 = metrics.day_start("2026-09-26") + 100
+    _seed_event(d1, "e1", day1, [(None, "pending", day1), ("pending", "summarizing", day1 + 1), ("summarizing", "complete", day1 + 2)])
+    # 3 transitions with WALK_PAGE=1, WALK_PAGES=2 -> _walk returns False and flush schedules CONTINUE.
+    assert asyncio.run(runtime_metrics.flush(env, store, NOW)) == NOW + runtime_metrics.CONTINUE
+    # Next call finishes the walk and writes the 2 finished days (2026-09-26 and 2026-09-27).
+    assert asyncio.run(runtime_metrics.flush(env, store, NOW)) > NOW + runtime_metrics.CONTINUE
+
+    # day_page: normal page, and before <= oldest returns ([], None).
+    days, before = asyncio.run(runtime_metrics.day_page(d1, 2, None, NOW))
+    assert [d["day"] for d in days] == ["2026-09-27", "2026-09-26"]
+    assert before == "2026-09-26"
+    oldest = metrics.day_of(NOW - runtime_metrics.KEEP_DAYS * DAY)
+    assert asyncio.run(runtime_metrics.day_page(d1, 10, oldest, NOW)) == ([], None)
+    _, last_before = asyncio.run(runtime_metrics.day_page(d1, 5, metrics.shift(oldest, 2), NOW))
+    assert last_before is None
+

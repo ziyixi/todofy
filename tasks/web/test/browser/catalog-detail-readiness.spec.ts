@@ -1,23 +1,7 @@
-import { expect, test, type APIRequestContext } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import { createResource } from "./seed";
 
 test.use({ serviceWorkers: "block" });
-
-async function createResource(
-  request: APIRequestContext,
-  kind: string,
-  fields: Record<string, unknown>,
-) {
-  const { token } = await (await request.get("/api/tasks/csrf")).json();
-  const response = await request.post(
-    `/api/tasks/v1/${kind}?request_id=${crypto.randomUUID()}`,
-    {
-      headers: { "x-csrf-token": token, origin: "http://127.0.0.1:8798" },
-      data: fields,
-    },
-  );
-  expect(response.status(), await response.text()).toBe(200);
-  return response.json() as Promise<{ id: string; title: string }>;
-}
 
 test("a deep-linked task waits for its project and selected labels before opening", async ({
   page,

@@ -48,7 +48,7 @@ export interface AlarmResult {
 }
 
 /** The lane of a watch: its host, or the browser for browser watches (one render at a time). */
-function laneOf(row: WatchRow): string {
+export function laneOf(row: WatchRow): string {
   try {
     return storedConfig(row).fetcher === 'browser' ? ':browser' : row.host;
   } catch {

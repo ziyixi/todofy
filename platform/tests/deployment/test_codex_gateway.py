@@ -17,7 +17,7 @@ from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb
 from ziyixi_proto.platform.runtime.v1 import runtime_service_pb as api
 from ziyixi_proto.wire_json import to_wire
 
-from .test_release import CONFIG, IDENTITY, REQUEST, SHA, TARGETS, Fixture, asset
+from .fixtures import CONFIG, IDENTITY, REQUEST, SHA, TARGETS, Fixture, asset
 
 GATEWAY = Workload(
     "codex-gateway",

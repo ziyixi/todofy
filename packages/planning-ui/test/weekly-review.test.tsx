@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { fakeActions } from "./transport";
 import { PlanView, type PlanViewProps } from "../src/PlanView";
@@ -29,14 +29,6 @@ import type { PlanningTask, PlusActions } from "../src/model";
 
 // The fixture's week is 2026-10-12 (ISO 2026-W42); "now" is its Tuesday.
 const NOW = Date.parse("2026-10-13T12:00:00Z");
-beforeAll(() => {
-  HTMLDialogElement.prototype.showModal = function () {
-    this.setAttribute("open", "");
-  };
-  HTMLDialogElement.prototype.close = function () {
-    this.removeAttribute("open");
-  };
-});
 beforeEach(() => {
   vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
   window.localStorage.clear();

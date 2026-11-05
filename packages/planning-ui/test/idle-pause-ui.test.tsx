@@ -15,6 +15,7 @@ import type {
   PlusData,
   TimerSnapshot,
 } from "../src/model";
+import { stubPictureInPicture } from "./setup";
 
 // Idle Detection, the permission, Web Locks and Document Picture-in-Picture are stubbed: jsdom has none of them.
 // The fake detector reports what the test says the OS reports; the fake Tasks keeps the one timer.
@@ -302,12 +303,13 @@ it("pauses at the moment the screen locked; back, the bar and the mini timer ask
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
   stubIdleDetection();
-  const pip = stubPictureInPicture();
+  const { windows } = stubPictureInPicture();
   const page = mount(data());
   await settled();
   await act(async () =>
     fireEvent.click(screen.getByRole("button", { name: "Mini timer" })),
   );
+  const pip = windows[0]!;
   const mini = within(pip.document.body);
 
   vi.setSystemTime(NOW + 5 * MIN);
@@ -609,23 +611,3 @@ it("turned off while away, it asks at once", async () => {
   expect(live()).toHaveLength(0);
   expect(within(bar()).getByText("Away for 12 min — count it?")).toBeTruthy();
 });
-
-/** Document Picture-in-Picture with a window whose document is an iframe's, as in mini-timer.test.tsx. */
-function stubPictureInPicture() {
-  const frame = document.createElement("iframe");
-  document.body.append(frame);
-  const events = new EventTarget();
-  const pip = {
-    document: frame.contentDocument!,
-    addEventListener: events.addEventListener.bind(events),
-    removeEventListener: events.removeEventListener.bind(events),
-    setTimeout: () => 0,
-    clearTimeout: () => {},
-    close: () => events.dispatchEvent(new Event("pagehide")),
-  };
-  Object.defineProperty(window, "documentPictureInPicture", {
-    value: { requestWindow: async () => pip },
-    configurable: true,
-  });
-  return pip;
-}

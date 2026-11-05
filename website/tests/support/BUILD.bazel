@@ -16,4 +16,8 @@ website_sources()
 js_library(
     name = "deployment_contract",
     srcs = ["deployment-contract.ts"],
+    deps = [
+        "//website/src/lib/content:hash",
+        "//website/src/lib/content:schema",
+    ],
 )

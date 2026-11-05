@@ -19,13 +19,22 @@ py_library(
     imports = ["."],
 )
 
+py_library(
+    name = "image",
+    srcs = ["image.py"],
+    imports = ["."],
+)
+
 unittest_test(
     name = "build_identity_test",
     srcs = ["test_build.py"],
     imports = ["."],
     modules = ["test_build"],
     visibility = ["//visibility:public"],
-    deps = [":build"],
+    deps = [
+        ":build",
+        ":image",
+    ],
 )
 
 source_audit_files()

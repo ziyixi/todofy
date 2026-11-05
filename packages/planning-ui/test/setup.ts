@@ -40,3 +40,62 @@ Object.defineProperty(globalThis, "localStorage", {
   value: new MemoryStorage(),
   configurable: true,
 });
+
+if (typeof HTMLDialogElement !== "undefined") {
+  HTMLDialogElement.prototype.showModal = function () {
+    this.setAttribute("open", "");
+  };
+  HTMLDialogElement.prototype.close = function () {
+    this.removeAttribute("open");
+  };
+}
+
+/**
+ * Document Picture-in-Picture window stand-in whose document is an iframe's,
+ * whose timers are its own, and whose first close() dispatches pagehide.
+ */
+export function fakePipWindow() {
+  const frame = document.createElement("iframe");
+  document.body.append(frame);
+  const events = new EventTarget();
+  const timers = new Map<number, () => void>();
+  let next = 0;
+  const pip = {
+    closed: false,
+    document: frame.contentDocument!,
+    addEventListener: events.addEventListener.bind(events),
+    removeEventListener: events.removeEventListener.bind(events),
+    setTimeout: vi.fn((callback: () => void) => {
+      timers.set(++next, callback);
+      return next;
+    }),
+    clearTimeout: vi.fn((id: number) => timers.delete(id)),
+    close() {
+      if (pip.closed) return;
+      pip.closed = true;
+      events.dispatchEvent(new Event("pagehide"));
+    },
+    /** Runs the timers it holds now, as its own clock would. */
+    tick() {
+      const due = [...timers.values()];
+      timers.clear();
+      due.forEach((callback) => callback());
+    },
+  };
+  return pip;
+}
+export type FakePipWindow = ReturnType<typeof fakePipWindow>;
+
+/** Chrome's Document Picture-in-Picture API: each request opens a new window. */
+export function stubPictureInPicture() {
+  const windows: FakePipWindow[] = [];
+  const requestWindow = vi.fn(async () => {
+    windows.push(fakePipWindow());
+    return windows.at(-1)!;
+  });
+  Object.defineProperty(window, "documentPictureInPicture", {
+    value: { requestWindow },
+    configurable: true,
+  });
+  return { windows, requestWindow };
+}

@@ -5,7 +5,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import type { SetGuardInput } from '@ziyixi/proto/ops/v1/ops_wire';
-import type { OverrideGuardResponse } from '../../src/api-types.ts';
+import type { HomeView, OverrideGuardResponse } from '../../src/api-types.ts';
 import { aiNeurons, graphqlBodyWithAiError } from '../graphql-fixture.ts';
 import { d1Reads, expectValid, NOW, shedState, PATHS, startFlows, status, type FlowHarness } from './flows.ts';
 
@@ -236,6 +236,82 @@ describe('owner override', () => {
     expect((await guardCalls(h))['mail-hero']).toMatchObject([{ level: 'shed', reason: 'quota_d1_rows_read' }]);
   });
 
+  it('shows no aggregate shed after each guarded service is restored while account usage remains high, and excludes unguarded services', async () => {
+    h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(90) });
+    await h.answer('watch', 'status', { value: await status('watch', { capabilities: [] }) });
+    await h.tick(NOW - 20 * 60_000);
+    for (const app of ['mail-hero', 'todofy'] as const) {
+      expect((await h.post(PATHS.guard, { app, level: 'normal' })).status).toBe(200);
+    }
+    expect((await h.snapshot()).digest.items.some((item) => item.code === 'guard_shed')).toBe(false);
+    await h.tick(NOW + 60_000);
+
+    const home = await h.view<HomeView>('home');
+    expect(home.body?.cloudflare.guard_level).toBe('normal');
+    const snapshot = await h.snapshot();
+    expect(snapshot.usage.rows.find((row) => row.id === 'd1_rows_read')?.percent).toBe(90);
+    expect(snapshot.guard.apps.watch).toBeUndefined();
+    expect(snapshot.guard.apps.mailsort).toBeUndefined();
+    expect(await h.callsOf('watch', 'setGuard')).toEqual([]);
+    expect(await h.callsOf('mailsort', 'setGuard')).toEqual([]);
+    const mailsortGuard = await h.post(PATHS.guard, { app: 'mailsort', level: 'shed' });
+    expect(mailsortGuard.status).toBe(503);
+    await mailsortGuard.arrayBuffer();
+    expect(snapshot.digest.items.some((item) => item.code === 'guard_shed')).toBe(false);
+    expect(snapshot.ops.attention.items.some((item) => item.code === 'guard_shed')).toBe(false);
+  });
+
+  it('shows one manually delayed service in Home and its own held marker, and lets it expire independently', async () => {
+    h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' } });
+    await h.tick(NOW - 20 * 60_000);
+    const held = shedState('2026-10-02T12:00:00.000Z', 'owner_shed', '2026-10-01T12:00:00.000Z');
+    await h.answer('watch', 'setGuard', { value: held });
+    expect((await h.post(PATHS.guard, { app: 'watch', level: 'shed' })).status).toBe(200);
+
+    const home = await h.view<HomeView>('home');
+    expect(home.body?.cloudflare.guard_level).toBe('shed');
+    const snapshot = await h.snapshot();
+    expect(snapshot.ops.attention.held).toContainEqual({ entry: 'watch', code: 'owner_shed', target: { view: 'ops', entry: 'watch' } });
+    expect(snapshot.ops.attention.held.some((item) => item.code === 'owner_shed' && item.entry !== 'watch')).toBe(false);
+    expect(snapshot.ops.attention.items.some((item) => item.code === 'guard_shed')).toBe(false);
+    expect(await h.callsOf('watch', 'setGuard')).toHaveLength(1);
+    for (const app of ['mail-hero', 'todofy'] as const) expect(await h.callsOf(app, 'setGuard')).toEqual([]);
+
+    await h.answer('watch', 'setGuard', undefined);
+    await h.tick('2026-10-02T12:01:00Z');
+    expect(await h.callsOf('watch', 'setGuard')).toEqual([[{ level: 'normal', reason: 'quota_normal', until: null }]]);
+    for (const app of ['mail-hero', 'todofy'] as const) expect(await h.callsOf(app, 'setGuard')).toEqual([]);
+  });
+
+  it('restores a cached remote shed even when its earlier receipt was not saved, and replays or rejects request_id reuse', async () => {
+    h = await startFlows({ bindings: { CANARY_UTC_HOUR: '23' } });
+    await h.tick(NOW - 20 * 60_000);
+    const held = shedState('2026-10-02T00:00:00.000Z', 'owner_shed', '2026-10-01T11:50:00.000Z');
+    await h.answer('mail-hero', 'status', { value: await status('mail-hero', { guard: held }) });
+    await h.refresh('home');
+
+    const response = await h.post(PATHS.guard, { app: 'mail-hero', level: 'normal' });
+    expect(response.status).toBe(200);
+    expect(await h.callsOf('mail-hero', 'setGuard')).toEqual([[{ level: 'normal', reason: 'owner_clear', until: null }]]);
+
+    const requestId = 'e6316140-383e-4ee4-8467-6af6a2e03da7';
+    const input = { app: 'mail-hero', level: 'shed', request_id: requestId };
+    const first = await h.post(PATHS.guard, input);
+    expect(first.status).toBe(200);
+    const firstBody = await first.text();
+    expect(await h.callsOf('mail-hero', 'setGuard')).toHaveLength(1);
+
+    const replay = await h.post(PATHS.guard, input);
+    expect(replay.status).toBe(200);
+    expect(await replay.text()).toBe(firstBody);
+    expect(await h.callsOf('mail-hero', 'setGuard')).toEqual([]);
+
+    const changed = await h.post(PATHS.guard, { ...input, app: 'todofy' });
+    expect(changed.status).toBe(400);
+    expect(await h.callsOf('todofy', 'setGuard')).toEqual([]);
+    expect((await h.snapshot()).guard.apps.todofy?.override).toBeUndefined();
+  });
+
   it('requires old pages to refresh instead of silently changing multiple apps', async () => {
     h = await startFlows();
     const response = await h.post(PATHS.guard, { level: 'shed' });
@@ -250,3 +326,4 @@ describe('owner override', () => {
     expect(await h.called()).toEqual([]);
   });
 });
+

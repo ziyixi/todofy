@@ -29,9 +29,9 @@ def run_pytest(*args: str) -> subprocess.CompletedProcess[str]:
 @pytest.mark.parametrize(
     "paths",
     [
-        ["tests/runtime/test_configs.py"],
+        ["tests/runtime/test_scenarios_coverage.py"],
         # tests/runtime reached by directory recursion: its own conftest.py is never loaded on the controller.
-        ["tests", "-k", "test_configs"],
+        ["tests", "-k", "test_scenarios_coverage"],
         [],
     ],
     ids=["runtime-file", "recursion", "testpaths"],

@@ -42,7 +42,7 @@ export function apiError(status: number, code: string, message = '错误', reque
   return json(statusBody(error, { domain: 'home.ziyixi.science', requestId, localized: { locale: 'zh-CN', message } }), status)
 }
 
-/** The owner API's paths (DashboardUiService and the transport's CSRF route). */
+/** The owner API's paths (DashboardUiService). */
 export const PATHS = {
   registry: '/api/v1/registry',
   home: '/api/v1/homeView',
@@ -53,10 +53,9 @@ export const PATHS = {
   refreshCloudflare: '/api/v1/cloudflareView:refresh',
   guard: '/api/v1/guard:override',
   canary: '/api/v1/canaries/mail-todofy:run',
-  csrf: '/api/csrf',
 } as const
 
-/** Replaces fetch with a recorder; every call must be a same-origin path of the owner API or /api/csrf. */
+/** Replaces fetch with a recorder; every call must be a same-origin path of the owner API. */
 export function installFetch(handler: Handler): Call[] {
   const calls: Call[] = []
   resetViewCacheForTests()
@@ -64,7 +63,7 @@ export function installFetch(handler: Handler): Call[] {
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-      if (!/^\/api\/v1\//.test(url) && url !== PATHS.csrf) throw new Error(`unexpected request to ${url}`)
+      if (!/^\/api\/v1\//.test(url)) throw new Error(`unexpected request to ${url}`)
       const headers: Record<string, string> = {}
       new Headers(init.headers).forEach((value, key) => {
         headers[key] = value
@@ -90,22 +89,17 @@ export function freezeClock(at: Date = NOW): void {
 }
 
 /**
- * Serves a scenario's GETs (registry, the four views, csrf); anything else goes to `other` (mutations, the
+ * Serves a scenario's GETs (registry and the four views); anything else goes to `other` (mutations, the
  * refreshes) or answers NOT_FOUND. Each view may be a function, to change between requests.
  */
 export function serve(
   scenario: Scenario | ((call: Call) => Scenario),
   other: Handler = () => apiError(404, 'not_found'),
 ): Call[] {
-  let tokens = 0
   return installFetch((call) => {
     const current = typeof scenario === 'function' ? scenario(call) : scenario
     const path = call.path.replace(/\?.*$/, '')
     if (call.method === 'GET') {
-      if (path === PATHS.csrf) {
-        tokens += 1
-        return json({ token: `token-${tokens}` })
-      }
       if (path === PATHS.registry) return json(current.registry)
       if (path === PATHS.home) return json(current.home)
       if (path === PATHS.flows) return json(current.flows)

@@ -7,19 +7,11 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, beforeAll, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { createPrototype } from "./fixture";
 import { App } from "../src/App";
 import type { EstimateResult, Language, PlusActions } from "../src/model";
 
-beforeAll(() => {
-  HTMLDialogElement.prototype.showModal = function () {
-    this.setAttribute("open", "");
-  };
-  HTMLDialogElement.prototype.close = function () {
-    this.removeAttribute("open");
-  };
-});
 afterEach(cleanup);
 
 /** The fixture as Tasks lists it: children are steps, the rest tasks. "copy" takes 30 minutes. */

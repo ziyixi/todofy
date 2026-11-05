@@ -296,20 +296,25 @@ def test_rdf_and_rss_read_dates_dois_and_strip_markup():
     assert item.doi == "10.1234/rss"
 
 
-def test_feed_links_drop_tracking_and_upgrade_scheme():
-    url, version = researcher.canonical_url(
-        "http://news.example.org/a?id=7&utm_source=x&ref_src=y&at_medium=z#c"
-    )
-    assert (url, version) == ("https://news.example.org/a?id=7", "")
-    # DW and Al Jazeera tag every feed link.
-    for tagged in (
-        "https://news.example.org/a?maca=en-rss-en-world-4025-rdf",
-        "https://news.example.org/a?traffic_source=rss",
-    ):
-        assert researcher.canonical_url(tagged) == (
+@pytest.mark.parametrize(
+    ("raw_url", "expected_url"),
+    [
+        (
+            "http://news.example.org/a?id=7&utm_source=x&ref_src=y&at_medium=z#c",
+            "https://news.example.org/a?id=7",
+        ),
+        (
+            "https://news.example.org/a?maca=en-rss-en-world-4025-rdf",
             "https://news.example.org/a",
-            "",
-        )
+        ),
+        (
+            "https://news.example.org/a?traffic_source=rss",
+            "https://news.example.org/a",
+        ),
+    ],
+)
+def test_feed_links_drop_tracking_and_upgrade_scheme(raw_url, expected_url):
+    assert researcher.canonical_url(raw_url) == (expected_url, "")
 
 
 @pytest.mark.parametrize(
@@ -367,14 +372,19 @@ def test_hf_daily_becomes_arxiv_leads_with_upvotes():
     assert [entry.upvotes for entry in entries] == [50, 5]
 
 
-def test_clean_text_unescapes_and_strips_tags():
-    raw = "<script>alert(1)</script>&lt;i&gt;Mass&lt;/i&gt; n &lt; m\nend"
-    assert researcher.clean_text(raw) == "Mass n < m end"
-    assert researcher.clean_text("a<!-- x -->b<STYLE a=1>c</style >d") == (
-        "a b d"
-    )
-    # An unclosed block drops the rest instead of leaking script text.
-    assert researcher.clean_text("keep <script>drop() <b>x</b>") == "keep"
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (
+            "<script>alert(1)</script>&lt;i&gt;Mass&lt;/i&gt; n &lt; m\nend",
+            "Mass n < m end",
+        ),
+        ("a<!-- x -->b<STYLE a=1>c</style >d", "a b d"),
+        ("keep <script>drop() <b>x</b>", "keep"),
+    ],
+)
+def test_clean_text_unescapes_and_strips_tags(raw, expected):
+    assert researcher.clean_text(raw) == expected
 
 
 def test_clean_text_stays_linear_on_unclosed_blocks():

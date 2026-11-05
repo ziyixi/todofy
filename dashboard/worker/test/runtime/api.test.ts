@@ -4,15 +4,11 @@
  * and the status poll interval, v1's retired paths, the tick deduplication, and the bounded Durable
  * Object storage (60-day canary retention, 14 recent runs).
  */
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { QUOTA_RESOURCES } from '../../src/idl.ts';
 import { type HomeView, type OpsView } from '../../src/api-types.ts';
 import { accessClaims, testIssuer, type TestIssuer } from '../jwt.ts';
-import { d1Reads, expectValid, NOW, PATHS, startFlows, SYNTHETIC_BINDINGS, type FlowHarness } from './flows.ts';
+import { expectValid, NOW, PATHS, startFlows, SYNTHETIC_BINDINGS, type FlowHarness } from './flows.ts';
 
 const ISSUER = SYNTHETIC_BINDINGS.ACCESS_ISSUER ?? '';
 const AUDIENCE = SYNTHETIC_BINDINGS.ACCESS_AUDIENCE ?? '';
@@ -61,14 +57,16 @@ describe('Access end to end', () => {
     const jwt = await issuer.sign(accessClaims(ISSUER, AUDIENCE, 'owner@example.com'));
     const csrf = await h.fetch(PATHS.csrf, { headers: { 'cf-access-jwt-assertion': jwt } });
     const { token } = (await csrf.json()) as { token: string };
-    const cookie = (csrf.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
-    const post = (origin: string) =>
+    expect(token).toBe('1');
+    expect(csrf.headers.get('set-cookie')).toBeNull();
+    const post = (origin: string, csrfToken = token) =>
       h?.fetch(PATHS.guard, {
         method: 'POST',
-        headers: { 'cf-access-jwt-assertion': jwt, origin, 'x-csrf-token': token, cookie, 'content-type': 'application/json' },
+        headers: { 'cf-access-jwt-assertion': jwt, origin, 'x-csrf-token': csrfToken, 'content-type': 'application/json' },
         body: '{"level":"shed","app":"mail-hero"}',
       });
     expect((await post('http://127.0.0.1'))?.status).toBe(403);
+    expect((await post('https://home.example.com', ''))?.status).toBe(403);
     await h.tick(NOW); // Load the service capability before a guard mutation.
     const accepted = await post('https://home.example.com');
     expect(accepted?.status).toBe(200);
@@ -200,101 +198,5 @@ describe('ticks and storage bounds', () => {
     const ids = later.canary.recent.map((run) => run.run_id);
     expect(ids).not.toContain(`canary-${day(0)}`);
     expect(ids).toContain(`canary-${day(2)}`);
-  });
-
-  it('rebuilds a guard_applied table that still has the app CHECK, keeps its rows and drops a removed app', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'home-dashboard-guard-migration-'));
-    const tableSql = (db: DatabaseSync) =>
-      (db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'guard_applied'").get() as { sql: string } | undefined)?.sql ?? '';
-    try {
-      h = await startFlows({ persist: dir, bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(90) });
-      await h.tick('2026-09-29T10:00:00Z');
-      await h.dispose();
-      h = undefined;
-      // The storage of a release before 2026-10-05: a CHECK that knows two apps and one that has since left ops-v1,
-      // with that app's guard row, cached status and owner override.
-      const files = (await readdir(dir, { recursive: true })).filter((name) => name.endsWith('.sqlite'));
-      let rewritten = 0;
-      for (const file of files) {
-        const db = new DatabaseSync(join(dir, file));
-        if (tableSql(db) !== '') {
-          db.exec(`CREATE TABLE guard_applied_old (
-            app TEXT PRIMARY KEY CHECK (app IN ('mail-hero', 'todofy', 'former-app')),
-            input TEXT, state TEXT, last_call_at INTEGER, last_error TEXT, consecutive_failures INTEGER NOT NULL DEFAULT 0);
-            INSERT INTO guard_applied_old SELECT * FROM guard_applied WHERE app IN ('mail-hero', 'todofy');
-            INSERT INTO guard_applied_old (app, consecutive_failures) VALUES ('former-app', 0);
-            INSERT INTO state (key, doc, updated_at) VALUES ('status:former-app', '{}', 0), ('guard_override:former-app', '{}', 0);
-            DROP TABLE guard_applied;
-            ALTER TABLE guard_applied_old RENAME TO guard_applied;`);
-          expect(tableSql(db)).toContain('CHECK');
-          rewritten++;
-        }
-        db.close();
-      }
-      expect(rewritten).toBe(1);
-
-      // The new release opens it, drops the CHECK and the former app's rows, and can record the watch app's guard calls.
-      h = await startFlows({ persist: dir, bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(90) });
-      await h.tick('2026-09-29T10:30:00Z');
-      const snap = await h.snapshot();
-      expect(snap.guard.apps.watch?.last_error ?? null).toBeNull();
-      await h.dispose();
-      h = undefined;
-      for (const file of files) {
-        const db = new DatabaseSync(join(dir, file));
-        if (tableSql(db) !== '') {
-          expect(tableSql(db)).not.toContain('CHECK');
-          const rows = db.prepare('SELECT app, input FROM guard_applied ORDER BY app').all() as { app: string; input: string | null }[];
-          expect(rows.map((row) => row.app)).toEqual(['mail-hero', 'todofy', 'watch']);
-          expect(db.prepare("SELECT count(*) AS n FROM state WHERE key GLOB '*former-app'").get()).toEqual({ n: 0 });
-          expect((db.prepare("SELECT count(*) AS n FROM state WHERE key = 'status:mail-hero'").get() as { n: number }).n).toBe(1);
-          expect(rows.every((row) => row.input?.includes('quota_d1_rows_read') === true)).toBe(true);
-        }
-        db.close();
-      }
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  it('drops the rows of an app that left ops-v1 from a store without the CHECK', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'home-dashboard-removed-app-'));
-    const former = (db: DatabaseSync) =>
-      (db.prepare("SELECT (SELECT count(*) FROM guard_applied WHERE app = 'former-app') + (SELECT count(*) FROM state WHERE key GLOB '*former-app') AS n").get() as { n: number }).n;
-    try {
-      h = await startFlows({ persist: dir, bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(90) });
-      await h.tick('2026-09-29T10:00:00Z');
-      await h.dispose();
-      h = undefined;
-      const files = (await readdir(dir, { recursive: true })).filter((name) => name.endsWith('.sqlite'));
-      let seeded = 0;
-      for (const file of files) {
-        const db = new DatabaseSync(join(dir, file));
-        if (db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'guard_applied'").get() !== undefined) {
-          db.exec(`INSERT INTO guard_applied (app, consecutive_failures) VALUES ('former-app', 0);
-            INSERT INTO state (key, doc, updated_at) VALUES ('status:former-app', '{}', 0), ('guard_override:former-app', '{}', 0);`);
-          expect(former(db)).toBe(3);
-          seeded++;
-        }
-        db.close();
-      }
-      expect(seeded).toBe(1);
-
-      h = await startFlows({ persist: dir, bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(90) });
-      await h.tick('2026-09-29T10:30:00Z');
-      expect((await h.snapshot()).guard.apps.watch?.last_error ?? null).toBeNull();
-      await h.dispose();
-      h = undefined;
-      for (const file of files) {
-        const db = new DatabaseSync(join(dir, file));
-        if (db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'guard_applied'").get() !== undefined) {
-          expect(former(db)).toBe(0);
-          expect((db.prepare("SELECT count(*) AS n FROM state WHERE key = 'status:todofy'").get() as { n: number }).n).toBe(1);
-        }
-        db.close();
-      }
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
   });
 });

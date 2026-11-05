@@ -12,21 +12,33 @@ import hashlib
 import importlib.resources as resources
 import json
 import pathlib
+import sqlite3
 import urllib.parse as parse
 import uuid
 
+import fastapi
 import httpx
 import pytest
 
 import newsletter.adapters as adapters
+import newsletter.collection.instructions as instructions
 import newsletter.contracts as contracts
+import newsletter.editor as editor
+import newsletter.lifecycle as lifecycle
+import newsletter.notion_cli as notion_cli
 import newsletter.notion_content as newsletter_notion_content
 import newsletter.notion_journal as notion_journal
 import newsletter.notion_sync as notion_sync
+import newsletter.preflight as preflight
+import newsletter.settings as newsletter_settings
 import newsletter.store as newsletter_store
+import newsletter.worker as worker
 import newsletter.workflow.definition as newsletter_workflow_definition
+import newsletter.workflow.pipeline as pipeline
 import newsletter.workflow.repository as newsletter_workflow_repository
+import newsletter.workflow.state as state
 import tests.support.notion_content as notion_content
+import tests.support.story_pipeline as story_pipeline
 
 DAY = "2026-09-07"
 KEY = "material:offline-fixture"
@@ -39,17 +51,9 @@ DESTINATION = {
     "include_personal": False,
 }
 
-
-def rich(text):
-    return [{"type": "text", "text": {"content": text}}]
-
-
-def paragraph(text):
-    return {
-        "object": "block",
-        "type": "paragraph",
-        "paragraph": {"rich_text": rich(text)},
-    }
+rich = notion_content.rich
+paragraph = notion_content.paragraph
+FakeWorkspace = notion_content.FakeWorkspace
 
 
 def linked_paragraph(url):
@@ -95,168 +99,9 @@ def projected(key=KEY, *, count=2, prefix="Offline version", chart=False):
     )
 
 
-class FakeWorkspace:
-    """Retain synthetic external state across local SQLite restarts."""
-
-    def __init__(self):
-        self.pages = {}
-        self.uploads = {}
-        self.calls = []
-        self.failures = collections.defaultdict(list)
-        self.extra_lookup = []
-
-    def fail(
-        self, method, *, landed=False, code="NOTION_UNKNOWN", cancel=False
-    ):
-        self.failures[method].append((landed, code, cancel))
-
-    def count(self, method):
-        return sum(name == method for name, _ in self.calls)
-
-    def _mutation(self, method, value, effect):
-        self.calls.append((method, copy.deepcopy(value)))
-        if not self.failures[method]:
-            return effect()
-        landed, code, cancel = self.failures[method].pop(0)
-        if landed:
-            effect()
-        if cancel:
-            raise asyncio.CancelledError
-        raise adapters.AdapterError(code, ambiguous=code == "NOTION_UNKNOWN")
-
-    async def lookup(self, kind, key):
-        self.calls.append(("lookup", (kind, key)))
-        return copy.deepcopy(
-            [
-                p
-                for p in self.pages.values()
-                if p["kind"] == kind and p["key"] == key
-            ]
-            + self.extra_lookup
-        )
-
-    async def create(self, kind, properties):
-        key = "".join(
-            p["text"]["content"] for p in properties["sync_key"]["rich_text"]
-        )
-
-        def effect():
-            page_id = str(
-                uuid.uuid5(
-                    uuid.NAMESPACE_URL,
-                    "offline-create/" + str(self.count("create")),
-                )
-            )
-            self.pages[page_id] = {
-                "object": "page",
-                "id": page_id,
-                "in_trash": False,
-                "kind": kind,
-                "key": key,
-                "properties": copy.deepcopy(properties),
-                "blocks": [],
-            }
-            return page_id
-
-        return self._mutation("create", (kind, properties), effect)
-
-    async def patch(self, kind, page_id, properties):
-        def effect():
-            assert self.pages[page_id]["kind"] == kind
-            self.pages[page_id]["properties"].update(copy.deepcopy(properties))
-
-        self._mutation("patch", (kind, page_id, properties), effect)
-
-    def _returned_block(self, block, page_id, index):
-        result = copy.deepcopy(block)
-        result.update(
-            id=str(uuid.uuid5(uuid.NAMESPACE_URL, page_id + "/" + str(index))),
-            has_children=False,
-            in_trash=False,
-        )
-        body = result[result["type"]]
-        if result["type"] == "image":
-            assert body["type"] == "file_upload"
-            filename = self.uploads[body["file_upload"]["id"]]["filename"]
-            result["image"] = {
-                "type": "file",
-                "file": {
-                    "url": "https://files.example.org/uploads/"
-                    + parse.quote(filename)
-                    + "?signature=ephemeral-value",
-                    "expiry_time": "2026-09-07T20:00:00Z",
-                },
-                "caption": body.get("caption", []),
-            }
-        for name in ("rich_text", "caption"):
-            for fragment in result[result["type"]].get(name, []):
-                fragment["annotations"] = {
-                    "bold": False,
-                    "italic": False,
-                    "strikethrough": False,
-                    "underline": False,
-                    "code": False,
-                    "color": "default",
-                }
-                fragment["text"].setdefault("link", None)
-                fragment["plain_text"] = fragment["text"]["content"]
-                fragment["href"] = None
-        return result
-
-    async def append(self, page_id, blocks):
-        def effect():
-            current = self.pages[page_id]["blocks"]
-            returned = [
-                self._returned_block(block, page_id, len(current) + index)
-                for index, block in enumerate(blocks)
-            ]
-            current.extend(returned)
-            return copy.deepcopy(returned)
-
-        return self._mutation("append", (page_id, blocks), effect)
-
-    async def children(self, page_id):
-        self.calls.append(("children", page_id))
-        return copy.deepcopy(self.pages[page_id]["blocks"])
-
-    async def get_page(self, page_id):
-        self.calls.append(("get_page", page_id))
-        return copy.deepcopy(self.pages[page_id])
-
-    async def upload_png(self, png):
-        def effect():
-            upload_id = str(
-                uuid.uuid5(
-                    uuid.NAMESPACE_URL,
-                    "offline-upload/" + str(self.count("upload_png")),
-                )
-            )
-            self.uploads[upload_id] = {
-                "png": png,
-                "filename": "chart-" + hashlib.sha256(png).hexdigest() + ".png",
-            }
-            return upload_id
-
-        return self._mutation("upload_png", png, effect)
-
-
-class Rig:
+class Rig(notion_content.SyncRig):
     def __init__(self, path):
-        self.path = path
-        self.api = FakeWorkspace()
-        self.store = newsletter_store.Store(path, "mock")
-        self.journal = notion_journal.NotionJournal(self.store, DESTINATION)
-        self.sync = notion_sync.NotionSync(
-            self.journal, self.api, include_personal=False
-        )
-
-    def restart(self):
-        self.store.close()
-        self.store = newsletter_store.Store(self.path, "mock")
-        self.journal = notion_journal.NotionJournal(self.store, DESTINATION)
-        self.sync = notion_sync.NotionSync(
-            self.journal, self.api, include_personal=False
-        )
+        super().__init__(path, DESTINATION)
 
     def due(self):
         self.journal.execute("UPDATE notion_entities SET retry_at=0")
@@ -1309,3 +1154,141 @@ def test_old_journal_schema_gains_progress_column_once(tmp_path):
     assert journal.entity(KEY)["progress_at"] == 42.0
     assert journal.entity(KEY)["attempts"] == 0
     store.close()
+
+
+@pytest.fixture
+def live_settings(tmp_path):
+    return newsletter_settings.Settings(
+        data_dir=tmp_path / "live",
+        mode="live",
+        editor_backend="codex",
+        workflow_backend="dag",
+        notion_backend="notion",
+        notion_token="synthetic-notion-token-for-offline-test",
+        notion_materials_data_source_id="11111111-1111-4111-8111-111111111111",
+        notion_editions_data_source_id="22222222-2222-4222-8222-222222222222",
+        model_router_url="https://models.example.test",
+        model_router_token="synthetic-token",
+    )
+
+
+async def test_consumers_stop_before_store_and_skip_legacy_projection(
+    live_settings, monkeypatch
+):
+    events = []
+
+    async def checked(*args, **kwargs):
+        return preflight.PreflightReport((), ())
+
+    async def idle_worker(self):
+        events.append("worker-start")
+        try:
+            await asyncio.Event().wait()
+        finally:
+            self.store.db.execute("SELECT 1")
+            events.append("worker-stop")
+
+    async def idle_sync(self):
+        events.append("sync-start")
+        try:
+            await asyncio.Event().wait()
+        finally:
+            self.journal.store.db.execute("SELECT 1")
+            events.append("sync-stop")
+
+    monkeypatch.setattr(preflight, "preflight", checked)
+    monkeypatch.setattr(worker.Worker, "run", idle_worker)
+    monkeypatch.setattr(notion_sync.NotionSync, "run", idle_sync)
+    app = fastapi.FastAPI()
+    async with lifecycle.service_lifespan(
+        app, settings=live_settings, editor=editor.MockEditor()
+    ):
+        await asyncio.sleep(0)
+        assert events == ["worker-start", "sync-start"]
+        assert isinstance(app.state.worker.notion, adapters.DisabledNotion)
+        assert app.state.worker.skip_packet_projection
+        assert app.state.worker.pipeline.packet_projection is False
+        before = (live_settings.data_dir / "newsletter.sqlite3").read_bytes()
+        assert notion_cli.status(live_settings.data_dir / "newsletter.sqlite3")[
+            "enabled"
+        ]
+        assert (
+            live_settings.data_dir / "newsletter.sqlite3"
+        ).read_bytes() == before
+        assert not app.state.store.db.execute("SELECT 1 FROM sends").fetchone()
+    assert events == ["worker-start", "sync-start", "sync-stop", "worker-stop"]
+
+
+async def test_destination_failure_does_not_leave_content_worker_running(
+    live_settings, monkeypatch
+):
+    async def checked(*args, **kwargs):
+        return preflight.PreflightReport((), ())
+
+    async def forbidden(*args, **kwargs):
+        pytest.fail("A consumer started before initialization completed")
+
+    monkeypatch.setattr(preflight, "preflight", checked)
+    app = fastapi.FastAPI()
+    async with lifecycle.service_lifespan(
+        app, settings=live_settings, start_worker=False
+    ):
+        pass
+    monkeypatch.setattr(worker.Worker, "run", forbidden)
+    with pytest.raises(ValueError, match="explicit migration"):
+        async with lifecycle.service_lifespan(
+            app,
+            settings=dataclasses.replace(
+                live_settings, notion_archive_private=True
+            ),
+        ):
+            pytest.fail("Changed audience/privacy was silently adopted")
+
+
+async def test_live_startup_ignores_the_offline_fixture_directions(
+    live_settings, monkeypatch, tmp_path
+):
+    async def checked(*args, **kwargs):
+        return preflight.PreflightReport((), ())
+
+    legacy = tmp_path / "unreadable-legacy-directions"
+    real_loader = instructions.load_instructions
+
+    def guarded(directory):
+        if directory == legacy:
+            pytest.fail("Live startup read the offline fixture directions")
+        return real_loader(directory)
+
+    monkeypatch.setattr(preflight, "preflight", checked)
+    monkeypatch.setattr(instructions, "load_instructions", guarded)
+    app = fastapi.FastAPI()
+    async with lifecycle.service_lifespan(
+        app,
+        settings=dataclasses.replace(live_settings, instructions_dir=legacy),
+        start_worker=False,
+    ):
+        assert isinstance(app.state.worker.pipeline, pipeline.DagPipeline)
+
+
+def test_status_missing_database_never_creates_it(tmp_path):
+    path = tmp_path / "absent.sqlite3"
+    with pytest.raises(sqlite3.OperationalError):
+        notion_cli.status(path)
+    assert not path.exists()
+
+
+def test_retired_whole_edition_recipe_is_rejected_before_freezing(
+    live_settings, tmp_path
+):
+    retired = dataclasses.replace(
+        live_settings, workflow_file=story_pipeline.LEGACY_RECIPE
+    )
+    with_store = newsletter_store.Store(tmp_path / "source.sqlite3", "live")
+    try:
+        with pytest.raises(newsletter_workflow_definition.DefinitionError):
+            pipeline.freeze_workflow(
+                retired, state.WorkflowState(with_store), "2026-09-07"
+            )
+    finally:
+        with_store.close()
+

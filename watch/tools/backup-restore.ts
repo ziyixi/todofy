@@ -140,7 +140,7 @@ function wranglerCommand(args: string[]) {
   return { command, prefix, target };
 }
 
-function bucketOf(args: string[], fallback?: string): string {
+export function bucketOf(args: string[], fallback?: string): string {
   const bucket = option(args, '--bucket') ?? fallback;
   if (bucket === undefined || !/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(bucket)) throw new RestoreError('--bucket is not a bucket name');
   return bucket;

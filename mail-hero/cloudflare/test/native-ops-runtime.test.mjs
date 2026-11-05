@@ -4,21 +4,14 @@
 // contract's rules (proto/ops/v1/ops.proto). All mail, addresses and credentials are synthetic.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFile, readdir, mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
-import { build } from 'esbuild'
-import { Miniflare, convertV4MiniflareOptions } from 'miniflare'
-import { migrationStatements } from './migrations.mjs'
+import { buildWorker, startRuntime } from './runtime-harness.mjs'
 import * as opsProto from '@ziyixi/proto/ops/v1/ops_pb'
 import { fromWire } from '@ziyixi/proto/wire-json'
 import { buildPayload, syntheticCanaryMail } from '../src/native/pipeline.ts'
 import { STATUS_MAX_D1_STATEMENTS } from '../src/native/ops-core.ts'
 import { DEFERRABLE_JOBS } from '../src/native/ops-guard.ts'
 
-const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const INBOX = 'inbox@mail.example.org'
 const BACKUP_TOKEN = 'synthetic-backup-machine-token-32-characters'
 // Distinctive synthetic mail content that must never appear in an ops output.
@@ -40,7 +33,9 @@ const KEPT_SQL = {
 
 let bundled
 async function script() {
-  bundled ??= (await build({ stdin: { contents: `
+  bundled ??= await buildWorker({
+    sourcefile: 'native-ops-entry.ts',
+    contents: `
     import app from './src/native/index';
     import { emailHandler } from './src/native/ingest';
     import { enqueue } from './src/native/pipeline';
@@ -90,8 +85,8 @@ async function script() {
         return new Response(rejected || null, { status: rejected ? 422 : 204 })
       }
       return app.fetch(request, env, ctx)
-    }};`, resolveDir: root, sourcefile: 'native-ops-entry.ts', loader: 'ts' },
-  bundle: true, format: 'esm', platform: 'neutral', conditions: ['browser'], external: ['cloudflare:workers'], write: false })).outputFiles[0].text
+    }};`,
+  })
   return bundled
 }
 
@@ -107,13 +102,12 @@ async function waitFor(read, predicate, label, timeout = 15000) {
 }
 
 async function runtime(t, bindings = {}) {
-  const temp = await mkdtemp(join(tmpdir(), 'mail-hero-ops-'))
   const calls = [], responses = []
-  const mf = new Miniflare(convertV4MiniflareOptions({
-    host: '127.0.0.1', port: 0,
-    d1Persist: join(temp, 'd1'), r2Persist: join(temp, 'r2'), durableObjectsPersist: join(temp, 'do'),
+  const { mf, db, close } = await startRuntime({
+    prefix: 'mail-hero-ops-',
+    d1Worker: 'mail-hero',
     workers: [
-      { name: 'mail-hero', modules: true, script: await script(), compatibilityDate: '2026-09-07',
+      { name: 'mail-hero', script: await script(),
         d1Databases: { DB: 'ops-test' }, r2Buckets: ['MAIL_STORE'],
         durableObjects: { COORDINATOR: { className: 'ProbeCoordinator', useSQLite: true } },
         bindings: { RECEIVE_ADDRESS: INBOX, DEV_AUTH_BYPASS: 'true', ACCESS_ISSUER: 'https://synthetic.cloudflareaccess.com',
@@ -126,7 +120,7 @@ async function runtime(t, bindings = {}) {
           return new Response(null, { status: responses.shift() ?? 204 })
         } },
       // The future dashboard, reduced to a loopback for the test: it only ever calls MAIL_HERO.<method>.
-      { name: 'dashboard', modules: true, compatibilityDate: '2026-09-07',
+      { name: 'dashboard',
         script: `export default { async fetch(request, env) {
           const { method, args } = await request.json()
           try { return Response.json({ ok: await env.MAIL_HERO[method](...args) }) }
@@ -134,14 +128,9 @@ async function runtime(t, bindings = {}) {
         } }`,
         serviceBindings: { MAIL_HERO: { name: 'mail-hero', entrypoint: 'Ops' } } },
     ],
-  }))
-  t.after(async () => { await mf.dispose(); await rm(temp, { recursive: true, force: true }) })
-  await mf.ready
-  const db = await mf.getD1Database('DB', 'mail-hero')
+  })
+  t.after(close)
   const bucket = await mf.getR2Bucket('MAIL_STORE', 'mail-hero')
-  for (const name of (await readdir(join(root, 'migrations'))).filter(name => name.endsWith('.sql')).sort()) {
-    await db.batch(migrationStatements(await readFile(join(root, 'migrations', name), 'utf8')).map(sql => db.prepare(sql)))
-  }
   const dashboard = await mf.getWorker('dashboard')
   const request = async (path, init) => {
     const response = await mf.dispatchFetch('http://localhost' + path, init)

@@ -61,7 +61,6 @@ copied_source_files(
         "app.test.ts",
         "app.ts",
         "check-layout.test.ts",
-        "classification-interval.test.ts",
         "components.ts",
         "dom.ts",
         "flowchart.ts",
@@ -71,8 +70,7 @@ copied_source_files(
         "overview.test.ts",
         "priorities.ts",
         "prompt.test.ts",
-        "provider.test.ts",
-        "replay.test.ts",
+        "settings.test.ts",
         "unread-classification.test.ts",
         "views/classifier.ts",
         "views/common.ts",
@@ -291,17 +289,6 @@ proto_vitest_test(
 )
 
 proto_vitest_test(
-    name = "src__classification-interval_test",
-    config = "//mailsort/web:test_config",
-    data = COMMON_TEST_DATA,
-    project = "mailsort/web",
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = [":classification-interval.test.ts"],
-    deps = COMMON_TEST_DEPS,
-)
-
-proto_vitest_test(
     name = "src__labels_test",
     config = "//mailsort/web:test_config",
     data = COMMON_TEST_DATA,
@@ -335,39 +322,14 @@ proto_vitest_test(
 )
 
 proto_vitest_test(
-    name = "src__provider_test",
+    name = "src__settings_test",
     config = "//mailsort/web:test_config",
     data = COMMON_TEST_DATA,
     project = "mailsort/web",
     runner = vitest.vitest_test,
     tags = ["unit"],
-    tests = [":provider.test.ts"],
+    tests = [":settings.test.ts"],
     deps = COMMON_TEST_DEPS,
-)
-
-proto_vitest_test(
-    name = "src__replay_test",
-    config = "//mailsort/web:test_config",
-    data = COMMON_TEST_DATA,
-    project = "mailsort/web",
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = [":replay.test.ts"],
-    deps = [
-        ":src__api",
-        ":src__components",
-        ":src__dom",
-        ":src__format",
-        ":src__views__replay",
-        "//mailsort/web:node_modules/vitest",
-        "//proto/mailsort/ui/v2:ts",
-        "//proto/modelrouter/inference/v1:ts",
-        "//proto/ts:field-mask",
-        "//proto/ts:http-transcoder",
-        "//proto/ts:protobuf",
-        "//proto/ts:protobuf-wkt",
-        "//proto/ts:rpc-status",
-    ],
 )
 
 proto_vitest_test(
@@ -392,12 +354,10 @@ test_suite(
     tests = [
         ":src__app_test",
         ":src__check-layout_test",
-        ":src__classification-interval_test",
         ":src__labels_test",
         ":src__overview_test",
         ":src__prompt_test",
-        ":src__provider_test",
-        ":src__replay_test",
+        ":src__settings_test",
         ":src__unread-classification_test",
         "//mailsort/web/src/test:check",
     ],
@@ -409,12 +369,10 @@ test_suite(
     tests = [
         ":src__app_test",
         ":src__check-layout_test",
-        ":src__classification-interval_test",
         ":src__labels_test",
         ":src__overview_test",
         ":src__prompt_test",
-        ":src__provider_test",
-        ":src__replay_test",
+        ":src__settings_test",
         ":src__unread-classification_test",
         "//mailsort/web/src/test:unit_tests",
     ],

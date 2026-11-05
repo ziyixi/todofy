@@ -45,7 +45,7 @@ export function errorMessage(error: unknown): string {
 }
 
 /** Any failure of a call as an ApiError. */
-function toApiError(error: unknown): ApiError {
+export function toApiError(error: unknown): ApiError {
   if (error instanceof ApiError) return error
   if (error instanceof RpcStatusError) {
     const { status } = error

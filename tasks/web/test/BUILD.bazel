@@ -39,6 +39,7 @@ copied_source_files(
 )
 
 _BROWSER_RUNTIME_DATA = [
+    ":browser/seed.ts",
     "//tasks/web:bundle",
     "//tasks:migrations",
     "//tasks/worker/test:browser_server",
@@ -73,14 +74,6 @@ tasks_browser_test(
     data = ["//tasks/web:package_json"] + _BROWSER_RUNTIME_DATA,
     project = "tasks/web",
     spec = ":browser/color-detail.spec.ts",
-)
-
-tasks_browser_test(
-    name = "browser_date_input_help_test",
-    config = "//tasks/web:browser_test_config",
-    data = ["//tasks/web:package_json"] + _BROWSER_RUNTIME_DATA,
-    project = "tasks/web",
-    spec = ":browser/date-input-help.spec.ts",
 )
 
 tasks_browser_test(
@@ -169,14 +162,6 @@ tasks_browser_test(
 )
 
 tasks_browser_test(
-    name = "browser_noop_save_test",
-    config = "//tasks/web:browser_test_config",
-    data = ["//tasks/web:package_json"] + _BROWSER_RUNTIME_DATA,
-    project = "tasks/web",
-    spec = ":browser/noop-save.spec.ts",
-)
-
-tasks_browser_test(
     name = "browser_outdated_test",
     config = "//tasks/web:browser_test_config",
     data = ["//tasks/web:package_json"] + _BROWSER_RUNTIME_DATA,
@@ -221,6 +206,7 @@ tasks_browser_test(
     name = "browser_planning_journeys_test",
     config = "//tasks/web:browser_test_config",
     data = [
+        ":browser/drag.ts",
         ":browser/planning-stub.ts",
         "//tasks/web:package_json",
     ] + _BROWSER_RUNTIME_DATA,
@@ -273,14 +259,6 @@ tasks_browser_test(
 )
 
 tasks_browser_test(
-    name = "browser_pwa_test",
-    config = "//tasks/web:browser_test_config",
-    data = ["//tasks/web:package_json"] + _BROWSER_RUNTIME_DATA,
-    project = "tasks/web",
-    spec = ":browser/pwa.spec.ts",
-)
-
-tasks_browser_test(
     name = "browser_refinement_test",
     config = "//tasks/web:browser_test_config",
     data = ["//tasks/web:package_json"] + _BROWSER_RUNTIME_DATA,
@@ -327,14 +305,6 @@ tasks_browser_test(
     ] + _BROWSER_RUNTIME_DATA,
     project = "tasks/web",
     spec = ":browser/task-delete-keyboard.spec.ts",
-)
-
-tasks_browser_test(
-    name = "browser_task_detail_reads_test",
-    config = "//tasks/web:browser_test_config",
-    data = ["//tasks/web:package_json"] + _BROWSER_RUNTIME_DATA,
-    project = "tasks/web",
-    spec = ":browser/task-detail-reads.spec.ts",
 )
 
 tasks_browser_test(

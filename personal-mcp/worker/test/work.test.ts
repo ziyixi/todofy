@@ -1,48 +1,12 @@
-import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
-import { createMcpHandler, McpServer, type CallToolResult } from '@modelcontextprotocol/server';
-import { afterEach, expect, it } from 'vitest';
+import { expect, it } from 'vitest';
 import { WorkStore, type WorkAttention, type WorkStorage } from '../src/work-store.ts';
 import { registerWorkTools } from '../src/work-tools.ts';
 import type { WorkCreateInput, WorkReportInput } from '../src/work-model.ts';
-
-const databases: DatabaseSync[] = [];
-const handlers: ReturnType<typeof createMcpHandler>[] = [];
-afterEach(async () => {
-  await Promise.all(handlers.splice(0).map(handler => handler.close()));
-  for (const database of databases.splice(0)) database.close();
-});
-
-function uuid(value: number) { return `00000000-0000-4000-8000-${String(value).padStart(12, '0')}`; }
+import { createTestWorkStorage, createToolCaller, uuid } from './harness.ts';
 
 /** Exercise real SQLite statements without replacing the store's transactional behavior with JS maps. */
 function fixture(callback?: (attention: WorkAttention, storage: WorkStorage) => void) {
-  const database = new DatabaseSync(':memory:');
-  databases.push(database);
-  const sql = {
-    exec(query: string, ...bindings: SqlStorageValue[]) {
-      if (query.trimStart().startsWith('CREATE')) { database.exec(query); return { toArray: () => [] }; }
-      const values = bindings.map(value => value instanceof ArrayBuffer ? new Uint8Array(value) : value) satisfies SQLInputValue[];
-      const rows = database.prepare(query).all(...values);
-      return { toArray: () => rows };
-    },
-  } as unknown as SqlStorage;
-  let transaction = 0;
-  const storage: WorkStorage = {
-    sql,
-    transactionSync<T>(action: () => T): T {
-      const savepoint = `work_test_${String(++transaction)}`;
-      database.exec(`SAVEPOINT ${savepoint}`);
-      try {
-        const result = action();
-        database.exec(`RELEASE ${savepoint}`);
-        return result;
-      } catch (error) {
-        database.exec(`ROLLBACK TO ${savepoint}`);
-        database.exec(`RELEASE ${savepoint}`);
-        throw error;
-      }
-    },
-  };
+  const storage = createTestWorkStorage();
   const attention: WorkAttention[] = [];
   const store = new WorkStore(storage, event => { callback?.(event, storage); attention.push(event); });
   return { store, storage, attention };
@@ -256,24 +220,7 @@ it('exports every record and meaningful entry through bounded pages without inte
 });
 
 function tools(store: WorkStore, beforeRead: () => Promise<void>) {
-  const handler = createMcpHandler(() => {
-    const server = new McpServer({ name: 'synthetic-work', version: '1' }, { capabilities: { tools: {} } });
-    registerWorkTools(server, store, beforeRead);
-    return server;
-  }, { legacy: 'reject' });
-  handlers.push(handler);
-  return async (name: string, args: Record<string, unknown>) => {
-    const response = await handler.fetch(new Request('https://mcp.example.org/mcp', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream',
-        'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': 'tools/call', 'Mcp-Name': name },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args,
-        _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28',
-          'io.modelcontextprotocol/clientCapabilities': {},
-          'io.modelcontextprotocol/clientInfo': { name: 'synthetic', version: '1' } } } }),
-    }));
-    return response.json<{ result?: CallToolResult; error?: { code: number; message: string } }>();
-  };
+  return createToolCaller('synthetic-work', server => { registerWorkTools(server, store, beforeRead); });
 }
 
 it('registers MCP tools with source refresh only on context/get and validates writes at the protocol boundary', async () => {

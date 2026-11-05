@@ -2,30 +2,30 @@
 
 import copy
 import hashlib
+import json
+import pathlib
 import sqlite3
 
 import pytest
 
 import newsletter.collection.repository as repository
+import newsletter.contracts as contracts
 import newsletter.editor as editor
+import newsletter.monitoring_status as monitoring
+import newsletter.settings as newsletter_settings
 import newsletter.store as newsletter_store
+import newsletter.workflow.definition as newsletter_workflow_definition
+import newsletter.workflow.engine as engine
 import newsletter.workflow.pipeline as newsletter_workflow_pipeline
 import newsletter.workflow.publication as newsletter_workflow_publication
+import newsletter.workflow.repository as newsletter_workflow_repository
 import newsletter.workflow.state as newsletter_workflow_state
 import newsletter.workflow.threads as threads
 import tests.support.publication as publication
+import tests.support.story_pipeline as story_pipeline
 import tests.support.usage as usage
 import tests.support.workflow_content as workflow_content
 import tests.support.workflow_state as workflow_state
-
-
-@pytest.fixture
-def store(tmp_path):
-    value = newsletter_store.Store(tmp_path / "state.sqlite3", "mock")
-    try:
-        yield value
-    finally:
-        value.close()
 
 
 def test_usage_ledger_upserts_latest_cumulative_snapshot_not_each_notification(
@@ -637,3 +637,412 @@ def test_marking_never_downgrades_a_used_candidate(store):
     }
     with pytest.raises(ValueError, match="disposition"):
         state.mark(["fresh"], "seen", replacing=("archived",))
+
+
+REPAIR_DEFINITION = {
+    "version": 1,
+    "id": "editorial-repair",
+    "nodes": [
+        {"id": "revision", "type": "revision"},
+        {"id": "final_review", "type": "final_review", "needs": ["revision"]},
+    ],
+}
+
+
+@pytest.fixture
+def source(tmp_path):
+    store = newsletter_store.Store(tmp_path / "repair.sqlite3", "mock")
+    try:
+        yield {
+            "store": store,
+            "state": newsletter_workflow_state.WorkflowState(store),
+            "parent": "fixture-parent",
+        }
+    finally:
+        store.close()
+
+
+def create(source):
+    """Insert a receipt exactly as the retired repair path stored it."""
+    receipt = {
+        "parent_run_id": source["parent"],
+        "source_edition_id": "fixture-edition",
+        "child_run_id": source["parent"] + ":repair-1",
+        "snapshot": {
+            "definition": REPAIR_DEFINITION,
+            "inputs": {"issue_date": "2026-09-06"},
+        },
+    }
+    with source["store"].transaction():
+        source["store"].db.execute(
+            "INSERT INTO workflow_repairs VALUES(?,?,?,?)",
+            (
+                receipt["parent_run_id"],
+                receipt["source_edition_id"],
+                receipt["child_run_id"],
+                contracts.canonical_json(receipt["snapshot"]),
+            ),
+        )
+    return receipt
+
+
+def test_parent_child_usage_aggregation_has_no_cross_run_leak(source):
+    state, parent = source["state"], source["parent"]
+    prior = usage.record_one(
+        usage.notification(5_500_000, 403_990, 4_000_000, 100_000)
+    )[-1]
+    state.usage_sink(parent)(prior)
+    unrelated = usage.record_one(usage.notification(999_000, 1_000))[-1]
+    state.usage_sink("unrelated-run")(unrelated)
+    child = create(source)["child_run_id"]
+    assert state.usage(child)["usage"]["total_tokens"] == 5_903_990
+    current = usage.record_one(usage.notification(80_000, 5_000, 50_000, 2_000))
+    for row in current + [current[-1]]:
+        state.usage_sink(child)(row)
+    assert state.usage(parent) == state.usage(child)
+    assert state.usage(child)["usage"]["total_tokens"] == 5_988_990
+    assert state.usage(child)["invocations"] == 2
+    assert not state.usage(child)["partial"]
+    assert state.usage("unrelated-run")["usage"]["total_tokens"] == 1_000_000
+    with pytest.raises(newsletter_store.StoreError):
+        state.usage_sink(child)(prior)
+
+
+def test_missing_child_usage_preserves_known_parent_and_partial_status(source):
+    source["state"].usage_sink(source["parent"])(usage.record_one()[-1])
+    child = create(source)["child_run_id"]
+    source["state"].usage_sink(child)(usage.record_one()[0])
+    result = source["state"].usage(child)
+    assert result["usage"]["total_tokens"] == 120
+    assert result["partial"] and result["missing_invocations"] == 1
+
+
+def test_repair_and_combined_usage_survive_reopening_database(source, tmp_path):
+    receipt = create(source)
+    source["state"].usage_sink(source["parent"])(usage.record_one()[-1])
+    source["state"].usage_sink(receipt["child_run_id"])(usage.record_one()[-1])
+    peer = newsletter_store.Store(tmp_path / "repair.sqlite3", "mock")
+    try:
+        state = newsletter_workflow_state.WorkflowState(peer)
+        assert state.repair(source["parent"]) == receipt
+        assert (
+            state.usage(receipt["child_run_id"])["usage"]["total_tokens"] == 240
+        )
+    finally:
+        peer.close()
+
+
+def test_stored_repair_is_reported_as_a_continuation(source, tmp_path):
+    legacy = newsletter_workflow_definition.load_definition(
+        story_pipeline.LEGACY_RECIPE
+    )
+    inputs = {"issue_date": "2026-09-06"}
+    runs = repository.RunRepository(source["store"])
+    run = runs.start(
+        {"request_key": "legacy-run", "issue_date": inputs["issue_date"]},
+        [],
+        workflow_snapshot={"definition": legacy.snapshot(), "inputs": inputs},
+    )
+    newsletter_workflow_repository.WorkflowRepository(source["store"]).start(
+        run["id"], legacy, inputs
+    )
+    source["parent"] = run["id"]
+    create(source)
+    pipeline = newsletter_workflow_pipeline.DagPipeline(
+        runs,
+        tmp_path / "jobs",
+        editor=editor.ModelEditor(tmp_path / "unused-auth"),
+    )
+    workflow = pipeline.receipt(run["id"])["workflow"]
+    assert workflow["id"] == "daily-newsletter"
+    assert [item["id"] for item in workflow["continuations"]] == [
+        "editorial-repair"
+    ]
+    assert workflow["continuations"][0]["state"] == "queued"
+
+
+MARKER = "migration:settle_read_only_attempts:v1"
+
+
+def _attempt(store, identity, state, error_code):
+    store.db.execute(
+        "INSERT INTO workflow_attempts(id,run_id,node_id,item_id,state,"
+        "input_hash,artifact_id,error_code,started_at,finished_at) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (
+            identity,
+            "run-1",
+            "briefs",
+            identity,
+            state,
+            "hash-" + identity,
+            "",
+            error_code,
+            "2026-09-30T14:00:00+00:00",
+            "2026-09-30T14:05:00+00:00",
+        ),
+    )
+
+
+def _old_database(path: pathlib.Path, attempts) -> None:
+    """Build state written by a release that predates the migration."""
+    store = newsletter_store.Store(path, "live")
+    newsletter_workflow_repository.WorkflowRepository(store)
+    store.db.execute(
+        "INSERT INTO workflow_runs VALUES('run-1','d','{}','i','{}','{}')"
+    )
+    for attempt in attempts:
+        _attempt(store, *attempt)
+    store.db.execute(
+        "INSERT INTO packets(id,principal,request_key,digest,body,projection) "
+        "VALUES('p1','test','p1','hash','{}','unknown')"
+    )
+    store.db.execute(
+        "INSERT INTO editions VALUES('e1','e1','hash','complete',?,'{}')",
+        (json.dumps({"delivery_state": "unknown"}),),
+    )
+    store.db.execute("DELETE FROM metadata WHERE key=?", (MARKER,))
+    store.close()
+
+
+def _rows(path: pathlib.Path) -> list[tuple]:
+    with sqlite3.connect(path) as db:
+        return db.execute(
+            "SELECT * FROM workflow_attempts ORDER BY id"
+        ).fetchall()
+
+
+def test_settles_only_timed_out_and_interrupted_attempts(tmp_path):
+    path = tmp_path / "newsletter.sqlite3"
+    _old_database(
+        path,
+        [
+            ("a-timeout", "unknown", "timeout"),
+            ("b-interrupted", "unknown", "interrupted"),
+            ("c-failed", "failed", "handler_failed"),
+            ("d-done", "succeeded", ""),
+        ],
+    )
+    before = _rows(path)
+    store = newsletter_store.Store(path, "live")
+    try:
+        after = _rows(path)
+        expected = [
+            row[:4] + ("failed",) + row[5:] if row[4] == "unknown" else row
+            for row in before
+        ]
+        assert after == expected
+        assert [row[7] for row in after[:2]] == ["timeout", "interrupted"]
+        marker = store.db.execute(
+            "SELECT value FROM metadata WHERE key=?", (MARKER,)
+        ).fetchone()[0]
+        assert json.loads(marker)["changed"] == 2
+        observed = monitoring.snapshot(store)["unknown_by_kind"]
+        assert observed["workflow_attempts"] == 0
+        assert observed["packets"] == 1
+        assert observed["delivery"] == 1
+        assert store.deployment.status()["unknown"]["workflow_attempts"] == 0
+    finally:
+        store.close()
+
+
+def test_migration_runs_once_and_never_rewrites_later_unknowns(tmp_path):
+    path = tmp_path / "newsletter.sqlite3"
+    _old_database(path, [("a-timeout", "unknown", "timeout")])
+    newsletter_store.Store(path, "live").close()
+    migrated = _rows(path)
+    newsletter_store.Store(path, "live").close()
+    assert _rows(path) == migrated
+    store = newsletter_store.Store(path, "live")
+    _attempt(store, "b-later", "unknown", "timeout")
+    store.close()
+    newsletter_store.Store(path, "live").close()
+    assert [row[4] for row in _rows(path)] == ["failed", "unknown"]
+
+
+def test_other_unknown_codes_stay_visible(tmp_path):
+    path = tmp_path / "newsletter.sqlite3"
+    _old_database(path, [("a-external", "unknown", "external_unknown")])
+    store = newsletter_store.Store(path, "live")
+    try:
+        assert [row[4] for row in _rows(path)] == ["unknown"]
+        assert (
+            monitoring.snapshot(store)["unknown_by_kind"]["workflow_attempts"]
+            == 1
+        )
+    finally:
+        store.close()
+
+
+def test_monitor_revision_is_kept_but_count_drops_to_zero(tmp_path):
+    """Fleet raises the Home warning from the count, never the revision."""
+    path = tmp_path / "newsletter.sqlite3"
+    _old_database(path, [])
+    store = newsletter_store.Store(path, "live")
+    _attempt(store, "a-timeout", "unknown", "timeout")
+    store.db.execute("DELETE FROM metadata WHERE key=?", (MARKER,))
+    first = monitoring.snapshot(store)
+    store.close()
+    assert first["unknown_by_kind"]["workflow_attempts"] == 1
+    store = newsletter_store.Store(path, "live")
+    try:
+        second = monitoring.snapshot(store)
+        assert second["unknown_by_kind"]["workflow_attempts"] == 0
+        assert second["unknown_revision"] == first["unknown_revision"]
+    finally:
+        store.close()
+
+
+async def test_node_timeout_after_migration_does_not_reopen_warning(tmp_path):
+    """The marker settles old rows once, so new timeouts must not be unknown."""
+    path = tmp_path / "newsletter.sqlite3"
+    _old_database(path, [("a-timeout", "unknown", "timeout")])
+    store = newsletter_store.Store(path, "live")
+    try:
+        before = monitoring.snapshot(store)
+        assert before["unknown_by_kind"]["workflow_attempts"] == 0
+        workflows = newsletter_workflow_repository.WorkflowRepository(store)
+        workflows.start(
+            "run-2",
+            newsletter_workflow_definition.parse_definition(
+                {
+                    "version": 1,
+                    "id": "daily-newsletter",
+                    "nodes": [{"id": "discover", "type": "discovery"}],
+                }
+            ),
+            {},
+        )
+
+        async def slow(context):
+            raise TimeoutError()
+
+        await engine.WorkflowEngine(workflows, {"discovery": slow}).run("run-2")
+        after = monitoring.snapshot(store)
+        assert after["unknown_by_kind"]["workflow_attempts"] == 0
+        assert after["unknown_revision"] == before["unknown_revision"]
+        assert [
+            (row["state"], row["error_code"])
+            for row in workflows.attempts("run-2")
+        ] == [("failed", "timeout")]
+    finally:
+        store.close()
+
+
+def test_fresh_database_records_the_marker_without_tables(tmp_path):
+    store = newsletter_store.Store(tmp_path / "newsletter.sqlite3", "mock")
+    try:
+        marker = store.db.execute(
+            "SELECT value FROM metadata WHERE key=?", (MARKER,)
+        ).fetchone()[0]
+        assert json.loads(marker)["changed"] == 0
+    finally:
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_dag_pipeline_collect_next_handles_outer_timeout_and_store_errors(
+    store, tmp_path, monkeypatch
+):
+    settings = newsletter_settings.Settings(
+        data_dir=tmp_path / "data",
+        editor_token="e" * 32,
+        send_token="s" * 32,
+    )
+    state = newsletter_workflow_state.WorkflowState(store)
+    instructions, snapshot = newsletter_workflow_pipeline.freeze_workflow(
+        settings, state, "2026-09-06"
+    )
+    runs = repository.RunRepository(store)
+    pipeline = newsletter_workflow_pipeline.DagPipeline(
+        runs,
+        tmp_path / "workspace",
+        editor=editor.ModelEditor(tmp_path / "unused-auth"),
+    )
+
+    # 1. Outer TimeoutError before engine.step
+    first = runs.start(
+        {"request_key": "outer-timeout", "issue_date": "2026-09-06"},
+        instructions,
+        workflow_snapshot=snapshot,
+    )
+    monkeypatch.setattr(
+        pipeline.repository,
+        "start",
+        lambda *args, **kwargs: (_ for _ in ()).throw(TimeoutError()),
+    )
+    assert await pipeline.collect_next() is True
+    assert runs.get(first["id"])["state"] == "blocked"
+    assert runs.get(first["id"])["error_code"] == "workflow_deadline"
+
+    # 2. Non-busy StoreError
+    second = runs.start(
+        {"request_key": "store-error", "issue_date": "2026-09-06"},
+        instructions,
+        workflow_snapshot=snapshot,
+    )
+    monkeypatch.setattr(
+        pipeline.repository,
+        "start",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            newsletter_store.StoreError("conflict", "db conflict")
+        ),
+    )
+    assert await pipeline.collect_next() is True
+    assert runs.get(second["id"])["state"] == "failed"
+    assert runs.get(second["id"])["error_code"] == "workflow_storage"
+
+
+def test_dag_pipeline_archive_candidates_handles_empty_and_populated_pools(
+    store, tmp_path
+):
+    settings = newsletter_settings.Settings(
+        data_dir=tmp_path / "data",
+        editor_token="e" * 32,
+        send_token="s" * 32,
+    )
+    state = newsletter_workflow_state.WorkflowState(store)
+    instructions, snapshot = newsletter_workflow_pipeline.freeze_workflow(
+        settings, state, "2026-09-06"
+    )
+    definition = newsletter_workflow_definition.parse_definition(
+        snapshot["definition"]
+    )
+    runs = repository.RunRepository(store)
+    run = runs.start(
+        {"request_key": "archive-run", "issue_date": "2026-09-06"},
+        instructions,
+        workflow_snapshot=snapshot,
+    )
+    pipeline = newsletter_workflow_pipeline.DagPipeline(
+        runs,
+        tmp_path / "workspace",
+        editor=editor.ModelEditor(tmp_path / "unused-auth"),
+    )
+    pipeline.repository.start(run["id"], definition, snapshot["inputs"])
+    dedup_node = next(
+        node for node in definition.nodes if node.type == "deduplicate"
+    )
+
+    # Empty candidate pool returns early without archiving a packet
+    pipeline.repository.output = lambda _run_id, _node_id: {"candidates": []}
+    pipeline.archive_candidates(run, definition, [], [])
+    assert state.archive(run["id"]) is None
+
+    # Populated candidate pool marks used candidates and writes index packet
+    cand = workflow_content.candidate(
+        id="cand-1", url="https://example.org/paper-1"
+    )
+    state.remember([cand], "2026-09-06")
+    pipeline.repository.output = lambda _run_id, _node_id: {
+        "candidates": [cand]
+    }
+    pkt = workflow_state.packet(store, "pkt-1")
+    pkt["content"]["sources"][0]["url"] = "https://example.org/paper-1"
+    pipeline.archive_candidates(run, definition, [pkt["id"]], [pkt])
+    archived = state.archive(run["id"])
+    assert archived is not None and archived["packet_id"]
+    prog = pipeline.graph_progress(run["id"])
+    assert prog["id"] == definition.id
+    assert any(n["id"] == dedup_node.id for n in prog["nodes"])
+

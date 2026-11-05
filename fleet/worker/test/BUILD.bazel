@@ -28,10 +28,7 @@ copied_source_files(
     name = "types_srcs",
     srcs = [
         "cloudflare-workers.ts",
-        "codex-gateway.test.ts",
-        "deploy.test.ts",
         "metrics.test.ts",
-        "newsletter-config.test.ts",
         "report.test.ts",
     ],
 )
@@ -58,34 +55,6 @@ copied_source_files(
 )
 
 proto_vitest_test(
-    name = "codex-gateway_test",
-    config = "//fleet/worker:test_config",
-    data = [
-        "//fleet/worker:node_modules/vitest",
-        "//fleet/worker:package_json",
-    ],
-    project = "fleet/worker",
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = [":codex-gateway.test.ts"],
-    deps = COMMON_TEST_DEPS,
-)
-
-proto_vitest_test(
-    name = "deploy_test",
-    config = "//fleet/worker:test_config",
-    data = [
-        "//fleet/worker:node_modules/vitest",
-        "//fleet/worker:package_json",
-    ],
-    project = "fleet/worker",
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = [":deploy.test.ts"],
-    deps = ["//fleet/deploy:vars"],
-)
-
-proto_vitest_test(
     name = "metrics_test",
     config = "//fleet/worker:test_config",
     data = [
@@ -106,28 +75,10 @@ proto_vitest_test(
 )
 
 proto_vitest_test(
-    name = "newsletter-config_test",
-    config = "//fleet/worker:test_config",
-    data = [
-        "//fleet/worker:node_modules/vitest",
-        "//fleet/worker:package_json",
-    ],
-    project = "fleet/worker",
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = [":newsletter-config.test.ts"],
-    deps = [
-        "//contracts:fleet-report-v1/fixtures/healthy.json_data",
-        "//fleet/worker/src:health",
-        "//fleet/worker/src:report",
-        "//proto/fleet/telemetry/v1:ts",
-    ],
-)
-
-proto_vitest_test(
     name = "report_test",
     config = "//fleet/worker:test_config",
     data = [
+        ":cloudflare-workers.ts",
         "//fleet/worker:node_modules/vitest",
         "//fleet/worker:package_json",
     ],
@@ -135,7 +86,26 @@ proto_vitest_test(
     runner = vitest.vitest_test,
     tags = ["unit"],
     tests = [":report.test.ts"],
-    deps = COMMON_TEST_DEPS,
+    deps = COMMON_TEST_DEPS + [
+        "//fleet/worker/src:http",
+        "//fleet/worker/src:metrics",
+        "//fleet/worker/src:module_group_5",
+        "//fleet/worker/src:newsletter-config",
+        "//fleet/worker/src:ops",
+        "//fleet/worker/src:receipt",
+        "//fleet/worker/src:runtime",
+        "//packages/edge-auth:lib",
+        "//proto/common/errors/v1:ts",
+        "//proto/fleet/telemetry/v1:ts",
+        "//proto/fleet/ui/v1:ts",
+        "//proto/ops/v1:ts",
+        "//proto/platform/runtime/v1:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:protobuf-wkt",
+        "//proto/ts:rpc-status",
+        "//proto/ts:wire-json",
+    ],
 )
 
 js_library(

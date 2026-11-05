@@ -436,3 +436,136 @@ describe('the alarm', () => {
     expect(ledger?.fetches).toBeGreaterThanOrEqual(60);
   });
 });
+
+// ---- fake-net proxy streaming & passthrough (formerly runtime/fake-net.test.ts) ----
+
+import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
+import { BODY_SLICE_BYTES, FakeNet, type FakeHandler } from './fake-net.ts';
+
+const FAKE_NET_PAGE = 'https://big.example.com/p';
+const FAKE_NET_PAGE_BYTES = 2 * 1024 * 1024 - 200;
+const FAKE_NET_STALL_MS = 300;
+const FAKE_NET_MAX_AHEAD_BYTES = 2 * 32 * 1024;
+
+function syntheticBody(size: number): { bytes: Uint8Array; sum: number } {
+  const bytes = new Uint8Array(size);
+  let sum = 0;
+  for (let i = 0; i < size; i++) {
+    bytes[i] = (i * 31 + 7) % 251;
+    sum = (sum + (bytes[i] ?? 0)) % 65521;
+  }
+  return { bytes, sum };
+}
+
+const FAKE_NET_READER = `
+export default {
+  async fetch(request, env) {
+    const path = new URL(request.url).pathname;
+    if (path === '/echo') {
+      const response = await fetch('https://echo.example.com/x?q=1', { method: 'POST', headers: { 'x-sent': 'yes' }, body: 'hello' });
+      return Response.json({ status: response.status, header: response.headers.get('x-answered'), body: await response.text() });
+    }
+    if (path === '/empty') {
+      const answers = [];
+      for (const url of ['https://echo.example.com/not-modified', 'https://echo.example.com/blank']) {
+        const response = await fetch(url);
+        answers.push({ status: response.status, body: response.body === null ? null : await response.text() });
+      }
+      return Response.json(answers);
+    }
+    const response = await fetch('${FAKE_NET_PAGE}');
+    const reader = response.body.getReader();
+    let read = 0;
+    let sum = 0;
+    const take = (value) => {
+      read += value.byteLength;
+      for (const byte of value) sum = (sum + byte) % 65521;
+    };
+    take((await reader.read()).value);
+    await env.CONTROL.fetch('http://control/stalled?read=' + read);
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      take(value);
+    }
+    return Response.json({ read, sum });
+  },
+};
+`;
+
+async function withReader<T>(handler: FakeHandler, onStall: (read: number, net: FakeNet) => Promise<void>, run: (mf: Miniflare, net: FakeNet) => Promise<T>): Promise<T> {
+  const net = new FakeNet(handler);
+  const mf = new Miniflare(
+    convertV4MiniflareOptions({
+      host: '127.0.0.1',
+      port: 0,
+      workers: [
+        {
+          name: 'reader',
+          modules: true,
+          script: FAKE_NET_READER,
+          compatibilityDate: '2026-09-08',
+          outboundService: 'fake-net',
+          serviceBindings: {
+            CONTROL: async (request: Request) => {
+              await onStall(Number(new URL(request.url).searchParams.get('read')), net);
+              return new Response(null, { status: 204 });
+            },
+          },
+        },
+        net.worker('fake-net'),
+      ],
+    }),
+  );
+  try {
+    await mf.ready;
+    return await run(mf, net);
+  } finally {
+    await mf.dispose();
+  }
+}
+
+describe('the fake network', () => {
+  it('hands a body out only as the reader reads: a stalled reader holds at most two slices of a 2 MiB page', async () => {
+    const pageData = syntheticBody(FAKE_NET_PAGE_BYTES);
+    let stalled: { read: number; served: number } | undefined;
+    const result = await withReader(
+      (request) => Promise.resolve(request.url === FAKE_NET_PAGE ? new Response(pageData.bytes, { headers: { 'content-type': 'text/html' } }) : new Response('not found', { status: 404 })),
+      async (read, net) => {
+        await new Promise((resolve) => setTimeout(resolve, FAKE_NET_STALL_MS));
+        stalled = { read, served: net.served.get(FAKE_NET_PAGE) ?? 0 };
+      },
+      async (mf) => (await mf.dispatchFetch('http://reader/stall')).json(),
+    );
+    expect(result, 'the whole page, intact').toEqual({ read: FAKE_NET_PAGE_BYTES, sum: pageData.sum });
+    expect(stalled?.read).toBeGreaterThan(0);
+    expect((stalled?.served ?? Infinity) - (stalled?.read ?? 0), `bytes sent ahead of the stalled reader (a slice is ${String(BODY_SLICE_BYTES)})`).toBeLessThanOrEqual(FAKE_NET_MAX_AHEAD_BYTES);
+  });
+
+  it('passes the request (method, URL, headers, body) and the answer (status, headers, body, none, empty) through', async () => {
+    const seen: { url: string; method: string; sent: string | null; body: string }[] = [];
+    const answers = await withReader(
+      async (request) => {
+        seen.push({ url: request.url, method: request.method, sent: request.headers.get('x-sent'), body: await request.text() });
+        if (request.url.endsWith('/not-modified')) return new Response(null, { status: 304 });
+        if (request.url.endsWith('/blank')) return new Response('');
+        return new Response('answered', { status: 201, headers: { 'x-answered': 'yes' } });
+      },
+      () => Promise.resolve(),
+      async (mf) => [await (await mf.dispatchFetch('http://reader/echo')).json(), await (await mf.dispatchFetch('http://reader/empty')).json()],
+    );
+    expect(answers).toEqual([
+      { status: 201, header: 'yes', body: 'answered' },
+      [
+        { status: 304, body: null },
+        { status: 200, body: '' },
+      ],
+    ]);
+    expect(seen).toEqual([
+      { url: 'https://echo.example.com/x?q=1', method: 'POST', sent: 'yes', body: 'hello' },
+      { url: 'https://echo.example.com/not-modified', method: 'GET', sent: null, body: '' },
+      { url: 'https://echo.example.com/blank', method: 'GET', sent: null, body: '' },
+    ]);
+  });
+});
+

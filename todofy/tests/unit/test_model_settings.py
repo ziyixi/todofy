@@ -139,3 +139,97 @@ def test_api_and_subscription_routes_persist_independently(settings_api):
         asyncio.run(
             module.update(env, "owner", request(dataclasses.replace(changed, report_model="openai/gpt-6-astra")))
         )
+
+
+def test_model_generate_fallbacks_and_error_classification(monkeypatch):
+    from todofy.core.vocab import Code
+
+    with stubbed_pyodide(monkeypatch):
+        from todofy.runtime import model
+
+        now = model.now_ms()
+        env = types.SimpleNamespace()
+
+        # Past deadline immediately returns SUMMARY_FAILED without calling client
+        expired = asyncio.run(
+            model.generate(env, system="sys", user="u", deadline_ms=now - 1, model=EMAIL)
+        )
+        assert not expired.verdict.ok and expired.verdict.code == Code.SUMMARY_FAILED and expired.attempts == 0
+
+        # Fallback from RESOURCE_EXHAUSTED error to a working fallback model
+        calls = []
+
+        class FallbackClient:
+            async def generate(self, req):
+                calls.append(req.model)
+                if req.model == EMAIL:
+                    raise models.ModelRouterError("RESOURCE_EXHAUSTED")
+                return models.GenerateResponse(
+                    model=req.model,
+                    output="ok text",
+                    usage=models.Usage(input_tokens=10, output_tokens=5, available=True),
+                    error=None,
+                )
+
+        monkeypatch.setattr(model, "client", lambda *_a: FallbackClient())
+        res = asyncio.run(
+            model.generate(
+                env,
+                system="sys",
+                user="u",
+                deadline_ms=now + 60_000,
+                model=EMAIL,
+                fallback_models=(REPORT,),
+            )
+        )
+        assert res.verdict.ok and res.text == "ok text" and res.tokens == 15 and res.attempts == 2
+        assert calls == [EMAIL, REPORT]
+
+        # Rejected error (UNAUTHENTICATED) stops immediately without trying fallback
+        calls.clear()
+
+        class RejectedClient:
+            async def generate(self, req):
+                calls.append(req.model)
+                raise models.ModelRouterError("UNAUTHENTICATED")
+
+        monkeypatch.setattr(model, "client", lambda *_a: RejectedClient())
+        rej = asyncio.run(
+            model.generate(
+                env,
+                system="sys",
+                user="u",
+                deadline_ms=now + 60_000,
+                model=EMAIL,
+                fallback_models=(REPORT,),
+            )
+        )
+        assert not rej.verdict.ok and rej.verdict.code == Code.LLM_REQUEST_REJECTED and calls == [EMAIL]
+
+        # Answer-level error classification (MODEL_QUOTA -> LLM_QUOTA, MODEL_AUTH -> LLM_REQUEST_REJECTED)
+        class AnswerErrorClient:
+            def __init__(self, reason: str) -> None:
+                self.reason = reason
+
+            async def generate(self, req):
+                return models.GenerateResponse(
+                    model=req.model,
+                    output="",
+                    usage=models.Usage(input_tokens=4, output_tokens=0, available=True),
+                    error=models.GenerateError(reason=self.reason, message="err", retry_after_seconds=12.0),
+                )
+
+        monkeypatch.setattr(model, "client", lambda *_a: AnswerErrorClient("MODEL_QUOTA"))
+        quota_res = asyncio.run(
+            model.generate(env, system="sys", user="u", deadline_ms=now + 60_000, model=EMAIL)
+        )
+        assert quota_res.verdict.code == Code.LLM_QUOTA and quota_res.verdict.retry_after == 12.0
+
+        monkeypatch.setattr(model, "client", lambda *_a: AnswerErrorClient("MODEL_AUTH"))
+        auth_res = asyncio.run(
+            model.generate(
+                env, system="sys", user="u", deadline_ms=now + 60_000, model=EMAIL, fallback_models=(REPORT,)
+            )
+        )
+        assert auth_res.verdict.code == Code.LLM_REQUEST_REJECTED and auth_res.attempts == 1
+

@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+import { URL } from 'node:url';
+import { describe, expect, it, onTestFinished } from 'vitest';
 import type { TokenUsage } from '../src/types.ts';
 import { estimateCostMicrousd } from '../src/providers/pricing.ts';
 import { addUsage, claudeUsage, geminiUsage, unknownUsage } from '../src/providers/usage.ts';
@@ -118,5 +121,36 @@ describe('pricing after provider usage normalization', () => {
     expect(addUsage(first, second).estimatedCostMicrousd).toBe(418);
     expect(addUsage(first, unknownUsage()).estimatedCostMicrousd).toBeUndefined();
     expect(addUsage(first, unknownUsage()).available).toBe(false);
+  });
+
+  it('backfills only missing metadata estimates in SQL migration 0003, including large cumulative SDK usage and legacy JSON', () => {
+    const db = new DatabaseSync(':memory:');
+    onTestFinished(() => db.close());
+    db.exec(readFileSync(new URL('../../migrations/0001_router.sql', import.meta.url), 'utf8'));
+    const usage = { available: true, input_tokens: 534327, output_tokens: 1526, cached_input_tokens: 454400, billing_kind: 'subscription' };
+    const samples = [
+      { id: 'large', model: 'gpt-6.1-sol', state: 'succeeded', json: { generation: { usage } } },
+      { id: 'legacy', model: 'gemini-3.5-flash-lite', state: 'succeeded', json: { usage: { available: true, input_tokens: 27, output_tokens: 8 } } },
+      { id: 'known', model: 'gpt-6.1-sol', state: 'succeeded', json: { generation: { usage: { ...usage, estimated_cost_microusd: 123 } } } },
+      { id: 'unknown', model: 'gpt-6.1-sol', state: 'failed', json: { generation: { usage: { billing_kind: 'subscription' } } } },
+    ];
+    const insert = db.prepare('INSERT INTO requests VALUES (?,?,?,?,?,?,?,?,?,?)');
+    for (const row of samples) {
+      insert.run(row.id, 'newsletter', row.model, row.state, 1, 2, `requests/newsletter/${row.id}.json`, 3, '', JSON.stringify(row.json));
+    }
+    const migrationSql = readFileSync(new URL('../../migrations/0003_missing_cost_estimates.sql', import.meta.url), 'utf8');
+    db.exec(migrationSql);
+    db.exec(migrationSql);
+    const values = db.prepare(
+      "SELECT id,state,json_extract(COALESCE(json_extract(generation_json,'$.generation'),generation_json),'$.usage.estimated_cost_microusd') AS cost FROM requests ORDER BY id",
+    ).all();
+    expect(values).toEqual([
+      { id: 'known', state: 'succeeded', cost: 123 },
+      { id: 'large', state: 'succeeded', cost: 220554 },
+      { id: 'legacy', state: 'succeeded', cost: 29 },
+      { id: 'unknown', state: 'failed', cost: null },
+    ]);
+    const after = db.prepare("SELECT generation_json FROM requests WHERE id='large'").get() as { generation_json: string };
+    expect((JSON.parse(after.generation_json) as { generation: { usage: object } }).generation.usage).toMatchObject(usage);
   });
 });

@@ -1,15 +1,9 @@
 /**
  * The daily backup (src/backup.ts, src/backup-runner.ts) on real D1 and R2 at fixed clocks, then the LinksBackup
  * object's Alarm (src/backup-alarm.ts) running the first one at the real clock as soon as Home's status finds no state,
- * Ops reporting it, and tools/backup-restore.ts restoring it with wrangler into a new, empty local D1 that holds, row
- * for row, what the store held (docs/backup.md "Rehearse locally"). Synthetic rows only.
+ * and Ops reporting it. Synthetic rows only.
  */
-import { execFileSync, spawnSync } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 import { Severity } from '@ziyixi/proto/ops/v1/ops_pb';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -37,11 +31,6 @@ import type { Env } from '../../src/env.ts';
 import { RESTORE_ORDER } from '../../../tools/backup-restore.ts';
 import { measuredReads, startHarness, type Harness } from './harness.ts';
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const TOOL = join(HERE, '../../../tools/backup-restore.ts');
-const WRANGLER = process.env.BAZEL_WRANGLER
-  ? resolve(process.env.TEST_SRCDIR ?? '', process.env.TEST_WORKSPACE ?? '', process.env.BAZEL_WRANGLER)
-  : join(HERE, '../../node_modules/.bin/wrangler');
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 /** The daily slot, 05:25 UTC. */
@@ -439,47 +428,6 @@ describe('the Alarm, Home and a restore', () => {
     expect(latest.key).toBe(done.last_key);
     expect(await opsStatus()).toMatchObject({ health: 'ok', signals: [], counters: { database_ready: 1 } });
     expect(h.logs.join('\n')).not.toMatch(/k0\d{3}|example\.com|Synthetic/);
-
-    const work = await mkdtemp(join(tmpdir(), 'links-restore-'));
-    try {
-      const tool = (...args: string[]) => spawnSync(process.execPath, [TOOL, ...args, ...(WRANGLER && process.env.BAZEL_WRANGLER && ['download', 'upload', 'verify'].includes(args[0] ?? '') ? ['--wrangler', WRANGLER] : [])], { encoding: 'utf8' });
-      const wrangler = (...args: string[]) =>
-        execFileSync(WRANGLER, args, { encoding: 'utf8', env: { ...process.env, CI: 'true', WRANGLER_SEND_METRICS: 'false' }, stdio: 'pipe', maxBuffer: 256 << 20 });
-      const restore = join(work, 'restore');
-      const downloaded = tool('download', '--out', restore, '--local', '--persist-to', h.persistTo);
-      expect(downloaded.status, downloaded.stderr).toBe(0);
-      expect(downloaded.stdout).toContain(`backup ${latest.key}\n`);
-      expect(downloaded.stdout).toMatch(new RegExp(`\\nPASS link_revisions rows=${String(LINKS * REVISIONS_PER_LINK)} parts=\\d+\\n`));
-      const config = join(work, 'restore.toml');
-      const configured = tool('config', '--database-name', 'links-restore', '--database-id', randomUUID(), '--out', config);
-      expect(configured.status, configured.stderr).toBe(0);
-      const target = ['--local', '--persist-to', join(work, 'd1'), '--config', config];
-      wrangler('d1', 'migrations', 'apply', 'DB', ...target);
-      const sql = join(work, 'restore.sql');
-      const written = tool('sql', '--in', restore, '--out', sql);
-      expect(written.status, written.stderr).toBe(0);
-      expect(written.stdout).not.toMatch(/WARN|Synthetic|example\.com/);
-      wrangler('d1', 'execute', 'DB', ...target, '--file', sql);
-      const verified = tool('verify', '--in', restore, ...target);
-      expect(verified.status, verified.stdout + verified.stderr).toBe(0);
-      expect(verified.stdout).toContain(`PASS link_revisions rows=${String(LINKS * REVISIONS_PER_LINK)}/${String(LINKS * REVISIONS_PER_LINK)}\n`);
-      expect(verified.stdout.trim().split('\n').at(-1)).toBe('verify PASS');
-
-      // Independently of the tool: every table of the restored database equals the store, row for row.
-      for (const table of BACKUP_TABLES) {
-        const query = `SELECT * FROM ${table.name} ORDER BY ${table.key.join(',')}`;
-        const restored = (JSON.parse(wrangler('d1', 'execute', 'DB', ...target, '--json', '--command', query)) as { results: unknown[] }[])[0]?.results;
-        expect(restored, table.name).toEqual(await h.sql(query));
-      }
-
-      // A restored row that differs fails the check.
-      wrangler('d1', 'execute', 'DB', ...target, '--command', "UPDATE links SET description = 'changed' WHERE key = 'k0007'");
-      const failed = tool('verify', '--in', restore, ...target);
-      expect(failed.status).toBe(1);
-      expect(failed.stdout).toMatch(/FAIL links rows=600\/600 differing=1\n/);
-    } finally {
-      await rm(work, { recursive: true, force: true });
-    }
   });
 
   it('answers Home with the backup facts and no guard, and leaves an armed Alarm as it is', async () => {

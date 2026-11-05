@@ -623,46 +623,61 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
             all(resource["kind"] == "Secret" for resource in payload["items"])
         )
 
+    INSTALL_STEPS = (
+        (install, "preflight", str(binaries.CONNECTOR)),
+        (binaries, "install_connector", None),
+        (host, "migrate", None),
+        (host, "retire_legacy_runtime", None),
+        (observer_policy, "install", None),
+        (firewall, "install", None),
+        (node_address, "install", None),
+        (cluster, "start", None),
+        (node_address, "wait_cluster", None),
+        (node_address, "upstream_dns", False),
+        (cluster, "apply", None),
+        (cluster, "secrets", None),
+        (cluster, "held_runtime", None),
+        (node_address, "in_cluster_read", None),
+        (node_address, "public_lookup", None),
+        (cluster, "services", None),
+        (host, "complete_bootstrap", None),
+    )
+
+    def patch_install_steps(self, stack, *, skip=(), record_order=None, forbid=False):
+        steps = (
+            ((install, "credentials", None),) + self.INSTALL_STEPS
+            if forbid
+            else ((host, "bootstrap_completed", False),) + self.INSTALL_STEPS
+        )
+        for module, name, result in steps:
+            if name in skip:
+                continue
+            if forbid:
+                stack.enter_context(
+                    patch.object(module, name, side_effect=AssertionError(name))
+                )
+            elif record_order is not None:
+
+                def invoke(*args, _name=name, _result=result, **kwargs):
+                    record_order.append(_name)
+                    return _result
+
+                stack.enter_context(patch.object(module, name, side_effect=invoke))
+            else:
+                stack.enter_context(patch.object(module, name, return_value=result))
+        return [name for _, name, _ in steps if name not in skip]
+
     def test_orchestration_verifies_inputs_before_writes_and_finishes_held(self):
         bundle = self.bundle()
         private_path, _ = self.private()
         order = []
-        mocks = []
-        functions = [
-            (host, "bootstrap_completed", False),
-            (install, "preflight", str(binaries.CONNECTOR)),
-            (binaries, "install_connector", None),
-            (host, "migrate", None),
-            (host, "retire_legacy_runtime", None),
-            (observer_policy, "install", None),
-            (firewall, "install", None),
-            (node_address, "install", None),
-            (cluster, "start", None),
-            (node_address, "wait_cluster", None),
-            (node_address, "upstream_dns", False),
-            (cluster, "apply", None),
-            (cluster, "secrets", None),
-            (cluster, "held_runtime", None),
-            (node_address, "in_cluster_read", None),
-            (node_address, "public_lookup", None),
-            (cluster, "services", None),
-            (host, "complete_bootstrap", None),
-        ]
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch.object(os, "geteuid", return_value=0))
-            for module, name, result in functions:
-
-                def invoke(*args, _name=name, _result=result, **kwargs):
-                    order.append(_name)
-                    return _result
-
-                mocks.append(
-                    stack.enter_context(patch.object(module, name, side_effect=invoke))
-                )
+            expected_order = self.patch_install_steps(stack, record_order=order)
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
                 install.install(bundle, private_path)
-        self.assertEqual(order, [name for _, name, _ in functions])
+        self.assertEqual(order, expected_order)
         events = [json.loads(line) for line in output.getvalue().splitlines()]
         self.assertEqual(events[-1]["status"], "complete_held")
         self.assertTrue(
@@ -672,36 +687,13 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
     def test_completed_bootstrap_is_a_noop_after_release_activation(self):
         bundle = self.bundle()
         output = io.StringIO()
-        mutations = (
-            (install, "credentials"),
-            (install, "preflight"),
-            (binaries, "install_connector"),
-            (host, "migrate"),
-            (host, "retire_legacy_runtime"),
-            (observer_policy, "install"),
-            (firewall, "install"),
-            (node_address, "install"),
-            (cluster, "start"),
-            (node_address, "wait_cluster"),
-            (node_address, "upstream_dns"),
-            (cluster, "apply"),
-            (cluster, "secrets"),
-            (cluster, "held_runtime"),
-            (node_address, "in_cluster_read"),
-            (node_address, "public_lookup"),
-            (cluster, "services"),
-            (host, "complete_bootstrap"),
-        )
         with (
             contextlib.ExitStack() as stack,
             patch.object(os, "geteuid", return_value=0),
             patch.object(host, "bootstrap_completed", return_value=True) as completed,
             contextlib.redirect_stdout(output),
         ):
-            for module, name in mutations:
-                stack.enter_context(
-                    patch.object(module, name, side_effect=AssertionError(name))
-                )
+            self.patch_install_steps(stack, forbid=True)
             install.install(bundle, self.base / "removed-credentials.json")
         completed.assert_called_once_with(config.checksum(bundle / "manifest.json"))
         self.assertEqual(
@@ -716,27 +708,9 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
     def test_services_failure_does_not_mark_success_and_same_bundle_can_retry(self):
         bundle = self.bundle()
         private_path, _ = self.private()
-        functions = (
-            (install, "preflight", str(binaries.CONNECTOR)),
-            (binaries, "install_connector", None),
-            (host, "migrate", None),
-            (host, "retire_legacy_runtime", None),
-            (observer_policy, "install", None),
-            (firewall, "install", None),
-            (node_address, "install", None),
-            (cluster, "start", None),
-            (node_address, "wait_cluster", None),
-            (node_address, "upstream_dns", False),
-            (cluster, "apply", None),
-            (cluster, "secrets", None),
-            (cluster, "held_runtime", None),
-            (node_address, "in_cluster_read", None),
-            (node_address, "public_lookup", None),
-        )
         with (
             contextlib.ExitStack() as stack,
             patch.object(os, "geteuid", return_value=0),
-            patch.object(host, "bootstrap_completed", return_value=False),
             patch.object(host, "complete_bootstrap") as complete,
             patch.object(
                 cluster,
@@ -745,8 +719,9 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
             ) as services,
             contextlib.redirect_stdout(io.StringIO()),
         ):
-            for module, name, result in functions:
-                stack.enter_context(patch.object(module, name, return_value=result))
+            self.patch_install_steps(
+                stack, skip={"services", "complete_bootstrap"}
+            )
             with self.assertRaisesRegex(config.BootstrapError, "SYNTHETIC_FAILURE"):
                 install.install(bundle, private_path)
             complete.assert_not_called()
@@ -759,23 +734,6 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
         private_path, _ = self.private()
         connector_directory = self.base / "cloudflared"
         connector_directory.mkdir()
-        functions = (
-            (install, "preflight", str(binaries.CONNECTOR)),
-            (binaries, "install_connector", None),
-            (host, "migrate", None),
-            (host, "retire_legacy_runtime", None),
-            (observer_policy, "install", None),
-            (firewall, "install", None),
-            (node_address, "install", None),
-            (cluster, "start", None),
-            (node_address, "wait_cluster", None),
-            (node_address, "upstream_dns", False),
-            (cluster, "apply", None),
-            (cluster, "secrets", None),
-            (cluster, "held_runtime", None),
-            (node_address, "in_cluster_read", None),
-            (node_address, "public_lookup", None),
-        )
 
         def path(value):
             if value == "/etc/cloudflared":
@@ -785,7 +743,6 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
         with (
             contextlib.ExitStack() as stack,
             patch.object(os, "geteuid", return_value=0),
-            patch.object(host, "bootstrap_completed", return_value=False),
             patch.object(host, "complete_bootstrap") as complete,
             patch.object(cluster, "Path", side_effect=path),
             patch.object(cluster, "write_file"),
@@ -801,8 +758,9 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
             ) as command,
             contextlib.redirect_stdout(io.StringIO()),
         ):
-            for module, name, result in functions:
-                stack.enter_context(patch.object(module, name, return_value=result))
+            self.patch_install_steps(
+                stack, skip={"services", "complete_bootstrap"}
+            )
             with self.assertRaisesRegex(config.BootstrapError, "SYSTEM_COMMAND_FAILED"):
                 install.install(bundle, private_path)
             complete.assert_not_called()
@@ -814,6 +772,81 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
             self.assertGreater(startup.kwargs["timeout"], 15)
             install.install(bundle, private_path)
         complete.assert_called_once_with(config.checksum(bundle / "manifest.json"))
+
+    def test_cluster_start_and_held_runtime_verify_kubeconfig_and_rollouts(self):
+        bundle = self.bundle()
+        kubeconfig = self.base / "k3s.yaml"
+        kubeconfig.write_text("apiVersion: v1\n")
+        kubeconfig.chmod(0o600)
+
+        with (
+            patch.object(cluster, "KUBECONFIG", str(kubeconfig)),
+            patch.object(cluster, "pinned_binary") as pinned,
+            patch.object(cluster, "directory") as mkdir,
+            patch.object(cluster, "write_file") as write_file,
+            patch.object(cluster, "command") as cmd,
+            patch.object(cluster.time, "sleep"),
+            patch.object(
+                cluster,
+                "kubectl",
+                side_effect=[
+                    CompletedProcess([], 1, b"", b""),
+                    CompletedProcess([], 0, b"ok", b""),
+                ],
+            ) as kubectl_mock,
+        ):
+            cluster.start(bundle)
+            pinned.assert_called_once()
+            mkdir.assert_called_once_with("/etc/rancher/k3s", mode=0o700)
+            self.assertEqual(write_file.call_count, 4)
+            self.assertEqual(cmd.call_count, 2)
+            self.assertEqual(kubectl_mock.call_count, 2)
+
+        kubeconfig.chmod(0o644)
+        with (
+            patch.object(cluster, "KUBECONFIG", str(kubeconfig)),
+            patch.object(cluster, "pinned_binary"),
+            patch.object(cluster, "directory"),
+            patch.object(cluster, "write_file"),
+            patch.object(cluster, "command"),
+            patch.object(
+                cluster, "kubectl", return_value=CompletedProcess([], 0, b"ok", b"")
+            ),
+            self.assertRaisesRegex(config.BootstrapError, "KUBECONFIG_NOT_PRIVATE"),
+        ):
+            cluster.start(bundle)
+
+        with (
+            patch.object(cluster, "pinned_binary"),
+            patch.object(cluster, "directory"),
+            patch.object(cluster, "write_file"),
+            patch.object(cluster, "command"),
+            patch.object(cluster.time, "monotonic", side_effect=[100.0, 101.0, 300.0]),
+            patch.object(cluster.time, "sleep"),
+            patch.object(
+                cluster, "kubectl", return_value=CompletedProcess([], 1, b"", b"")
+            ),
+            self.assertRaisesRegex(config.BootstrapError, "K3S_READY_TIMEOUT"),
+        ):
+            cluster.start(bundle)
+
+        with (
+            patch.object(cluster, "apply") as apply_mock,
+            patch.object(cluster, "kubectl") as rollout_mock,
+        ):
+            cluster.held_runtime(bundle, "personal-cloud")
+            apply_mock.assert_called_once()
+            rollout_mock.assert_called_once_with(
+                [
+                    "-n",
+                    "personal-cloud",
+                    "rollout",
+                    "status",
+                    "deployment/newsletter",
+                    "--timeout=300s",
+                ],
+                timeout=330,
+            )
 
     def test_completion_marker_is_atomic_root_owned_and_rejects_other_bundles(self):
         marker = self.base / "completion.json"

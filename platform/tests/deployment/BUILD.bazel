@@ -11,10 +11,29 @@ py_library(
 )
 
 py_library(
+    name = "fixtures",
+    srcs = ["fixtures.py"],
+    imports = ["../.."],
+    deps = [
+        ":package",
+        "//platform/src/personal_cloud/deployment:admission",
+        "//platform/src/personal_cloud/deployment:controller",
+        "//platform/src/personal_cloud/deployment:kubernetes",
+        "//platform/src/personal_cloud/deployment:resources",
+        "//platform/src/personal_cloud/deployment:store",
+        "//platform/src/personal_cloud/status_daemon:config",
+        "//proto:python_runtime",
+        "//proto/platform/runtime/v1:python",
+        "@python_deps//pyyaml",
+    ],
+)
+
+py_library(
     name = "test_codex_gateway",
     srcs = ["test_codex_gateway.py"],
     imports = ["../.."],
     deps = [
+        ":fixtures",
         ":package",
         ":test_release",
         "//platform/src/personal_cloud/deployment:controller",
@@ -33,6 +52,7 @@ py_library(
     srcs = ["test_release.py"],
     imports = ["../.."],
     deps = [
+        ":fixtures",
         ":package",
         "//platform/src/personal_cloud/deployment:admission",
         "//platform/src/personal_cloud/deployment:controller",
@@ -62,6 +82,7 @@ unittest_test(
     ],
     modules = ["tests.deployment.test_codex_gateway"],
     deps = [
+        ":fixtures",
         ":package",
         ":test_release",
         "//platform/src/personal_cloud/deployment:controller",
@@ -107,6 +128,7 @@ py_test(
         "@platforms//os:linux",
     ],
     deps = [
+        ":fixtures",
         ":package",
         ":test_codex_gateway",
         ":test_release",
@@ -153,6 +175,7 @@ unittest_test(
     ],
     modules = ["tests.deployment.test_ownership"],
     deps = [
+        ":fixtures",
         ":package",
         "//platform/src/personal_cloud/deployment:kubernetes",
         "//platform/src/personal_cloud/deployment:resources",
@@ -176,32 +199,13 @@ unittest_test(
     ],
     modules = ["tests.deployment.test_reconcile"],
     deps = [
+        ":fixtures",
         ":package",
         ":test_release",
         "//platform/src/personal_cloud/deployment:kubernetes",
         "//platform/src/personal_cloud/deployment:reconcile",
+        "//platform/src/personal_cloud/deployment:router",
         "//platform/src/personal_cloud/deployment:store",
-        "//proto:python_runtime",
-        "//proto/platform/runtime/v1:python",
-    ],
-)
-
-unittest_test(
-    name = "deployment_test_reconcile_acceptance",
-    size = "small",
-    srcs = ["test_reconcile_acceptance.py"],
-    data = ["//platform:pyproject.toml"],
-    imports = [
-        "..",
-        "../..",
-        "../../src",
-        "../status_daemon",
-    ],
-    modules = ["tests.deployment.test_reconcile_acceptance"],
-    deps = [
-        ":package",
-        ":test_release",
-        "//platform/src/personal_cloud/deployment:kubernetes",
         "//proto:python_runtime",
         "//proto/platform/runtime/v1:python",
         "@python_deps//urllib3",
@@ -224,6 +228,7 @@ unittest_test(
     ],
     modules = ["tests.deployment.test_release"],
     deps = [
+        ":fixtures",
         ":package",
         "//platform/src/personal_cloud/deployment:admission",
         "//platform/src/personal_cloud/deployment:controller",
@@ -254,7 +259,11 @@ unittest_test(
     modules = ["tests.deployment.test_router"],
     deps = [
         ":package",
+        "//platform/src/personal_cloud/deployment:controller",
         "//platform/src/personal_cloud/deployment:router",
+        "//platform/src/personal_cloud/deployment:store",
+        "//proto:python_runtime",
+        "//proto/platform/runtime/v1:python",
     ],
 )
 
@@ -266,7 +275,6 @@ test_suite(
         ":deployment_test_kubernetes",
         ":deployment_test_ownership",
         ":deployment_test_reconcile",
-        ":deployment_test_reconcile_acceptance",
         ":deployment_test_release",
         ":deployment_test_router",
     ],

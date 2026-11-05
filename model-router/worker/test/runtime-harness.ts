@@ -58,6 +58,7 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
   const conversations = new Map<string, string>()
   let generationFailureReason = ''
   let geminiDelayMs = 0
+  let executorDelayMs = 0
   async function outbound(request: Request): Promise<Response> {
     const url = new URL(request.url)
     if (url.href === `${issuer}/cdn-cgi/access/certs`) return Response.json((await signingKeys).jwks)
@@ -101,6 +102,17 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
     if (url.hostname !== 'executor.example.test')
       return new Response('Synthetic external request denied', { status: 599 })
     if (url.pathname.endsWith('generations:generate')) {
+      const delay = executorDelayMs
+      executorDelayMs = 0
+      if (delay) {
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, delay)
+          request.signal.addEventListener('abort', () => {
+            clearTimeout(timer)
+            resolve()
+          }, { once: true })
+        })
+      }
       if (generationFailureReason) {
         const reason = generationFailureReason
         generationFailureReason = ''
@@ -156,8 +168,17 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
             OPENAI_API_KEY: 'synthetic-openai-key',
             MODEL_ROUTER_NEWSLETTER_TOKEN: machineToken,
           },
-          serviceBindings: { ASSETS: () => new Response('Synthetic private assets') },
+          serviceBindings: {
+            ASSETS: () => new Response('Synthetic private assets'),
+            AI: { name: 'workers-ai-fixture', entrypoint: 'AiBinding' },
+          },
           outboundService: outbound,
+        },
+        {
+          name: 'workers-ai-fixture',
+          modules: true,
+          compatibilityDate: '2026-09-08',
+          script: `import { WorkerEntrypoint } from 'cloudflare:workers'; export class AiBinding extends WorkerEntrypoint { async run(_model, input) { return { data: (input.text ?? []).map((_, index) => Array(1024).fill(index + 1)) }; } } export default { fetch() { return new Response(null, { status: 404 }); } };`,
         },
         {
           name: 'router-ops-probe',
@@ -243,6 +264,7 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
     openaiReplies,
     failNextGeneration(reason: string) { generationFailureReason = reason },
     delayNextGemini(ms: number) { geminiDelayMs = ms },
+    delayNextExecutor(ms: number) { executorDelayMs = ms },
     caller,
     async dispose() {
       await mf.dispose()

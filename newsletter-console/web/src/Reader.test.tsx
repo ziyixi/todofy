@@ -1,13 +1,7 @@
 import { cleanup, fireEvent, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { chartImage, chartMetadata, isolatedMail, MAIL_CSP } from './Reader.tsx';
 import { EDITION, fixture, serve, show, world } from './test/world.tsx';
-
-afterEach(() => {
-  cleanup();
-  vi.unstubAllGlobals();
-  window.location.hash = '';
-});
 
 const ID = EDITION.replace('editions/', '');
 const article = async () => within(await screen.findByRole('article'));

@@ -83,6 +83,42 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(models.ModelRouterError):
                 await models.ModelClient(transport).list_models()
 
+    async def test_embed_sends_request_and_parses_embedding(self):
+        calls = []
+
+        async def transport(call):
+            calls.append(call)
+            return models.HttpResult(
+                200,
+                b'{"model":"text-embedding-3-small","vectors":[{"values":[0.25,-0.5]}]}',
+            )
+
+        embedding = await models.ModelClient(transport).embed(
+            models.EmbedRequest(
+                model="text-embedding-3-small",
+                inputs=("hello",),
+            )
+        )
+        self.assertEqual(embedding.model, "text-embedding-3-small")
+        self.assertEqual(len(embedding.vectors), 1)
+        self.assertEqual(embedding.vectors[0].values, (0.25, -0.5))
+        self.assertEqual(calls[0].method, "POST")
+        self.assertEqual(calls[0].path, "/api/model/v1/embeddings:embed")
+        self.assertEqual(calls[0].timeout_seconds, 125)
+        self.assertEqual(
+            json.loads(calls[0].body),
+            {"model": "text-embedding-3-small", "inputs": ["hello"]},
+        )
+
+    async def test_oversize_response_is_rejected(self):
+        async def transport(call):
+            return models.HttpResult(200, b"{" + b" " * (16 * 1024 * 1024) + b"}")
+
+        with self.assertRaises(models.ModelRouterError) as caught:
+            await models.ModelClient(transport).list_models()
+        self.assertEqual(caught.exception.code, "UNAVAILABLE")
+        self.assertEqual(caught.exception.reason, "MODEL_ROUTER_INVALID_RESPONSE")
+
 
 if __name__ == "__main__":
     unittest.main()

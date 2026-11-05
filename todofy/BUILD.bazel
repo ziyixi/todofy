@@ -247,4 +247,5 @@ test_suite(
 exports_files([
     "pyproject.toml",
     "conftest.py",
+    "wrangler.test.toml",
 ])

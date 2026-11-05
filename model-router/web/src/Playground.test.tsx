@@ -104,9 +104,43 @@ test('validates schema before invoking and supports keyboard submission', async 
   expect(screen.getByRole('alert')).toHaveTextContent('JSON Schema 格式无效')
   expect(api.generate).not.toHaveBeenCalled()
   await user.clear(screen.getByLabelText('JSON Schema'))
+  await user.type(screen.getByLabelText('JSON Schema'), '[1, 2]')
+  await user.click(screen.getByRole('button', { name: '运行推理' }))
+  expect(screen.getByRole('alert')).toHaveTextContent('JSON Schema 需为对象或布尔值。')
+  expect(api.generate).not.toHaveBeenCalled()
+  await user.clear(screen.getByLabelText('JSON Schema'))
   await user.click(screen.getByLabelText('输入'))
   await user.keyboard('{Control>}{Enter}{/Control}')
   await waitFor(() => expect(api.generate).toHaveBeenCalledOnce())
+})
+
+test('adds and removes instruction blocks and sends only remaining non-empty blocks', async () => {
+  const user = userEvent.setup()
+  const api = mockApi()
+  renderApp(<Playground api={api} models={models} onGenerated={vi.fn()} />)
+  expect(screen.queryByRole('button', { name: '删除 Instructions 1' })).not.toBeInTheDocument()
+
+  await user.type(screen.getByLabelText('Instructions 1'), 'First transient instruction')
+  await user.click(screen.getByRole('button', { name: '添加指令块' }))
+  expect(screen.getByLabelText('Instructions 2')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '删除 Instructions 1' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '删除 Instructions 2' })).toBeInTheDocument()
+
+  await user.type(screen.getByLabelText('Instructions 2'), 'Retained second instruction')
+  await user.click(screen.getByRole('button', { name: '删除 Instructions 1' }))
+  expect(screen.queryByLabelText('Instructions 2')).not.toBeInTheDocument()
+  expect(screen.getByLabelText('Instructions 1')).toHaveValue('Retained second instruction')
+  expect(screen.queryByRole('button', { name: '删除 Instructions 1' })).not.toBeInTheDocument()
+
+  await user.type(screen.getByLabelText('输入'), 'Synthetic input with edited instructions')
+  await user.click(screen.getByRole('button', { name: '运行推理' }))
+  await waitFor(() =>
+    expect(api.generate).toHaveBeenCalledWith({
+      model: 'claude-opus-5-5',
+      input: 'Synthetic input with edited instructions',
+      instructions: [{ text: 'Retained second instruction' }],
+    }),
+  )
 })
 
 test('copies retained native options and prevents running an unconfigured model', async () => {

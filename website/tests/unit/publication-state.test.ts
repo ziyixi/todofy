@@ -15,39 +15,7 @@ import {
 } from "../../src/lib/content/schema";
 import { validateSlug } from "../../src/lib/content/slug";
 import { validateContentSnapshot } from "../../src/lib/content/validate";
-
-function makePost(slug = "published-note", key = sha256(slug)): Post {
-  return {
-    sourceKey: key,
-    feedGuid: `urn:ziyixi:post:${key}`,
-    slug,
-    title: "A published note",
-    summary: "Public article metadata.",
-    language: "en",
-    publishedAt: "2026-01-01T00:00:00.000Z",
-    tags: [],
-    blocks: [
-      {
-        id: "public-paragraph",
-        type: "paragraph",
-        richText: [{ text: "Public article body." }],
-        children: [],
-      },
-    ],
-    toc: [],
-    media: [],
-  };
-}
-
-function snapshot(posts: Post[] = []): ContentSnapshot {
-  return {
-    schemaVersion: CONTENT_SCHEMA_VERSION,
-    sourceMode: posts.length ? "fixture" : "empty",
-    posts,
-    media: [],
-    redirects: [],
-  };
-}
+import { makePost, makeSnapshot } from "../support/deployment-contract";
 
 function identity(value: ContentSnapshot): PublicationIdentity {
   return {
@@ -114,8 +82,8 @@ describe("per-article publication identity", () => {
   it("keeps an unchanged article hash when another article or the code release changes", () => {
     const first = makePost("first");
     const second = makePost("second");
-    const before = snapshot([first, second]);
-    const after = snapshot([first, { ...second, title: "Changed second article" }]);
+    const before = makeSnapshot([first, second]);
+    const after = makeSnapshot([first, { ...second, title: "Changed second article" }]);
     const initial = createPublicationState(before, identity(before));
     const next = createPublicationState(after, { ...identity(after), codeSha: "b".repeat(40) });
     expect(next.identity).not.toEqual(initial.identity);
@@ -136,10 +104,10 @@ describe("per-article publication identity", () => {
 describe("public publication state", () => {
   it("exposes only the published keys, slugs and hashes, with no original source IDs or bodies", () => {
     const rawId = "12345678-1234-1234-1234-123456789abc";
-    const post = makePost("public-note", sourceKeyForNotionPage(rawId));
+    const post = makePost("public-note", { sourceKey: sourceKeyForNotionPage(rawId) });
     const withdrawn = makePost("withdrawn-draft");
-    const previous = snapshot([post, withdrawn]);
-    const current = snapshot([post]);
+    const previous = makeSnapshot([post, withdrawn]);
+    const current = makeSnapshot([post]);
     const before = createPublicationState(previous, identity(previous));
     const result = createPublicationState(current, identity(current));
     expect(result.posts).toEqual([
@@ -154,7 +122,7 @@ describe("public publication state", () => {
   });
 
   it("pairs the state with the exact snapshot and rejects a different manifest identity", () => {
-    const value = snapshot([makePost()]);
+    const value = makeSnapshot([makePost()]);
     expect(createPublicationState(value, identity(value)).identity).toEqual(identity(value));
     expect(() =>
       createPublicationState(value, { ...identity(value), contentHash: sha256("other snapshot") }),
@@ -162,9 +130,9 @@ describe("public publication state", () => {
   });
 
   it("produces a legal empty state and rejects duplicate entries or private fields", () => {
-    const empty = snapshot();
+    const empty = makeSnapshot();
     expect(createPublicationState(empty, identity(empty)).posts).toEqual([]);
-    const value = snapshot([makePost()]);
+    const value = makeSnapshot([makePost()]);
     const state = createPublicationState(value, identity(value));
     expect(() =>
       PublicationStateSchema.parse({ ...state, posts: [...state.posts, ...state.posts] }),
@@ -190,6 +158,6 @@ describe("public publication state", () => {
         children: [],
       },
     ];
-    expect(() => validateContentSnapshot(snapshot([post]))).not.toThrow();
+    expect(() => validateContentSnapshot(makeSnapshot([post]))).not.toThrow();
   });
 });

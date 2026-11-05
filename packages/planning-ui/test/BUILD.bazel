@@ -57,39 +57,6 @@ proto_vitest_test(
 )
 
 proto_vitest_test(
-    name = "api-dependencies_test",
-    config = "//packages/planning-ui:vitest_config",
-    data = _TEST_DATA + [":transport.ts"],
-    project = "packages/planning-ui",
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = [":api-dependencies.test.ts"],
-    deps = [
-        "//packages/planning-ui/src:api",
-        "//proto/tasks/ui/v1:ts",
-        "//proto/ts:http-client",
-        "//proto/ts:protobuf",
-    ],
-)
-
-proto_vitest_test(
-    name = "api-planning_test",
-    config = "//packages/planning-ui:vitest_config",
-    data = _TEST_DATA + [":transport.ts"],
-    project = "packages/planning-ui",
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = [":api-planning.test.ts"],
-    deps = [
-        "//packages/planning-ui/src:api",
-        "//proto/tasks/ui/v1:ts",
-        "//proto/ts:http-client",
-        "//proto/ts:protobuf",
-        "//proto/ts:rpc-status",
-    ],
-)
-
-proto_vitest_test(
     name = "api_test",
     config = "//packages/planning-ui:vitest_config",
     data = _TEST_DATA + [":transport.ts"],
@@ -100,7 +67,10 @@ proto_vitest_test(
     deps = [
         "//packages/planning-ui/src:api",
         "//packages/planning-ui/src:model",
+        "//proto/tasks/ui/v1:ts",
         "//proto/ts:http-client",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
     ],
 )
 
@@ -361,7 +331,11 @@ proto_vitest_test(
     runner = vitest.vitest_test,
     tags = ["unit"],
     tests = [":mail.test.ts"],
-    deps = ["//packages/planning-ui/src:mail"],
+    deps = [
+        "//packages/planning-ui/src:MailCategories",
+        "//packages/planning-ui/src:mail",
+        "//packages/planning-ui/src:model",
+    ],
 )
 
 proto_vitest_test(
@@ -376,21 +350,6 @@ proto_vitest_test(
         "//packages/planning-ui/src:App",
         "//packages/planning-ui/src:MiniTimer",
         "//packages/planning-ui/src:model",
-    ],
-)
-
-proto_vitest_test(
-    name = "native-api_test",
-    config = "//packages/planning-ui:vitest_config",
-    data = _TEST_DATA,
-    project = "packages/planning-ui",
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = [":native-api.test.ts"],
-    deps = [
-        "//packages/planning-ui/src:api",
-        "//packages/planning-ui/src:model",
-        "//proto/ts:http-client",
     ],
 )
 
@@ -706,8 +665,6 @@ test_suite(
     tests = [
         ":add-step_test",
         ":announce_test",
-        ":api-dependencies_test",
-        ":api-planning_test",
         ":api_test",
         ":background-reads_test",
         ":bets_test",
@@ -726,7 +683,6 @@ test_suite(
         ":idle-pause_test",
         ":mail_test",
         ":mini-timer_test",
-        ":native-api_test",
         ":native-order_test",
         ":native-planning_test",
         ":native-timer_test",
@@ -776,8 +732,6 @@ copied_source_files(
         ":add-step.test.tsx",
         ":announce.test.tsx",
         ":api.test.ts",
-        ":api-dependencies.test.ts",
-        ":api-planning.test.ts",
         ":background-reads.test.tsx",
         ":bets.test.ts",
         ":components.test.tsx",
@@ -796,7 +750,6 @@ copied_source_files(
         ":idle-pause-ui.test.tsx",
         ":mail.test.ts",
         ":mini-timer.test.tsx",
-        ":native-api.test.ts",
         ":native-order.test.ts",
         ":native-planning.test.tsx",
         ":native-timer.test.tsx",

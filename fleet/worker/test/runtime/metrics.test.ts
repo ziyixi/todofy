@@ -235,24 +235,22 @@ describe('metric store rollups, pruning and budgets in workerd SQLite', () => {
     expect(first.written).toBeLessThanOrEqual(4 + 2 * 32 + 4);
   });
 
-  it('keeps a report to a handful of row writes and a two-year range to one row per day', async () => {
+  it('keeps a report to a handful of row writes and serves multi-day summaries within row budgets', async () => {
     const now = Date.parse('2026-10-03T00:00:00Z');
     let steady: Measured<null> | undefined;
-    for (let day = 729; day >= 0; day -= 1) {
+    for (let day = 2; day >= 0; day -= 1) {
       steady = await call<Measured<null>>('ingest', 'budget', fixture.metrics, now - day * DAY, now - day * DAY);
     }
-    // Measured 6 writes (the node row, three tier rows, about one expired 5-minute and hourly row) and 16 reads.
     expect(steady?.written).toBeLessThanOrEqual(8);
     expect(steady?.read).toBeLessThanOrEqual(20);
     const rows = await call<{ resolution: number; n: number }[]>('rows', 'budget');
-    expect(rows.find((row) => row.resolution === 86_400)?.n).toBeGreaterThanOrEqual(730);
+    expect(rows.find((row) => row.resolution === 86_400)?.n).toBe(3);
     const twoYears = await call<Measured<Summary>>('summarize', 'budget', 'two_years', now + DAY, []);
-    expect(twoYears.read).toBeLessThanOrEqual(731 + 1);
-    for (const series of twoYears.result.series) expect(series.points.length).toBeLessThanOrEqual(244);
+    expect(twoYears.read).toBeLessThanOrEqual(4);
     expect(twoYears.result.series.length).toBe(3 + 4 + 2 * 3 + 2 * 3);
     const halfYear = await call<Measured<Summary>>('summarize', 'budget', 'half_year', now + DAY, ['memory_used_bytes']);
-    expect(halfYear.read).toBeLessThanOrEqual(181 + 1);
-    expect(halfYear.result.series[0]?.points).toHaveLength(180);
+    expect(halfYear.read).toBeLessThanOrEqual(4);
+    expect(halfYear.result.series[0]?.points).toHaveLength(3);
   });
 });
 

@@ -140,9 +140,8 @@ describe('claims', () => {
   ];
 
   for (const [name, claims] of rejected) {
-    it(`rejects ${name} under both policies`, async () => {
+    it(`rejects ${name}`, async () => {
       expect(await mh(await jwt(MAIL_HERO_OWNER, claims))).toEqual(failure('invalid_token'));
-      expect(await tf(await jwt(TODOFY_OWNER, claims))).toEqual(failure('invalid_token'));
     });
   }
 
@@ -153,7 +152,6 @@ describe('claims', () => {
 
   it('accepts iat up to 59 s in the future (clock skew) and refuses 60 s', async () => {
     expect(await mh(await jwt(MAIL_HERO_OWNER, { iat: NOW + 59 }))).toEqual(OK_MH);
-    expect(await tf(await jwt(TODOFY_OWNER, { iat: NOW + 59 }))).toEqual(OK_TF);
     expect(await mh(await jwt(MAIL_HERO_OWNER, { iat: NOW + 60 }))).toEqual(failure('invalid_token'));
     expect(await mh(await jwt(MAIL_HERO_OWNER, { iat: 0 }))).toEqual(OK_MH);
   });
@@ -272,16 +270,11 @@ describe('header and algorithm', () => {
     ];
     for (const secret of secrets) {
       const hmac = await crypto.subtle.importKey('raw', secret, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-      for (const [alg, owner, verify] of [
-        ['HS256', MAIL_HERO_OWNER, mh],
-        ['HS256', TODOFY_OWNER, tf],
-        ['RS256', MAIL_HERO_OWNER, mh],
-        ['RS256', TODOFY_OWNER, tf],
-      ] as const) {
-        const input = `${encodeJson({ alg, kid: 'key-1', typ: 'JWT' })}.${encodeJson(baseClaims(owner))}`;
+      for (const alg of ['HS256', 'RS256'] as const) {
+        const input = `${encodeJson({ alg, kid: 'key-1', typ: 'JWT' })}.${encodeJson(baseClaims(MAIL_HERO_OWNER))}`;
         const forged = `${input}.${b64url(new Uint8Array(await crypto.subtle.sign('HMAC', hmac, text(input))))}`;
         const fetches = certs.mock.calls.length;
-        expect(await verify(forged), `${alg} ${owner}`).toEqual(failure('invalid_token'));
+        expect(await mh(forged), alg).toEqual(failure('invalid_token'));
         // HS256 is refused before any key lookup; an RS256 header reaches RSA verification and fails there.
         if (alg === 'HS256') expect(certs.mock.calls.length).toBe(fetches);
       }
@@ -298,7 +291,6 @@ describe('header and algorithm', () => {
   it('refuses any crit header, even an empty one or b64', async () => {
     for (const crit of [['b64'], [], ['exp'], 'b64']) {
       expect(await mh(await jwt(MAIL_HERO_OWNER, {}, { crit, b64: true }))).toEqual(failure('invalid_token'));
-      expect(await tf(await jwt(TODOFY_OWNER, {}, { crit }))).toEqual(failure('invalid_token'));
     }
   });
 
@@ -367,7 +359,6 @@ describe('malformed tokens', () => {
       'whitespace inside': `${h} .${p}.${s}`,
     };
     for (const [name, token] of Object.entries(cases)) expect(await mh(token), name).toEqual(failure('invalid_token'));
-    for (const [name, token] of Object.entries(cases)) expect(await tf(token), name).toEqual(failure('invalid_token'));
   });
 
   it('refuses a validly signed token whose payload is not an object', async () => {
@@ -586,7 +577,6 @@ describe('key selection', () => {
   it('refuses RSA keys smaller than 2048 bits', async () => {
     jwks = [await publicJwk(smallKey, 'key-1')];
     expect(await mh(await jwt(MAIL_HERO_OWNER, {}, {}, smallKey))).toEqual(failure('invalid_token'));
-    expect(await tf(await jwt(TODOFY_OWNER, {}, {}, smallKey))).toEqual(failure('invalid_token'));
   });
 
   it('drops a kid listed twice, even when both entries are the same key', async () => {
@@ -746,8 +736,7 @@ describe('configuration (fail closed)', () => {
 
   for (const [name, change] of broken) {
     it(`answers not_configured for ${name}, before reading the token`, async () => {
-      expect(await mh(await jwt(MAIL_HERO_OWNER), mailHeroPolicy(change))).toEqual(failure('not_configured'));
-      expect(await verifier.verify(get('https://mail.example.org/'), todofyPolicy(change))).toEqual(failure('not_configured'));
+      expect(await verifier.verify(get('https://mail.example.org/'), mailHeroPolicy(change))).toEqual(failure('not_configured'));
       expect(certs).not.toHaveBeenCalled();
     });
   }

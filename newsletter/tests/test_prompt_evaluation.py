@@ -496,3 +496,79 @@ def test_cli_uses_only_explicit_configuration_not_environment_or_dotenv(
     assert (
         received[0]["model"] == "gpt-6.1-sol" and received[0]["timeout"] == 300
     )
+
+
+def test_direct_suite_kind_validators_enforce_bounds():
+    runner._validate_selection(
+        {
+            "candidate_ids": ["candidate-1"],
+            "source_urls": [publication.URL],
+            "max_tasks": 2,
+        }
+    )
+    for bad_selection in (
+        {"candidate_ids": ["candidate-1"], "source_urls": []},
+        {
+            "candidate_ids": ["candidate-1", "candidate-1"],
+            "source_urls": [publication.URL],
+            "max_tasks": 1,
+        },
+        {
+            "candidate_ids": ["candidate-1"],
+            "source_urls": [publication.URL],
+            "max_tasks": True,
+        },
+    ):
+        with pytest.raises(runner.EvaluationError, match="invalid_suite"):
+            runner._validate_selection(bad_selection)
+
+    runner._validate_discovery(
+        {
+            "direction": "finance",
+            "issue_date": publication.DAY,
+            "seeds": [{}],
+            "history": [{}],
+        }
+    )
+    for bad_discovery in (
+        {"direction": "finance", "issue_date": publication.DAY, "seeds": []},
+        {
+            "direction": "bad/id",
+            "issue_date": publication.DAY,
+            "seeds": [],
+            "history": [],
+        },
+        {
+            "direction": "finance",
+            "issue_date": publication.DAY,
+            "seeds": ["not-a-dict"],
+            "history": [],
+        },
+    ):
+        with pytest.raises(runner.EvaluationError, match="invalid_suite"):
+            runner._validate_discovery(bad_discovery)
+
+    valid_packet = publication.packet()
+    runner._validate_summary(
+        {
+            "story_id": "story-1",
+            "packets": [valid_packet],
+            "paragraph_limit": 2,
+        }
+    )
+    tampered_packet = {**valid_packet, "content_hash": "0" * 64}
+    for bad_summary in (
+        {"story_id": "story-1", "packets": []},
+        {
+            "story_id": "story-1",
+            "packets": [valid_packet],
+            "paragraph_limit": 0,
+        },
+        {
+            "story_id": "story-1",
+            "packets": [tampered_packet],
+            "paragraph_limit": 2,
+        },
+    ):
+        with pytest.raises(runner.EvaluationError, match="invalid_suite"):
+            runner._validate_summary(bad_summary)

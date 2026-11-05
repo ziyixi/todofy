@@ -37,11 +37,13 @@ export const NOW = new Date('2026-09-29T17:00:00.000Z')
 export const BUILD = '0123456789abcdef0123456789abcdef01234567'
 /** The last tick: 00:30 on 9-30 in Asia/Shanghai ("今天 00:30"). */
 const TICK = '2026-09-29T16:30:04.000Z'
+const SNAPSHOT_AT = '2026-09-29T16:30:01.000Z'
+const ACTIVE_HOUR = '2026-09-29T16:00:00.000Z'
 
 export const status = {
-  mailHeroOk: { ...(mailHeroOk as unknown as OpsStatus), generated_at: '2026-09-29T16:30:01.000Z' },
+  mailHeroOk: { ...(mailHeroOk as unknown as OpsStatus), generated_at: SNAPSHOT_AT },
   mailHeroDegraded: mailHeroDegraded as unknown as OpsStatus,
-  todofyOk: { ...(todofyOk as unknown as OpsStatus), generated_at: '2026-09-29T16:30:01.000Z' },
+  todofyOk: { ...(todofyOk as unknown as OpsStatus), generated_at: SNAPSHOT_AT },
   todofyDegraded: todofyDegraded as unknown as OpsStatus,
 }
 export const guards = {
@@ -54,15 +56,31 @@ export function registry(): Registry {
   return registryView(BUILD)
 }
 
-export function withCodex(): Scenario {
-  const scenario = healthy()
-  const snapshot: OpsStatus = { ...codexGatewayOk as unknown as OpsStatus, generated_at: NOW.toISOString() }
+function appSnapshot(
+  entryId: string,
+  snapshot: OpsStatus,
+  patch: Partial<OpsView['apps'][number]> = {},
+): OpsView['apps'][number] {
   return {
-    ...scenario,
-    home: { ...scenario.home, entries: [...scenario.home.entries, { id: 'codex-gateway', level: 'ok', reason: null,
-      checked_at: NOW.toISOString(), consecutive_failures: 0, top_signals: [], metric: null }] },
-    ops: { ...scenario.ops, apps: [...scenario.ops.apps, { entry: 'codex-gateway', reachable: true,
-      checked_at: NOW.toISOString(), status_at: NOW.toISOString(), error: null, consecutive_failures: 0, status: snapshot }] },
+    entry: entryId,
+    reachable: true,
+    checked_at: SNAPSHOT_AT,
+    error: null,
+    consecutive_failures: 0,
+    status: snapshot,
+    status_at: SNAPSHOT_AT,
+    ...patch,
+  }
+}
+
+export function withCodex(): Scenario {
+  const base = healthy()
+  const nowIso = NOW.toISOString()
+  const snapshot: OpsStatus = { ...(codexGatewayOk as unknown as OpsStatus), generated_at: nowIso }
+  return {
+    ...base,
+    home: { ...base.home, entries: [...base.home.entries, entry('codex-gateway', { checked_at: nowIso })] },
+    ops: { ...base.ops, apps: [...base.ops.apps, appSnapshot('codex-gateway', snapshot, { checked_at: nowIso, status_at: nowIso })] },
   }
 }
 
@@ -86,24 +104,32 @@ export function shell(patch: Partial<ShellFields> = {}): ShellFields {
   }
 }
 
-/** Todofy's Gemini budget at 82 %: the one warning of the mockup. */
-export const GEMINI_ITEM: AttentionItem = {
-  source: 'todofy',
-  code: 'gemini_budget_80',
-  severity: 'warning',
-  since: '2026-09-29T03:20:00.000Z',
-  metrics: { percent: 82.4 },
-  target: { view: 'flows', flow: 'mail-to-task', stage: 'consume', entry: 'todofy' },
+function attentionItem(
+  source: string,
+  code: string,
+  severity: AttentionItem['severity'],
+  target: AttentionItem['target'],
+  patch: Partial<AttentionItem> = {},
+): AttentionItem {
+  return { source, code, severity, since: null, metrics: {}, target, ...patch }
 }
 
-export const UNREACHABLE_ITEM: AttentionItem = {
-  source: 'todofy',
-  code: 'app_unreachable',
-  severity: 'critical',
-  since: '2026-09-29T16:00:01.000Z',
-  metrics: { consecutive_failures: 2 },
-  target: { view: 'ops', entry: 'todofy' },
-}
+/** Todofy's Gemini budget at 82 %: the one warning of the mockup. */
+export const GEMINI_ITEM: AttentionItem = attentionItem(
+  'todofy',
+  'gemini_budget_80',
+  'warning',
+  { view: 'flows', flow: 'mail-to-task', stage: 'consume', entry: 'todofy' },
+  { since: '2026-09-29T03:20:00.000Z', metrics: { percent: 82.4 } },
+)
+
+export const UNREACHABLE_ITEM: AttentionItem = attentionItem(
+  'todofy',
+  'app_unreachable',
+  'critical',
+  { view: 'ops', entry: 'todofy' },
+  { since: '2026-09-29T16:00:01.000Z', metrics: { consecutive_failures: 2 } },
+)
 
 function warned(items: AttentionItem[], badges: Partial<ShellFields['badges']>): Partial<ShellFields> {
   const critical = items.some((item) => item.severity === 'critical')
@@ -147,14 +173,24 @@ function row(partial: Partial<QuotaRow> & Pick<QuotaRow, 'id' | 'period' | 'unit
   }
 }
 
+const dailyRow = (
+  id: QuotaRow['id'],
+  unit: QuotaRow['unit'],
+  limit: number,
+  used: number,
+  patch: Partial<QuotaRow> = {},
+): QuotaRow => row({ id, period: 'daily', unit, limit, used, ...patch })
+
+const storageRow = (
+  id: QuotaRow['id'],
+  limit: number,
+  used: number,
+  breakdown: QuotaRow['breakdown'] = [],
+): QuotaRow => row({ id, period: 'storage', unit: 'bytes', limit, used, breakdown })
+
 export function quotaRows(overrides: Partial<Record<QuotaRow['id'], Partial<QuotaRow>>> = {}): QuotaRow[] {
   const rows: QuotaRow[] = [
-    row({
-      id: 'workers_requests',
-      period: 'daily',
-      unit: 'requests',
-      limit: 100_000,
-      used: 712,
+    dailyRow('workers_requests', 'requests', 100_000, 712, {
       projected: 790,
       projected_percent: 0.8,
       breakdown: [
@@ -163,37 +199,22 @@ export function quotaRows(overrides: Partial<Record<QuotaRow['id'], Partial<Quot
         { name: 'new-worker', value: 3 },
       ],
     }),
-    row({
-      id: 'd1_rows_read',
-      period: 'daily',
-      unit: 'rows',
-      limit: 5_000_000,
-      used: 7_142,
+    dailyRow('d1_rows_read', 'rows', 5_000_000, 7_142, {
       breakdown: [
         { name: IDS.mailHeroDb, value: 5_210, kind: 'd1', resource: 'mail-hero-db' },
         { name: IDS.unknownDb, value: 1_932, kind: 'd1' },
       ],
     }),
-    row({ id: 'd1_rows_written', period: 'daily', unit: 'rows', limit: 100_000, used: 486 }),
-    row({
-      id: 'do_requests',
-      period: 'daily',
-      unit: 'requests',
-      limit: 100_000,
-      used: 1_380,
+    dailyRow('d1_rows_written', 'rows', 100_000, 486),
+    dailyRow('do_requests', 'requests', 100_000, 1_380, {
       breakdown: [
         { name: 'mail-hero', value: 1_020 },
         { name: 'todofy-core', value: 360 },
       ],
     }),
-    row({ id: 'do_duration', period: 'daily', unit: 'gb_seconds', limit: 13_000, used: 212 }),
-    row({ id: 'do_rows_read', period: 'daily', unit: 'rows', limit: 5_000_000, used: 21_400 }),
-    row({
-      id: 'do_rows_written',
-      period: 'daily',
-      unit: 'rows',
-      limit: 100_000,
-      used: 1_920,
+    dailyRow('do_duration', 'gb_seconds', 13_000, 212),
+    dailyRow('do_rows_read', 'rows', 5_000_000, 21_400),
+    dailyRow('do_rows_written', 'rows', 100_000, 1_920, {
       breakdown: [
         { name: IDS.mailCoordinator, value: 1_020, kind: 'do', resource: 'mail-coordinator' },
         { name: IDS.todofyCore, value: 610, kind: 'do', resource: 'todofy-core-do' },
@@ -202,12 +223,7 @@ export function quotaRows(overrides: Partial<Record<QuotaRow['id'], Partial<Quot
       ],
     }),
     // Workers AI: daily but never a guard trigger; synthetic public model IDs.
-    row({
-      id: 'ai_neurons',
-      period: 'daily',
-      unit: 'neurons',
-      limit: 10_000,
-      used: 300,
+    dailyRow('ai_neurons', 'neurons', 10_000, 300, {
       projected: 423.5,
       projected_percent: 4.2,
       guard_trigger: false,
@@ -219,21 +235,14 @@ export function quotaRows(overrides: Partial<Record<QuotaRow['id'], Partial<Quot
     }),
     row({ id: 'r2_class_a', period: 'monthly', unit: 'operations', limit: 1_000_000, used: 18_450 }),
     row({ id: 'r2_class_b', period: 'monthly', unit: 'operations', limit: 10_000_000, used: 61_200 }),
-    row({ id: 'd1_storage', period: 'storage', unit: 'bytes', limit: 5_000_000_000, used: 46_200_000 }),
-    row({ id: 'd1_database_max', period: 'storage', unit: 'bytes', limit: 500_000_000, used: 38_900_000 }),
-    row({ id: 'do_storage', period: 'storage', unit: 'bytes', limit: 5_000_000_000, used: 12_400_000 }),
-    row({
-      id: 'r2_storage',
-      period: 'storage',
-      unit: 'bytes',
-      limit: 10_000_000_000,
-      used: 837_000_000,
-      breakdown: [
-        { name: 'mail-hero-store', value: 781_000_000, kind: 'r2', resource: 'mail-hero-store' },
-        { name: 'todofy-backups', value: 52_000_000, kind: 'r2', resource: 'todofy-backups' },
-        { name: 'scratch-bucket', value: 4_000_000, kind: 'r2' },
-      ],
-    }),
+    storageRow('d1_storage', 5_000_000_000, 46_200_000),
+    storageRow('d1_database_max', 500_000_000, 38_900_000),
+    storageRow('do_storage', 5_000_000_000, 12_400_000),
+    storageRow('r2_storage', 10_000_000_000, 837_000_000, [
+      { name: 'mail-hero-store', value: 781_000_000, kind: 'r2', resource: 'mail-hero-store' },
+      { name: 'todofy-backups', value: 52_000_000, kind: 'r2', resource: 'todofy-backups' },
+      { name: 'scratch-bucket', value: 4_000_000, kind: 'r2' },
+    ]),
   ]
   return rows.map((item) => {
     const patch = overrides[item.id]
@@ -243,7 +252,6 @@ export function quotaRows(overrides: Partial<Record<QuotaRow['id'], Partial<Quot
     return { ...merged, percent: patch.percent !== undefined ? patch.percent : percent }
   })
 }
-
 
 function usage(patch: Partial<Usage> = {}): Usage {
   return {
@@ -260,7 +268,7 @@ function usage(patch: Partial<Usage> = {}): Usage {
   }
 }
 
-export const UNAVAILABLE_USAGE: Usage = {
+export const UNAVAILABLE_USAGE: Usage = usage({
   status: 'unavailable',
   fetched_at: null,
   day: null,
@@ -269,8 +277,7 @@ export const UNAVAILABLE_USAGE: Usage = {
   last_error_at: '2026-09-29T16:30:02.000Z',
   consecutive_failures: 5,
   rows: [],
-  unclassified_r2_operations: 0,
-}
+})
 
 // ---- entries (首页) --------------------------------------------------------------------------------
 
@@ -287,17 +294,20 @@ function entry(id: string, patch: Partial<EntryState> = {}): EntryState {
   }
 }
 
+const unmonitoredEntry = (id: string, patch: Partial<EntryState> = {}): EntryState =>
+  entry(id, { level: 'unmonitored', checked_at: null, ...patch })
+
 function entries(patch: Record<string, Partial<EntryState>> = {}): EntryState[] {
   return [
     entry('mail-hero', { metric: { kind: 'counter', name: 'ingest_today_messages', value: 37 }, ...patch['mail-hero'] }),
     entry('todofy', { metric: { kind: 'counter', name: 'received_24h', value: 41 }, ...patch.todofy }),
     entry('links', { metric: { kind: 'latency', ms: 40 }, ...patch.links }),
     entry('website', { metric: { kind: 'latency', ms: 180 }, ...patch.website }),
-    entry('notion-publish', { ...patch['notion-publish'] }),
-    entry('newsletter', { level: 'unmonitored', checked_at: null, ...patch.newsletter }),
+    entry('notion-publish', patch['notion-publish']),
+    unmonitoredEntry('newsletter', patch.newsletter),
     // The Newsletter console has no status of its own (status none).
-    entry('newsletter-console', { level: 'unmonitored', checked_at: null, ...patch['newsletter-console'] }),
-    entry('storage', { level: 'unmonitored', checked_at: null, ...patch.storage }),
+    unmonitoredEntry('newsletter-console', patch['newsletter-console']),
+    unmonitoredEntry('storage', patch.storage),
   ]
 }
 
@@ -318,6 +328,9 @@ function stage(id: string, patch: Partial<StageState> = {}): StageState {
     ...patch,
   }
 }
+
+const IDLE_DELIVERY: CanaryRun['delivery'] = { state: null, attempts: 0, last_http_status: null, error_code: null }
+const IDLE_CONSUMER: CanaryRun['consumer'] = { state: null, waiting_code: null, error_code: null }
 
 function canaryRun(partial: Partial<CanaryRun> & Pick<CanaryRun, 'run_id' | 'day' | 'created_at'>): CanaryRun {
   return {
@@ -361,7 +374,7 @@ export const RUN_FAILED_TODAY = canaryRun({
   stage: 'delivery',
   code: 'http_503',
   delivery: { state: 'failed', attempts: 4, last_http_status: 503, error_code: 'http_503' },
-  consumer: { state: null, waiting_code: null, error_code: null },
+  consumer: IDLE_CONSUMER,
   polls: 5,
 })
 
@@ -381,8 +394,8 @@ function recentRuns(today: CanaryRun = RUN_OK_TODAY): CanaryRun[] {
             outcome: 'skipped',
             stage: 'consumer',
             code: 'processing_paused',
-            delivery: { state: null, attempts: 0, last_http_status: null, error_code: null },
-            consumer: { state: null, waiting_code: null, error_code: null },
+            delivery: IDLE_DELIVERY,
+            consumer: IDLE_CONSUMER,
           })
         : canaryRun({ run_id: `canary-${day}`, day, created_at: created, finished_at: `${day}T16:06:00.000Z` }),
     )
@@ -405,38 +418,52 @@ export function canaryView(patch: Partial<CanaryView> = {}): CanaryView {
   }
 }
 
+function flowState(
+  id: FlowState['id'],
+  monitored: number,
+  total: number,
+  stages: StageState[],
+  patch: Partial<FlowState> = {},
+): FlowState {
+  return {
+    id,
+    level: 'ok',
+    partial: false,
+    coverage: { monitored, total },
+    first_issue: null,
+    freshness: { kind: 'none', at: null },
+    stages,
+    unclassified: [],
+    canary: null,
+    ...patch,
+  }
+}
+
 function flowStates(options: { geminiWarning?: boolean; todofyDown?: boolean } = {}): FlowState[] {
   const todofyLevel = options.todofyDown ? 'critical' : options.geminiWarning ? 'warning' : 'ok'
+  const consumeReason = options.todofyDown ? 'unreachable' : options.geminiWarning ? 'gemini_budget_80' : null
   const consumeSignals = options.geminiWarning
     ? [{ code: 'gemini_budget_80', severity: 'warning' as const, since: GEMINI_ITEM.since, metrics: { percent: 82.4 } }]
     : []
-  const mailLevel = options.todofyDown ? 'critical' : options.geminiWarning ? 'warning' : 'ok'
   return [
-    {
-      id: 'mail-to-task',
-      level: mailLevel,
-      partial: false,
-      coverage: { monitored: 5, total: 6 },
-      first_issue: options.todofyDown
-        ? { stage: 'consume', code: 'unreachable' }
-        : options.geminiWarning
-          ? { stage: 'consume', code: 'gemini_budget_80' }
-          : null,
-      freshness: { kind: 'canary', at: RUN_OK_TODAY.finished_at, ok_runs: 13, runs: 14 },
-      stages: [
+    flowState(
+      'mail-to-task',
+      5,
+      6,
+      [
         stage('forward', { level: 'unmonitored' }),
         stage('ingest', {
           counters: [
             { name: 'ingest_today_messages', value: 37 },
             { name: 'capacity_used_bytes', value: 1_288_490_188 },
           ],
-          analytics: { requests: 268, errors: 0, error_percent: 0, last_active_hour: '2026-09-29T16:00:00.000Z' },
+          analytics: { requests: 268, errors: 0, error_percent: 0, last_active_hour: ACTIVE_HOUR },
         }),
         stage('parse', { counters: [{ name: 'jobs_pending', value: 0 }, { name: 'oldest_pending_age_seconds', value: 0 }] }),
         stage('deliver', { canary: 'verified', counters: [{ name: 'delivery_failed', value: 0 }, { name: 'blocked_waiting', value: 0 }] }),
         stage('consume', {
           level: todofyLevel,
-          reason: options.todofyDown ? 'unreachable' : options.geminiWarning ? 'gemini_budget_80' : null,
+          reason: consumeReason,
           canary: 'verified',
           signals: consumeSignals,
           counters: [
@@ -444,7 +471,7 @@ function flowStates(options: { geminiWarning?: boolean; todofyDown?: boolean } =
             { name: 'gemini_calls', value: 43 },
             { name: 'active_events', value: 0 },
           ],
-          analytics: { requests: 310, errors: 2, error_percent: 0.6, last_active_hour: '2026-09-29T16:00:00.000Z' },
+          analytics: { requests: 310, errors: 2, error_percent: 0.6, last_active_hour: ACTIVE_HOUR },
         }),
         stage('tasks', {
           level: options.todofyDown ? 'critical' : 'ok',
@@ -452,47 +479,29 @@ function flowStates(options: { geminiWarning?: boolean; todofyDown?: boolean } =
           counters: [{ name: 'attention_events', value: 0 }],
         }),
       ],
-      unclassified: [],
-      canary: { ...canaryView(), last_ok_at: RUN_OK_TODAY.finished_at },
-    },
-    {
-      id: 'site-publish',
-      level: 'ok',
-      partial: false,
-      coverage: { monitored: 2, total: 3 },
-      first_issue: null,
-      freshness: { kind: 'content_check', at: '2026-09-29T16:00:00.000Z' },
-      stages: [
+      {
+        level: todofyLevel,
+        first_issue: consumeReason ? { stage: 'consume', code: consumeReason } : null,
+        freshness: { kind: 'canary', at: RUN_OK_TODAY.finished_at, ok_runs: 13, runs: 14 },
+        canary: { ...canaryView(), last_ok_at: RUN_OK_TODAY.finished_at },
+      },
+    ),
+    flowState(
+      'site-publish',
+      2,
+      3,
+      [
         stage('source', { level: 'unmonitored' }),
         stage('publish', { checked_at: TICK }),
         stage('serve', { probe: { checked_at: TICK, ok: true, http_status: 200, latency_ms: 180 } }),
       ],
-      unclassified: [],
-      canary: null,
-    },
-    {
-      // Todofy's personal items, then the engine (unseen in these fixtures); Notion is a backup copy, not a stage.
-      id: 'daily-newsletter',
-      level: 'ok',
-      partial: false,
-      coverage: { monitored: 1, total: 2 },
-      first_issue: null,
-      freshness: { kind: 'none', at: null },
-      stages: [stage('report'), stage('fetch', { level: 'unmonitored' })],
-      unclassified: [],
-      canary: null,
-    },
-    {
-      id: 'ops-digest',
-      level: 'ok',
-      partial: false,
-      coverage: { monitored: 3, total: 3 },
-      first_issue: null,
+      { freshness: { kind: 'content_check', at: ACTIVE_HOUR } },
+    ),
+    // Todofy's personal items, then the engine (unseen in these fixtures); Notion is a backup copy, not a stage.
+    flowState('daily-newsletter', 1, 2, [stage('report'), stage('fetch', { level: 'unmonitored' })]),
+    flowState('ops-digest', 3, 3, [stage('collect'), stage('report'), stage('remind')], {
       freshness: { kind: 'digest', at: '2026-09-29T15:00:03.000Z', accepted: true },
-      stages: [stage('collect'), stage('report'), stage('remind')],
-      unclassified: [],
-      canary: null,
-    },
+    }),
   ]
 }
 
@@ -513,7 +522,7 @@ function worker(script: string, entryId: string | null, patch: Partial<WorkerRow
     do_errors: null,
     first_seen_day: '2026-09-01',
     last_seen_day: '2026-09-29',
-    last_active_hour: '2026-09-29T16:00:00.000Z',
+    last_active_hour: ACTIVE_HOUR,
     ...patch,
   }
 }
@@ -529,7 +538,7 @@ export function workerRows(): WorkerRow[] {
       subrequests: 48,
       cpu_p50_us: 2_300,
       cpu_p99_us: 8_400,
-      last_active_hour: '2026-09-29T16:00:00.000Z',
+      last_active_hour: ACTIVE_HOUR,
     }),
     worker('mail-hero', 'mail-hero', { requests: 268, subrequests: 41, cpu_p50_us: 1_100, cpu_p99_us: 4_800, do_requests: 612, do_errors: 0 }),
     worker('home', 'home', { requests: 118, subrequests: 29, cpu_p50_us: 800, cpu_p99_us: 2_900, do_requests: 136, do_errors: 0 }),
@@ -674,24 +683,8 @@ function scenario(
         next_due_at: '2026-09-29T21:00:03.000Z',
       },
       apps: parts.apps ?? [
-        {
-          entry: 'mail-hero',
-          reachable: true,
-          checked_at: '2026-09-29T16:30:01.000Z',
-          error: null,
-          consecutive_failures: 0,
-          status: status.mailHeroOk,
-          status_at: '2026-09-29T16:30:01.000Z',
-        },
-        {
-          entry: 'todofy',
-          reachable: true,
-          checked_at: '2026-09-29T16:30:01.000Z',
-          error: null,
-          consecutive_failures: 0,
-          status: status.todofyOk,
-          status_at: '2026-09-29T16:30:01.000Z',
-        },
+        appSnapshot('mail-hero', status.mailHeroOk),
+        appSnapshot('todofy', status.todofyOk),
       ],
     },
   }
@@ -741,8 +734,8 @@ export function todofyUnreachable(): Scenario {
  */
 export function observedOnly(): Scenario {
   const items: AttentionItem[] = [
-    { source: 'todofy', code: 'unreachable', severity: 'warning', since: null, metrics: {}, target: { view: 'home', entry: 'todofy' }, observed: 'unknown' },
-    { source: 'website', code: 'http_status', severity: 'warning', since: null, metrics: {}, target: { view: 'home', entry: 'website' }, observed: 'warning' },
+    attentionItem('todofy', 'unreachable', 'warning', { view: 'home', entry: 'todofy' }, { observed: 'unknown' }),
+    attentionItem('website', 'http_status', 'warning', { view: 'home', entry: 'website' }, { observed: 'warning' }),
   ]
   return scenario(warned(items, { home: 2 }), {
     entries: entries({
@@ -754,27 +747,16 @@ export function observedOnly(): Scenario {
 
 /** The analytics token is rejected: no usage, no Worker rows. */
 export function analyticsUnavailable(): Scenario {
-  const item: AttentionItem = {
-    source: 'dashboard',
-    code: 'usage_unavailable',
-    severity: 'warning',
-    since: '2026-09-29T14:30:02.000Z',
-    metrics: {},
-    target: { view: 'cloudflare' },
-  }
+  const item = attentionItem('dashboard', 'usage_unavailable', 'warning', { view: 'cloudflare' }, { since: '2026-09-29T14:30:02.000Z' })
   return scenario(warned([item], { cloudflare: 1 }), { usage: UNAVAILABLE_USAGE, workers: [] })
 }
 
 /** The drift check found four differences (one of each kind) and its item is on the strip. */
 export function configDrift(): Scenario {
-  const item: AttentionItem = {
-    source: 'dashboard',
-    code: 'config_drift',
-    severity: 'warning',
+  const item = attentionItem('dashboard', 'config_drift', 'warning', { view: 'cloudflare' }, {
     since: '2026-09-29T02:30:05.000Z',
     metrics: { total: 4, scripts: 1, custom_domains: 1, bindings: 1, personal: 1 },
-    target: { view: 'cloudflare' },
-  }
+  })
   return scenario(warned([item], { cloudflare: 1 }), {
     drift: driftView({
       status: 'drift',
@@ -791,40 +773,28 @@ export function withWorkers(count: number): Scenario {
 
 /** D1 rows read at 84 %: the auto guard shed both apps (Todofy's setGuard timed out). */
 export function guardShed(): Scenario {
-  const base = scenario({})
   const guard = guardActive()
-  return {
-    ...base,
-    ops: {
-      ...base.ops,
-      guard,
-      apps: [
-        { ...base.ops.apps[0]!, status: { ...status.mailHeroOk, guard: guards.shedMailHero } },
-        { ...base.ops.apps[1]!, status: { ...status.todofyOk, guard: guards.shedTodofy } },
-      ],
-    },
-    cloudflare: { ...base.cloudflare, guard },
-  }
+  return scenario({}, {
+    guard,
+    apps: [
+      appSnapshot('mail-hero', { ...status.mailHeroOk, guard: guards.shedMailHero }),
+      appSnapshot('todofy', { ...status.todofyOk, guard: guards.shedTodofy }),
+    ],
+  })
 }
 
 /** Both apps degraded with their contract signals (应用详情). */
 export function degradedApps(): Scenario {
-  const base = scenario({})
-  return {
-    ...base,
-    ops: {
-      ...base.ops,
-      apps: [
-        { ...base.ops.apps[0]!, status: { ...status.mailHeroDegraded, guard: guards.normal } },
-        { ...base.ops.apps[1]!, status: { ...status.todofyDegraded, guard: guards.normal } },
-      ],
-    },
-  }
+  return scenario({}, {
+    apps: [
+      appSnapshot('mail-hero', { ...status.mailHeroDegraded, guard: guards.normal }),
+      appSnapshot('todofy', { ...status.todofyDegraded, guard: guards.normal }),
+    ],
+  })
 }
 
 /** A manual canary in progress: queued, waiting for delivery. */
 export function canaryActive(): Scenario {
-  const base = scenario({})
   const active = canaryRun({
     run_id: 'canary-manual-20260929T165500Z',
     kind: 'manual',
@@ -834,17 +804,16 @@ export function canaryActive(): Scenario {
     phase: 'delivering',
     outcome: null,
     delivery: { state: 'pending', attempts: 1, last_http_status: 503, error_code: 'http_503' },
-    consumer: { state: null, waiting_code: null, error_code: null },
+    consumer: IDLE_CONSUMER,
     polls: 1,
   })
-  const canary = canaryView({ today: active, active, recent: [active, ...recentRuns().slice(1)], manual_today: 1 })
-  return { ...base, ops: { ...base.ops, canary } }
+  return scenario({}, { canary: canaryView({ today: active, active, recent: [active, ...recentRuns().slice(1)], manual_today: 1 }) })
 }
 
 /** CANARY_ENABLED=false with a run still in progress (polled to its end); the strip's info item. */
 export function canaryDisabled(): Scenario {
   const base = canaryActive()
-  const info: AttentionItem = { source: 'dashboard', code: 'canary_disabled', severity: 'info', since: null, metrics: {}, target: { view: 'ops' } }
+  const info = attentionItem('dashboard', 'canary_disabled', 'info', { view: 'ops' })
   const canary = { ...base.ops.canary, enabled: false, next_scheduled_at: null }
   const attention = { ...base.ops.attention, info: [info] }
   const mail = base.flows.flows[0]!
@@ -858,14 +827,13 @@ export function canaryDisabled(): Scenario {
 
 /** Today's canary failed at delivery with HTTP 503. */
 export function canaryFailed(): Scenario {
-  const base = scenario({})
   const canary = canaryView({ today: RUN_FAILED_TODAY, recent: recentRuns(RUN_FAILED_TODAY), manual_today: 1 })
+  const base = scenario({}, { canary })
   const mail = base.flows.flows[0]!
   const stages = mail.stages.map((item) => (item.id === 'deliver' ? { ...item, level: 'critical' as const, reason: 'canary_failed', canary: 'failed' as const } : item))
   return {
     ...base,
     flows: { ...base.flows, flows: [{ ...mail, level: 'critical', stages, canary: { ...canary, last_ok_at: null } }, ...base.flows.flows.slice(1)] },
-    ops: { ...base.ops, canary },
   }
 }
 

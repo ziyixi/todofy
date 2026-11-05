@@ -52,6 +52,7 @@ def test_precompute_stores_todays_empty_reports_without_calling_gemini(worker: W
     # The owner sees exactly what the newsletter gets.
     assert (summary, recommendation) == (latest["summary"], latest["recommendations"][0])
     assert_message(worker.owner.get("/api/v1/latestReports"), reports_pb.LatestReports)
+    assert worker.d1("SELECT count(*) AS n FROM mail_reminders") == [{"n": 0}]
 
 
 def test_owner_recompute_summarises_the_window_with_the_range_prompt(

@@ -89,9 +89,16 @@ py_library(
     deps = [
         ":package",
         ":rendering",
+        "//newsletter/src/newsletter:adapters",
         "//newsletter/src/newsletter:contracts",
+        "//newsletter/src/newsletter:drain",
+        "//newsletter/src/newsletter:notion_api",
         "//newsletter/src/newsletter:notion_content",
+        "//newsletter/src/newsletter:notion_intake",
+        "//newsletter/src/newsletter:notion_journal",
+        "//newsletter/src/newsletter:notion_sync",
         "//newsletter/src/newsletter:types",
+        "@python_deps//httpx",
     ],
 )
 

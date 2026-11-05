@@ -8,37 +8,8 @@ import { create } from '@ziyixi/proto/protobuf'
 import { Change_State, Change_SuppressionReason } from '@ziyixi/proto/watch/ui/v1/change_pb'
 import { Watch_Fetcher, Watch_NotifyPolicy, WatchSchema } from '@ziyixi/proto/watch/ui/v1/watch_pb'
 import { PreviewWatchResponseSchema } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb'
-import { mountApp } from './app.ts'
 import { draftOf, watchOf } from './settings.ts'
-import { change, FakeServer, NOW, watch } from './test/fakeServer.ts'
-
-const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
-
-/** Waits until `check` holds, at most `ms` of real time (withRetry pauses 800 ms before its repeat). */
-async function until(check: () => boolean, ms = 3000): Promise<void> {
-  const end = Date.now() + ms
-  while (!check() && Date.now() < end) await settle()
-  expect(check(), document.body.textContent ?? '').toBe(true)
-}
-
-async function mount(server: FakeServer, path: string): Promise<HTMLElement> {
-  server.install()
-  window.history.replaceState(null, '', path)
-  const root = document.createElement('div')
-  document.body.append(root)
-  await mountApp(root, { now: () => NOW, confirm: () => true })
-  return root
-}
-
-function buttons(scope: ParentNode, label: string): HTMLButtonElement[] {
-  return [...scope.querySelectorAll<HTMLButtonElement>('button')].filter((candidate) => candidate.textContent === label)
-}
-
-function button(scope: ParentNode, label: string): HTMLButtonElement {
-  const found = buttons(scope, label)[0]
-  if (found === undefined) throw new Error(`no button ${label}`)
-  return found
-}
+import { button, buttons, change, FakeServer, mount, settle, until, watch } from './test/fakeServer.ts'
 
 const text = (root: HTMLElement) => root.textContent ?? ''
 

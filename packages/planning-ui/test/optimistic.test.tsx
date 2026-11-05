@@ -8,7 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { afterEach, beforeAll, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { createPrototype } from "./fixture";
 import { predictMove, predictStage } from "../src/plan-updates";
@@ -75,11 +75,6 @@ vi.mock("@dnd-kit/react/sortable", () => ({
     return { ref: () => {}, handleRef: () => {}, isDragSource: false };
   },
 }));
-beforeAll(() => {
-  HTMLDialogElement.prototype.showModal = function () {
-    this.setAttribute("open", "");
-  };
-});
 afterEach(cleanup);
 
 /** Holds one action's calls until the test answers them. */

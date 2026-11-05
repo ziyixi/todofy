@@ -65,6 +65,62 @@ describe('event detail', () => {
     expect(alert).toHaveTextContent('NOT_FOUND')
     expect(alert).toHaveTextContent('req-404')
   })
+
+  it('truncates the timeline notice at 100 transitions and retries legacy text on error', async () => {
+    const user = userEvent.setup()
+    let legacyCalls = 0
+    const transitions = Array.from({ length: 100 }, () => ({
+      transition_time: '2026-09-28T08:00:00Z',
+      state: 'pending',
+      actor: 'worker',
+    }))
+    mockApi({
+      [DETAIL]: eventDetail({ legacy_text: `legacyTexts/${EVENT_ID}`, imported: true, transitions }),
+      [`GET /api/v1/legacyTexts/${EVENT_ID}`]: () =>
+        ++legacyCalls === 1
+          ? apiError(503, 'UNAVAILABLE', 'req-legacy-503')
+          : {
+              name: `legacyTexts/${EVENT_ID}`,
+              create_time: '2026-01-01T00:00:00Z',
+              expire_time: '2026-02-01T00:00:00Z',
+              text: '重试成功正文',
+            },
+    })
+    renderApp(`/events/${EVENT_ID}`)
+    const timeline = await screen.findByRole('region', { name: '时间线' })
+    expect(within(timeline).getByText('只显示最早的 100 次状态变化。')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '显示全文' }))
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('req-legacy-503')
+    await user.click(within(alert).getByRole('button', { name: '重试' }))
+    expect(await screen.findByText('重试成功正文')).toBeInTheDocument()
+    expect(screen.getByText(/后清除/)).toBeInTheDocument()
+  })
+
+  it('navigates back or to /events from BackButton and invalidates overview on state change', async () => {
+    const user = userEvent.setup()
+    let detailCalls = 0
+    const { calls } = mockApi({
+      [DETAIL]: () =>
+        ++detailCalls === 1
+          ? eventDetail({ state: 'pending' })
+          : eventDetail({ state: 'complete', error_code: undefined, allowed_actions: [] }),
+      'GET /api/v1/mailEvents': { mail_events: [] },
+    })
+    window.history.replaceState({ idx: 0 }, '')
+    const { router, client } = renderApp(`/events/${EVENT_ID}`)
+    await screen.findByRole('heading', { name: 'Quarterly tax reminder' })
+
+    const overviewCallsBefore = calls.filter((c) => c.path === '/api/v1/serviceStatus').length
+    await client.refetchQueries({ queryKey: ['event', EVENT_ID] })
+    await waitFor(() =>
+      expect(calls.filter((c) => c.path === '/api/v1/serviceStatus').length).toBeGreaterThan(overviewCallsBefore),
+    )
+
+    await user.click(screen.getByRole('button', { name: '返回' }))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/events'))
+  })
 })
 
 describe('reconcile dialogs', () => {

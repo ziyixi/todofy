@@ -10,124 +10,19 @@ import pytest
 
 import newsletter.adapters as adapters
 import newsletter.notion_api as notion_api
+import tests.support.notion_content as notion_content
 
-MATERIAL = "11111111-1111-4111-8111-111111111111"
-EDITION = "22222222-2222-4222-8222-222222222222"
-PAGE = "33333333-3333-4333-8333-333333333333"
-UPLOAD = "44444444-4444-4444-8444-444444444444"
-TOKEN = "synthetic-test-token-not-a-real-secret"
+MATERIAL = notion_content.MATERIAL
+EDITION = notion_content.EDITION
+PAGE = notion_content.PAGE
+UPLOAD = notion_content.UPLOAD
+TOKEN = notion_content.TOKEN
 PNG = b"\x89PNG\r\n\x1a\n" + b"synthetic-transport-payload"
 
-
-def rich(text):
-    return [{"type": "text", "text": {"content": text}}]
-
-
-def paragraph(text="Offline content"):
-    return {
-        "object": "block",
-        "type": "paragraph",
-        "paragraph": {"rich_text": rich(text)},
-    }
-
-
-def source(kind, *, complete=True):
-    properties = {
-        "My own title": {
-            "id": "title",
-            "name": "My own title",
-            "type": "title",
-            "title": {},
-        }
-    }
-    if complete:
-        for key, spec in notion_api.SCHEMAS[kind].items():
-            if key == "title":
-                continue
-            detail = {}
-            if spec.type in {"select", "multi_select"}:
-                detail = {
-                    "options": [
-                        {"name": name, "id": str(index)}
-                        for index, name in enumerate(spec.options)
-                    ]
-                }
-            elif spec.type == "relation":
-                detail = {
-                    "data_source_id": EDITION
-                    if kind == "material"
-                    else MATERIAL,
-                    "single_property": {},
-                }
-            properties[spec.name] = {
-                "id": kind + "-" + key,
-                "type": spec.type,
-                "name": spec.name,
-                spec.type: detail,
-            }
-    return {
-        "object": "data_source",
-        "id": MATERIAL if kind == "material" else EDITION,
-        "in_trash": False,
-        "properties": properties,
-    }
-
-
-class Rig:
-    def __init__(self, complete=True):
-        self.sources = {
-            MATERIAL: source("material", complete=complete),
-            EDITION: source("edition", complete=complete),
-        }
-        self.requests = []
-        self.extra = None
-        self.api = notion_api.NotionWorkspace(
-            TOKEN, MATERIAL, EDITION, transport=httpx.MockTransport(self.handle)
-        )
-
-    def handle(self, request):
-        self.requests.append(request)
-        assert (
-            request.url.scheme == "https"
-            and request.url.host == "api.notion.com"
-        )
-        assert request.headers["Authorization"] == "Bearer " + TOKEN
-        assert (
-            request.headers["Notion-Version"]
-            == notion_api.API_VERSION
-            == "2026-03-11"
-        )
-        if request.url.path.startswith(
-            "/v1/data_sources/"
-        ) and not request.url.path.endswith("/query"):
-            target = request.url.path.rsplit("/", 1)[1]
-            if request.method == "PATCH":
-                body = json.loads(request.content)
-                assert set(body) == {"properties"}
-                for name, value in body["properties"].items():
-                    assert name not in self.sources[target]["properties"]
-                    kind = next(iter(value))
-                    self.sources[target]["properties"][name] = {
-                        "id": "new-"
-                        + str(len(self.sources[target]["properties"])),
-                        "name": name,
-                        "type": kind,
-                        **value,
-                    }
-            return httpx.Response(200, json=self.sources[target])
-        if self.extra:
-            return self.extra(request)
-        return httpx.Response(
-            200, json={"object": "page", "id": PAGE, "properties": {}}
-        )
-
-    def mutations(self):
-        return [
-            r
-            for r in self.requests
-            if r.method == "PATCH"
-            or (r.method == "POST" and not r.url.path.endswith("/query"))
-        ]
+rich = notion_content.rich
+paragraph = notion_content.paragraph
+source = notion_content.source
+Rig = notion_content.ApiRig
 
 
 @pytest.fixture(autouse=True)

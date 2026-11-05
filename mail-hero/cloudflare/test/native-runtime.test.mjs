@@ -271,20 +271,21 @@ test('native workerd: durable archive, protected API, stable retry identity and 
     assert.equal(calls[4].body, legacyBytes.toString('utf8'), 'the frozen bytes, never rebuilt');
     assert.equal(calls[4].key, frozen.event_id);
   } finally {
-    await mf.dispose();
-    await rm(temp, { recursive: true, force: true });
+    await close();
   }
 });
 
 test('native workerd: MAINTENANCE_MODE refuses a mutation before Access, with a Status on the owner API', { timeout: 60000 }, async () => {
-  const bundle = await build({ entryPoints: [join(root, 'src/native/index.ts')], bundle: true, format: 'esm', platform: 'neutral', conditions: ['browser'], external: ['cloudflare:workers'], write: false });
-  const mf = new Miniflare(convertV4MiniflareOptions({
-    name: 'mail-hero-maintenance-test', modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-09-07', host: '127.0.0.1', port: 0,
+  const { mf, close } = await startRuntime({
+    persist: false,
+    d1: null,
+    name: 'mail-hero-maintenance-test',
+    entry: { entryPoints: [join(root, 'src/native/index.ts')] },
     d1Databases: { DB: 'maintenance-test' }, r2Buckets: ['MAIL_STORE'], durableObjects: { COORDINATOR: { className: 'MailCoordinator', useSQLite: true } },
     bindings: { RECEIVE_ADDRESS: 'inbox@mail.example.org', ACCESS_ISSUER: 'https://synthetic.cloudflareaccess.com', ACCESS_AUDIENCE: 'synthetic',
       ACCESS_OWNER: 'owner@example.org', CREDENTIAL_KEY: 'a'.repeat(64), WEBHOOK_ALLOWED_HOSTS: 'consumer.example.org', FORCE_SEND_PAUSED: 'false', MAINTENANCE_MODE: 'true' },
     serviceBindings: { ASSETS: () => new Response('<html>Mail Hero</html>', { headers: { 'content-type': 'text/html' } }) },
-  }));
+  });
   try {
     // No login at all: maintenance answers first, as before; the owner API's answer is a Status, every other path's the envelope.
     const refused = await mf.dispatchFetch('https://mail.example.org/api/v2/settings?update_mask=send_paused', { method: 'PATCH', body: '{}' });
@@ -296,6 +297,6 @@ test('native workerd: MAINTENANCE_MODE refuses a mutation before Access, with a 
     const read = await mf.dispatchFetch('https://mail.example.org/api/v2/settings');
     assert.deepEqual([read.status, reasonOf(await read.json())], [401, 'UNAUTHORIZED'], 'a read still needs Access');
   } finally {
-    await mf.dispose();
+    await close();
   }
 });

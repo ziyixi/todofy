@@ -1,26 +1,10 @@
 import { create } from '@ziyixi/proto/protobuf'
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
 import { SnapshotSchema, SnapshotImageSchema } from '@ziyixi/proto/watch/ui/v1/snapshot_pb'
-import { mountApp } from './app.ts'
-import { change, FakeServer, NOW, watch } from './test/fakeServer.ts'
+import { change, FakeServer, mount, NOW, until, watch } from './test/fakeServer.ts'
 
 const BEFORE = 'watches/news/snapshots/0000000000000001'
 const AFTER = 'watches/news/snapshots/0000000000000002'
-const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
-
-async function until(check: () => boolean): Promise<void> {
-  for (let i = 0; i < 300 && !check(); i += 1) await settle()
-  expect(check(), document.body.textContent ?? '').toBe(true)
-}
-
-async function mount(server: FakeServer, path: string): Promise<HTMLElement> {
-  server.install()
-  window.history.replaceState(null, '', path)
-  const root = document.createElement('div')
-  document.body.append(root)
-  await mountApp(root, { now: () => NOW, confirm: () => true })
-  return root
-}
 
 function expand(scope: ParentNode, label: string): HTMLDetailsElement {
   const summary = [...scope.querySelectorAll('summary')].find((candidate) => candidate.textContent === label)

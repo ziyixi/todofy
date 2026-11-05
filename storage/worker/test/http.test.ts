@@ -1,16 +1,35 @@
 import { Script } from 'node:vm';
+import { encodePageToken } from '@ziyixi/proto/page-token';
+import { Code } from '@ziyixi/proto/rpc-status';
+import { Client_Access } from '@ziyixi/proto/storage/ui/v1/client_pb';
 import { describe, expect, it, vi } from 'vitest';
-import { handleRequest } from '../src/http.ts';
 import type { Env } from '../src/env.ts';
+import { errorResponse, failure, readJson } from '../src/errors.ts';
+import { handleRequest } from '../src/http.ts';
+import { handlers, type OwnerContext } from '../src/owner.ts';
+import type { Store } from '../src/store.ts';
 import { PAGE, SCRIPT } from '../src/ui.ts';
+import { seedNamespaceAndKey, setupConnected, sqliteStore, TEST_ENV } from './sqlite.ts';
 
 function environment() {
   const get = vi.fn();
   const env: Env = {
-    PUBLIC_HOST: 'storage.example.test', ACCESS_ISSUER: 'https://synthetic.cloudflareaccess.com', ACCESS_AUDIENCE: 'a'.repeat(64), ACCESS_OWNER: 'owner@example.test',
+    ...TEST_ENV,
     STORAGE: { idFromName: vi.fn(), get } as unknown as Env['STORAGE'],
   };
   return { env, get };
+}
+
+function ownerContext(store: Store): OwnerContext {
+  return {
+    store,
+    dropbox: setupConnected(store).provider,
+    redirectUri: 'https://storage.example.test/api/dropbox/callback',
+    flushUsage: vi.fn(),
+    buildSha: 'synthetic',
+    stateSizeBytes: () => 0,
+    scheduleScan: () => Promise.resolve(),
+  };
 }
 
 describe('owner gates', () => {
@@ -31,6 +50,146 @@ describe('owner gates', () => {
     const response = await handleRequest(request, env);
     expect(response.status).toBe(403);
     expect(fixture.get).not.toHaveBeenCalled();
+  });
+
+  it('serves health, console HTML and script on GET/HEAD, blocks cf-ray local bypass, and answers 503 when unconfigured', async () => {
+    const fixture = environment();
+    const health = await handleRequest(new Request('https://storage.example.test/health'), { ...fixture.env, BUILD_SHA: 'synthetic-sha' });
+    expect(health.status).toBe(200);
+    expect(await health.json()).toEqual({ ok: true, build_sha: 'synthetic-sha' });
+
+    const devEnv: Env = { ...fixture.env, DEV_AUTH_BYPASS: 'true' };
+    const spoofed = await handleRequest(new Request('http://127.0.0.1/', { headers: { 'cf-ray': 'synthetic-ray' } }), devEnv);
+    expect(spoofed.status).toBe(404);
+
+    const getPage = await handleRequest(new Request('http://127.0.0.1/'), devEnv);
+    expect(getPage.status).toBe(200);
+    expect(getPage.headers.get('content-type')).toBe('text/html; charset=utf-8');
+    expect(await getPage.text()).toBe(PAGE);
+
+    const headPage = await handleRequest(new Request('http://127.0.0.1/', { method: 'HEAD' }), devEnv);
+    expect(headPage.status).toBe(200);
+    expect(await headPage.text()).toBe('');
+
+    const getScript = await handleRequest(new Request('http://127.0.0.1/assets/storage.js'), devEnv);
+    expect(getScript.status).toBe(200);
+    expect(getScript.headers.get('content-type')).toBe('text/javascript; charset=utf-8');
+    expect(await getScript.text()).toBe(SCRIPT);
+
+    const headScript = await handleRequest(new Request('http://127.0.0.1/assets/storage.js', { method: 'HEAD' }), devEnv);
+    expect(headScript.status).toBe(200);
+    expect(await headScript.text()).toBe('');
+
+    const unconfigured = await handleRequest(new Request('https://storage.example.test/api/v1/settings'), { ...fixture.env, ACCESS_ISSUER: '' });
+    expect(unconfigured.status).toBe(503);
+    expect(await unconfigured.text()).toContain('UNAVAILABLE');
+  });
+});
+
+describe('error responses and bounded JSON reads', () => {
+  it('omits the error body on HEAD and maps unexpected errors to 500 INTERNAL', async () => {
+    const headResponse = errorResponse(failure(Code.NOT_FOUND, 'NOT_FOUND'), 'synthetic-req', true);
+    expect(headResponse.status).toBe(404);
+    expect(await headResponse.text()).toBe('');
+
+    const internalResponse = errorResponse(new Error('synthetic crash'), 'synthetic-req', false);
+    expect(internalResponse.status).toBe(500);
+    expect(await internalResponse.text()).toContain('INTERNAL');
+  });
+
+  it('rejects null, oversized, or malformed JSON bodies', async () => {
+    await expect(readJson(new Response(null))).rejects.toMatchObject({ reason: 'BAD_REQUEST' });
+    await expect(readJson(new Response(JSON.stringify({ key: 'a'.repeat(64) })), 16)).rejects.toMatchObject({ reason: 'BAD_REQUEST' });
+    await expect(readJson(new Response('{invalid-json'))).rejects.toMatchObject({ reason: 'BAD_REQUEST' });
+    await expect(readJson(new Response('{"ok":true}'), 32)).resolves.toEqual({ ok: true });
+  });
+});
+
+describe('owner client handlers', () => {
+  it('validates pagination cursors and clamps listClients page sizes to 64', async () => {
+    const { store } = sqliteStore();
+    const context = ownerContext(store);
+    await expect(handlers.listClients({ pageSize: -1, pageToken: '' } as never, context)).rejects.toMatchObject({ reason: 'BAD_REQUEST' });
+    for (const pageToken of ['malformed-token', encodePageToken(123, {}), encodePageToken('not-a-uuid', {})]) {
+      await expect(handlers.listClients({ pageSize: 10, pageToken } as never, context)).rejects.toMatchObject({ reason: 'BAD_REQUEST' });
+    }
+
+    const firstId = '00000000-0000-4000-8000-000000000001';
+    const secondId = '00000000-0000-4000-8000-000000000002';
+    seedNamespaceAndKey({ id: firstId, token_sha256: '1'.repeat(64) }, store);
+    seedNamespaceAndKey({ id: secondId, token_sha256: '2'.repeat(64) }, store);
+
+    const spy = vi.spyOn(store, 'clients');
+    const firstPage = await handlers.listClients({ pageSize: 1, pageToken: '' } as never, context);
+    expect(firstPage.clients).toHaveLength(1);
+    expect(firstPage.nextPageToken).not.toBe('');
+    const secondPage = await handlers.listClients({ pageSize: 100, pageToken: firstPage.nextPageToken } as never, context);
+    expect(secondPage.clients.map((client) => client.name)).toEqual(['clients/' + secondId]);
+    expect(secondPage.nextPageToken).toBe('');
+    expect(spy).toHaveBeenLastCalledWith(firstId, 65);
+  });
+
+  it('rejects control characters, replays of revoked requestIds, and creations past the 64-client limit', async () => {
+    const { store } = sqliteStore();
+    const context = ownerContext(store);
+    const requestId = '00000000-0000-4000-8000-000000000001';
+
+    await expect(handlers.createClient({ requestId } as never, context)).rejects.toMatchObject({ reason: 'BAD_REQUEST' });
+    for (const label of ['bad\u0007label', 'bad\u007flabel']) {
+      await expect(handlers.createClient({
+        requestId, client: { label, namespace: 'synthetic', access: Client_Access.READ_WRITE },
+      } as never, context)).rejects.toMatchObject({ reason: 'BAD_REQUEST' });
+    }
+    await expect(handlers.createClient({
+      requestId, client: { label: 'Synthetic', namespace: 'synthetic', access: Client_Access.ACCESS_UNSPECIFIED },
+    } as never, context)).rejects.toMatchObject({ reason: 'BAD_REQUEST' });
+
+    const created = await handlers.createClient({
+      requestId, client: { label: 'Synthetic', namespace: 'synthetic', access: Client_Access.READ_WRITE },
+    } as never, context);
+    expect(created.apiKey).toMatch(/^sto_/);
+
+    const replayed = await handlers.createClient({
+      requestId, client: { label: 'Synthetic', namespace: 'synthetic', access: Client_Access.READ_WRITE },
+    } as never, context);
+    expect(replayed.apiKey).toBe('');
+
+    await expect(handlers.createClient({
+      requestId, client: { label: 'Different', namespace: 'synthetic', access: Client_Access.READ_WRITE },
+    } as never, context)).rejects.toMatchObject({ reason: 'BAD_REQUEST' });
+
+    await handlers.deleteClient({ name: 'clients/' + requestId } as never, context);
+    await expect(handlers.createClient({
+      requestId, client: { label: 'Synthetic', namespace: 'synthetic', access: Client_Access.READ_WRITE },
+    } as never, context)).rejects.toMatchObject({ code: Code.NOT_FOUND, reason: 'NOT_FOUND' });
+
+    for (let index = 0; index < 64; index++) {
+      seedNamespaceAndKey({
+        id: '00000000-0000-4000-8000-' + String(index + 10).padStart(12, '0'),
+        token_sha256: String(index + 10).padStart(64, '0'),
+      }, store);
+    }
+    await expect(handlers.createClient({
+      requestId: '00000000-0000-4000-8000-000000000099',
+      client: { label: 'Overflow', namespace: 'synthetic', access: Client_Access.READ_ONLY },
+    } as never, context)).rejects.toMatchObject({ code: Code.RESOURCE_EXHAUSTED, reason: 'CLIENT_LIMIT' });
+  });
+
+  it('returns 400 for malformed client resource names and 404 for absent or already revoked clients', async () => {
+    const { store } = sqliteStore();
+    const context = ownerContext(store);
+    const id = '00000000-0000-4000-8000-000000000001';
+    seedNamespaceAndKey({ id }, store);
+
+    for (const name of ['clients/not-a-uuid', 'other/' + id]) {
+      await expect(handlers.deleteClient({ name } as never, context)).rejects.toMatchObject({ httpStatus: 400, reason: 'BAD_REQUEST' });
+    }
+    await expect(handlers.deleteClient({ name: 'clients/00000000-0000-4000-8000-000000000099' } as never, context))
+      .rejects.toMatchObject({ httpStatus: 404, reason: 'NOT_FOUND' });
+
+    await handlers.deleteClient({ name: 'clients/' + id } as never, context);
+    await expect(handlers.deleteClient({ name: 'clients/' + id } as never, context))
+      .rejects.toMatchObject({ httpStatus: 404, reason: 'NOT_FOUND' });
   });
 });
 
@@ -77,3 +236,4 @@ describe('owner console', () => {
     expect(SCRIPT).not.toContain('今日');
   });
 });
+

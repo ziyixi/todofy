@@ -23,6 +23,7 @@ unittest_test(
         "//tools/cloud-bootstrap:finalize",
         "//tools/cloud-bootstrap:github_config",
         "//tools/cloud-bootstrap:github_secrets",
+        "//tools/cloud-bootstrap:inventory_pr",
         "//tools/cloud-bootstrap:private_input",
         "//tools/cloud-bootstrap:state_imports",
         "//tools/cloud-bootstrap:tofu_bootstrap",

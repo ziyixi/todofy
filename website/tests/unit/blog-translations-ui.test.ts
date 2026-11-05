@@ -5,25 +5,19 @@ import { describe, expect, it } from "vitest";
 import { ArticleLanguages } from "../../src/components/ArticleLanguages";
 import { BlogList } from "../../src/components/BlogList";
 import { PublicationList } from "../../src/components/PublicationList";
-import { sha256, type Post } from "../../src/lib/content";
+import { type Post } from "../../src/lib/content";
 import { articleLanguageAlternates } from "../../src/lib/metadata";
+import { makePost } from "../support/deployment-contract";
 
 function post(slug: string, language: Post["language"], translationKey?: string): Post {
-  const sourceKey = sha256(slug);
-  return {
-    sourceKey,
-    feedGuid: `urn:ziyixi:post:${sourceKey}`,
-    slug,
+  return makePost(slug, {
     language,
     translationKey,
     title: language === "en" ? "A shared article" : "同一篇文章",
     summary: "Summary",
     publishedAt: "2025-02-03T00:00:00.000Z",
-    tags: [],
     blocks: [],
-    toc: [],
-    media: [],
-  };
+  });
 }
 
 describe("bilingual article presentation", () => {

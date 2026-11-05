@@ -1,5 +1,6 @@
 """Test collection contracts and durable triggers without real providers."""
 
+import copy
 import dataclasses
 
 import fastapi.testclient as testclient
@@ -9,8 +10,12 @@ import newsletter.adapters as adapters
 import newsletter.app as app
 import newsletter.collection.collector as newsletter_collection_collector
 import newsletter.collection.instructions as newsletter_collection_instructions
+import newsletter.collection.pipeline as newsletter_collection_pipeline
+import newsletter.collection.repository as repository
+import newsletter.contracts as contracts
 import newsletter.preflight as preflight
 import newsletter.settings as newsletter_settings
+import newsletter.store as newsletter_store
 
 AUTH = {"Authorization": "Bearer " + "e" * 32}
 REQUEST = {"request_key": "external-job-01", "issue_date": "2026-09-05"}
@@ -303,3 +308,124 @@ def test_queue_capacity_and_no_implicit_job_on_startup(settings):
             ).status_code
             == 429
         )
+
+
+@pytest.fixture
+def environment(tmp_path):
+    store = newsletter_store.Store(
+        tmp_path / "data" / "newsletter.sqlite3", "mock"
+    )
+    runs = repository.RunRepository(store)
+    instruction = newsletter_collection_instructions.Instruction(
+        "science",
+        "Synthetic research direction.",
+        contracts.content_hash("fixture"),
+    )
+    run = runs.start(
+        {"request_key": "synthetic-run", "issue_date": "2026-09-05"},
+        [instruction],
+    )
+    pipeline = newsletter_collection_pipeline.CollectionPipeline(
+        runs,
+        newsletter_collection_collector.MockCollector(),
+        tmp_path / "work",
+        1,
+        20,
+    )
+    try:
+        yield store, runs, pipeline, run
+    finally:
+        store.close()
+
+
+async def test_failed_second_packet_never_leaves_untracked_material(
+    environment,
+):
+    store, runs, pipeline, run = environment
+
+    class PartlyInvalidCollector(
+        newsletter_collection_collector.MockCollector
+    ):
+        async def collect(self, *args):
+            result = await super().collect(*args)
+            invalid = copy.deepcopy(result.packets[0])
+            invalid["sources"] = []
+            return newsletter_collection_collector.ResearchResult(
+                [*result.packets, invalid], "Synthetic invalid second packet."
+            )
+
+    pipeline.collector = PartlyInvalidCollector()
+    assert await pipeline.collect_next()
+    failed = runs.get(run["id"])
+    assert failed["state"] == "failed"
+    persisted = {packet["id"] for packet in store.read_inbox()["packets"]}
+    recorded = {
+        packet_id
+        for direction in failed["directions"]
+        for packet_id in direction["packet_ids"]
+    }
+    assert persisted <= recorded
+
+
+async def test_internal_edition_key_conflict_blocks_run_not_killing_worker(
+    environment,
+):
+    store, runs, pipeline, run = environment
+    assert await pipeline.collect_next()
+    collected = runs.get(run["id"])
+    packet_ids = collected["directions"][0]["packet_ids"]
+    for packet_id in packet_ids:
+        store.projection_result(packet_id, "done")
+    store.prepare(
+        {
+            "request_key": "collection:" + run["id"],
+            "issue_date": "2026-09-06",
+            "packet_ids": packet_ids,
+        }
+    )
+    assert pipeline.advance()
+    failed = runs.get(run["id"])
+    assert failed["state"] in {"blocked", "failed"}
+    assert failed["error_code"]
+
+
+async def test_restart_does_not_reissue_uncertain_notion_projection(
+    environment,
+):
+    store, runs, pipeline, run = environment
+    assert await pipeline.collect_next()
+    packet = store.claim_projection()
+    assert packet is not None
+    store.recover()
+    runs.recover()
+    assert pipeline.advance()
+    blocked = runs.get(run["id"])
+    assert blocked["state"] == "blocked"
+    assert blocked["error_code"] == "notion_projection_unconfirmed"
+    assert blocked["edition_id"] == ""
+    assert store.claim_projection() is None
+    assert not pipeline.advance()
+
+
+async def test_crash_between_edition_creation_and_run_link_reuses_one_edition(
+    environment,
+):
+    store, runs, pipeline, run = environment
+    assert await pipeline.collect_next()
+    collected = runs.get(run["id"])
+    packet_ids = collected["directions"][0]["packet_ids"]
+    for packet_id in packet_ids:
+        store.projection_result(packet_id, "done")
+    edition = store.prepare(
+        {
+            "request_key": "collection:" + run["id"],
+            "issue_date": run["issue_date"],
+            "packet_ids": packet_ids,
+        }
+    )
+    store.recover()
+    runs.recover()
+    assert pipeline.advance()
+    assert runs.get(run["id"])["edition_id"] == edition["id"]
+    assert store.db.execute("SELECT COUNT(*) FROM editions").fetchone()[0] == 1
+    assert not pipeline.advance()

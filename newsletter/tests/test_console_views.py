@@ -766,3 +766,262 @@ def test_a_published_discovery_candidate_in_chinese_is_not_left_pooled():
     # further than the lead, so it may be there.
     (event,) = check(linked, **run).events
     assert (event.stage, event.match) == (STAGE.UNCERTAIN, published["title"])
+
+
+def test_scalar_and_url_helpers_clamp_and_reject_unsafe_inputs():
+    assert views.instant(True) is None
+    assert views.instant(0) is None
+    assert views.instant(-10) is None
+    assert views.instant("2026-10-28T14:07:41") is None
+    assert views.instant("not-a-date") is None
+    assert views.instant(1793196000) == datetime.datetime(
+        2026, 10, 28, 14, 0, tzinfo=datetime.UTC
+    )
+    assert views.int32(True) == 0
+    assert views.int32("12") == 0
+    assert views.int32(-99) == 0
+    assert views.int32(views.INT32_MAX + 500) == views.INT32_MAX
+    assert views.int32(42.8) == 42
+    assert views.http_url("https://example.org/a") == "https://example.org/a"
+    assert views.http_url("http://example.org/b") == "http://example.org/b"
+    assert views.http_url("javascript:alert(1)") == ""
+    assert views.http_url("ftp://example.org/file") == ""
+    assert views.http_url(None) == ""
+    uid = "01234567-89ab-cdef-0123-456789abcdef"
+    assert views.notion_url(uid) == (
+        "https://www.notion.so/0123456789abcdef0123456789abcdef"
+    )
+    assert views.notion_url("not-a-uuid") == ""
+    assert views.notion_url(None) == ""
+    assert (
+        views.call_seconds(
+            {
+                "started_at": "2026-10-28T14:05:00Z",
+                "finished_at": "2026-10-28T14:04:00Z",
+            }
+        )
+        == 0.0
+    )
+    assert views.call_seconds({"started_at": "2026-10-28T14:05:00Z"}) is None
+
+
+def test_funnel_fates_and_headline_summaries():
+    pool = [candidate("c1"), candidate("c2")]
+    active = funnel(
+        pool=pool,
+        tasks=[{"candidate_ids": ["c1"], "source_urls": [pool[1]["url"]]}],
+        stories=[
+            {"candidate_ids": ["c1"], "disposition": "deferred"},
+            {"candidate_ids": ["c1"], "disposition": "deep"},
+            {"candidate_ids": ["c2"], "disposition": "deferred"},
+        ],
+    )
+    selected, disposition = active.fates()
+    assert selected == {"c1", "c2"}
+    assert disposition == {"c1": "deep", "c2": "deferred"}
+    summaries = views.headline_summaries(
+        [
+            {
+                "direction": "03-world",
+                "feeds": 4,
+                "feeds_ok": 3,
+                "entries": 20,
+                "groups": 8,
+                "consensus_groups": 2,
+                "max_outlets": 5,
+                "top": [
+                    {"title": f"Group {i}", "outlets": 5 - i} for i in range(4)
+                ],
+            }
+        ]
+    )
+    assert len(summaries) == 1
+    assert summaries[0].direction == "03-world"
+    assert summaries[0].consensus_group_count == 2
+    assert len(summaries[0].top_groups) == 3
+    assert summaries[0].top_groups[0].title == "Group 0"
+
+
+def test_frozen_usage_and_usage_groupings():
+    assert views.frozen_usage(None) is None
+    frozen = views.frozen_usage(
+        {
+            "invocations": 3,
+            "partial": False,
+            "usage": {
+                "input_tokens": 100,
+                "cached_input_tokens": 40,
+                "output_tokens": 25,
+            },
+        }
+    )
+    assert frozen is not None
+    assert (frozen.call_count, frozen.input_tokens, frozen.complete) == (
+        3,
+        100.0,
+        True,
+    )
+    calls = [
+        (
+            "2026-10-28",
+            {
+                "stage": "selection",
+                "purpose": "selection",
+                "model": "req-model",
+                "contributing_models": ["rep-model"],
+                "status": "completed",
+                "partial": False,
+                "started_at": "2026-10-28T14:00:00Z",
+                "finished_at": "2026-10-28T14:00:10Z",
+                "usage": {
+                    "input_tokens": 10,
+                    "cached_input_tokens": 0,
+                    "output_tokens": 5,
+                },
+            },
+        ),
+        (
+            "2026-10-28",
+            {
+                "stage": "discovery:01-ai",
+                "purpose": "discovery",
+                "model": "req-model",
+                "status": "completed",
+                "partial": False,
+                "started_at": "2026-10-28T14:00:00Z",
+                "finished_at": "2026-10-28T14:00:30Z",
+                "usage": {
+                    "input_tokens": 20,
+                    "cached_input_tokens": 5,
+                    "output_tokens": 8,
+                },
+            },
+        ),
+    ]
+    days = views.usage_days(calls)
+    assert [(d.issue_date, d.model, d.usage.call_count) for d in days] == [
+        ("2026-10-28", "rep-model", 1),
+        ("2026-10-28", "req-model", 1),
+    ]
+    nodes = views.usage_nodes(calls, GRAPH)
+    assert [(n.node_id, n.purpose, n.budget_seconds) for n in nodes] == [
+        ("discovery", "discovery", 240),
+        ("selection", "selection", 150),
+    ]
+    assert nodes[0].median_seconds == 30.0
+    assert nodes[1].max_seconds == 10.0
+
+
+def test_replica_story_outcomes_and_edition_body():
+    empty_rep = views.replica(
+        enabled=True, entity=None, version_states=[], outdated=False
+    )
+    assert empty_rep.state == REPLICA.NOT_STARTED
+    retrying_rep = views.replica(
+        enabled=True,
+        entity={
+            "create_state": "ready",
+            "error": "notion_rate_limited",
+            "attempts": 2,
+            "retry_at": "2026-10-28T15:00:00Z",
+            "progress_at": "2026-10-28T14:30:00Z",
+            "page_id": "01234567-89ab-cdef-0123-456789abcdef",
+        },
+        version_states=["done"],
+        outdated=False,
+    )
+    assert retrying_rep.state == REPLICA.RETRYING
+    assert retrying_rep.next_retry_time == "2026-10-28T15:00:00Z"
+    assert retrying_rep.notion_url.endswith("0123456789abcdef")
+
+    from_coverage = views.story_outcomes(
+        [
+            {
+                "story_id": "s1",
+                "title": "Story 1",
+                "disposition": "deep",
+                "reason": "lead",
+            }
+        ],
+        [{"id": "s1", "question": "Plan Q"}],
+        {"s1": "approved"},
+    )
+    assert len(from_coverage) == 1 and from_coverage[0].disposition == "deep"
+    from_plan = views.story_outcomes(
+        [], [{"id": "s1", "question": "Plan Q"}], {"s1": "failed"}
+    )
+    assert len(from_plan) == 1 and from_plan[0].title == "Plan Q"
+
+    fallback = views.edition_body(
+        None,
+        {
+            "sections": [
+                {
+                    "kind": "feature",
+                    "heading": "H",
+                    "paragraphs": [{"text": "Body text"}],
+                    "limitations": "Lim",
+                }
+            ]
+        },
+    )
+    assert fallback["sections"][0].paragraphs[0].text == "Body text"
+
+    rich = views.edition_body(
+        {
+            "packets": [
+                {
+                    "id": "p1",
+                    "content": {
+                        "sources": [{"id": "s1", "access_scope": "full_text"}]
+                    },
+                }
+            ],
+            "sections": [
+                {
+                    "kind": "feature",
+                    "heading": "H",
+                    "paragraphs": [
+                        {"text": "Cited", "references": [{"number": 1}]}
+                    ],
+                    "limitations": ["L1"],
+                }
+            ],
+            "references": [
+                {
+                    "number": 1,
+                    "title": "Ref 1",
+                    "url": "https://example.org/1",
+                    "citation": "p1/s1",
+                    "published_at": "2026-10-28",
+                }
+            ],
+            "chart": {
+                "kind": "bar",
+                "question": "Q",
+                "metric": "M",
+                "unit": "U",
+                "period": "P",
+                "caption": "C",
+                "alt_text": "A",
+                "limitations": ["CL"],
+                "rows": [
+                    {
+                        "label": "R1",
+                        "value": "10",
+                        "missing_reason": "",
+                        "references": [{"number": 1}],
+                    }
+                ],
+            },
+            "reading": {
+                "reference": {"number": 1},
+                "reason": "Read this",
+                "supporting_references": [{"number": 1}],
+            },
+        },
+        {},
+    )
+    assert rich["references"][0].access_scope == "full_text"
+    assert rich["chart"].points[0].reference_numbers == (1,)
+    assert rich["recommended_reading"].reference_number == 1

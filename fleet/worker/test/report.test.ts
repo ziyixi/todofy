@@ -1,7 +1,81 @@
-import { describe, expect, it } from 'vitest';
+import { createHash, createHmac } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
+import { describe, expect, it, vi } from 'vitest';
+import type { NewsletterConfigSync } from '@ziyixi/proto/fleet/telemetry/v1/host_report_wire';
 import fixture from '../../../contracts/fleet-report-v1/fixtures/healthy.json';
+import type { Env } from '../src/env.ts';
 import { statusSnapshot } from '../src/health.ts';
-import { freshness, parseReport, reportCodes } from '../src/report.ts';
+import { handleRequest } from '../src/http.ts';
+import { CodexGatewayOps, NewsletterOps, Ops } from '../src/ops.ts';
+import { handleReceipt } from '../src/receipt.ts';
+import { freshness, MAX_REPORT_BYTES, parseReport, REPORT_KEY_ID, REPORT_PATH, ReceiptError, reportCodes } from '../src/report.ts';
+import { FleetState } from '../src/state.ts';
+
+function createFleetState(overrides: Partial<Env> = {}): { db: DatabaseSync; state: FleetState; env: Env } {
+  const db = new DatabaseSync(':memory:');
+  let depth = 0;
+  const sql = {
+    exec<T extends Record<string, SqlStorageValue>>(query: string, ...bindings: unknown[]) {
+      const trimmed = query.trim();
+      const stmt = db.prepare(trimmed);
+      const params = bindings as (string | number | bigint | Uint8Array | null)[];
+      if (/^(SELECT|PRAGMA|WITH)\b/i.test(trimmed)) {
+        const rows = stmt.all(...params) as unknown as T[];
+        return {
+          toArray: () => rows,
+          one: () => {
+            if (rows.length !== 1) throw new Error(`Expected 1 row, got ${rows.length}`);
+            return rows[0]!;
+          },
+          [Symbol.iterator]: () => rows[Symbol.iterator](),
+        };
+      }
+      stmt.run(...params);
+      const empty: T[] = [];
+      return {
+        toArray: () => empty,
+        one: () => { throw new Error('Expected 1 row'); },
+        [Symbol.iterator]: () => empty[Symbol.iterator](),
+      };
+    },
+  } as unknown as SqlStorage;
+  const ctx = {
+    storage: {
+      sql,
+      transactionSync<T>(fn: () => T): T {
+        const sp = `sp_${++depth}`;
+        db.exec(`SAVEPOINT ${sp}`);
+        try {
+          const result = fn();
+          db.exec(`RELEASE SAVEPOINT ${sp}`);
+          return result;
+        } catch (err) {
+          db.exec(`ROLLBACK TO SAVEPOINT ${sp}`);
+          db.exec(`RELEASE SAVEPOINT ${sp}`);
+          throw err;
+        } finally {
+          depth -= 1;
+        }
+      },
+    },
+  } as unknown as DurableObjectState;
+  const env: Env = {
+    FLEET: {} as DurableObjectNamespace<FleetState>,
+    ASSETS: { fetch: () => Promise.resolve(new Response('ok')) } as unknown as Fetcher,
+    PUBLIC_HOST: 'fleet.example.test',
+    HOST_KEY: 'vps',
+    HOST_EPOCH: '1',
+    REPORT_HMAC_KEY: 'a'.repeat(64),
+    BUILD_SHA: '1'.repeat(40),
+    ...overrides,
+  };
+  const state = new FleetState(ctx, env);
+  env.FLEET = {
+    idFromName: (name: string) => name as unknown as DurableObjectId,
+    get: () => state as unknown as DurableObjectStub<FleetState>,
+  } as unknown as DurableObjectNamespace<FleetState>;
+  return { db, state, env };
+}
 
 const NOW = Date.parse('2026-10-03T00:00:00Z');
 const read = (value: unknown = fixture) => parseReport(JSON.stringify(value), 'vps', '1', NOW);
@@ -345,3 +419,321 @@ describe('runtime reconcile observations', () => {
     expect(() => read(reported({ observed_at: '2026-10-02T23:58:59Z' }))).toThrow('invalid_report');
   });
 });
+
+describe('Codex gateway process projection', () => {
+  function gatewayReport(health: string = 'healthy') {
+    const source = fixture.runtime.workloads[0];
+    if (!source) throw new Error('missing synthetic runtime');
+    const key = 'codex-gateway';
+    const gateway = {
+      ...source, name: `workloads/${key}`, workload_key: key,
+      admission_state: 'unsupported', health_state: health,
+      release: {
+        ...source.release,
+        desired: { ...source.release.desired, workload_key: key },
+        actual: { ...source.release.actual, workload_key: key },
+      },
+    };
+    return parseReport(JSON.stringify({
+      ...fixture,
+      newsletter: { ...fixture.newsletter, drain_state: 'frozen' },
+      runtime: { ...fixture.runtime, workloads: [gateway, ...fixture.runtime.workloads] },
+    }), 'vps', '1', NOW);
+  }
+
+  it('reports its verified process while Newsletter is paused', () => {
+    expect(statusSnapshot('codex-gateway', gatewayReport(), NOW, NOW, 'fleet.example.test')).toMatchObject({
+      app: 'codex-gateway', health: 'ok', signals: [], capabilities: [],
+      counters: { heartbeat_age_seconds: 0 },
+    });
+  });
+  it('keeps failed gateway process evidence visible without calling inference', () => {
+    const status = statusSnapshot('codex-gateway', gatewayReport('unknown'), NOW, NOW, 'fleet.example.test');
+    expect(status.health).toBe('degraded');
+    expect(status.signals.map((item) => item.code)).toEqual(['codex_gateway_unavailable', 'deployment_pending']);
+  });
+});
+
+describe('Newsletter configuration observation', () => {
+  const CONFIG = {
+    active_revision: '1'.repeat(40), active_digest: 'a'.repeat(64),
+    wanted_revision: '1'.repeat(40), wanted_digest: 'a'.repeat(64), wanted_commit: '2'.repeat(40),
+    last_attempt_time: '2026-10-02T23:55:00Z', last_success_time: '2026-10-02T23:55:00Z',
+  } satisfies NewsletterConfigSync;
+  const configReport = (config: unknown = CONFIG) => parseReport(JSON.stringify({
+    ...fixture,
+    newsletter: {
+      ...fixture.newsletter,
+      latest_delivery_state: 'provider_accepted',
+      latest_delivery_time: '2026-10-02T23:00:00Z',
+      config_sync: config,
+    },
+  }), 'vps', '1', NOW);
+  const configStatus = (config: unknown = CONFIG) => statusSnapshot('newsletter', configReport(config), NOW, NOW, 'fleet.example.test');
+  const signal = (state: string, severity = 'info') => ({ code: `newsletter_config_${state}`, severity, metrics: {} });
+
+  it('compares the observed identity pair and projects only numeric clocks to Home', () => {
+    const view = configStatus();
+    expect(view.health).toBe('ok');
+    expect(view.signals).toContainEqual(signal('current'));
+    expect(view.counters).toMatchObject({
+      newsletter_config_last_attempt_at: NOW / 1000 - 300,
+      newsletter_config_last_success_at: NOW / 1000 - 300,
+      newsletter_config_attempt_age_seconds: 300,
+    });
+    expect(Object.values(view.counters).every((value) => typeof value === 'number')).toBe(true);
+    expect(configStatus({ ...CONFIG, active_revision: 'packaged', wanted_revision: 'packaged' }).signals).toContainEqual(signal('current'));
+  });
+  it.each([{ active_revision: '3'.repeat(40) }, { active_digest: 'b'.repeat(64) }])('keeps an identity mismatch pending: %j', (patch) => {
+    expect(configStatus({ ...CONFIG, ...patch }).signals).toContainEqual(signal('pending'));
+  });
+  it('warns on safe errors and old attempts without changing process health or delivery evidence', () => {
+    for (const [config, state] of [
+      [{ ...CONFIG, error: 'CONFIG_GITHUB_NETWORK_ERROR' }, 'failed'],
+      [{ ...CONFIG, last_attempt_time: '2026-10-02T23:29:59Z' }, 'stale'],
+    ] as const) {
+      const view = configStatus(config);
+      expect(view.health).toBe('ok');
+      expect(view.signals).toContainEqual(signal(state, 'warning'));
+      expect(view.signals).toContainEqual({ code: 'newsletter_delivery_accepted', severity: 'info', since: '2026-10-02T23:00:00Z', metrics: {} });
+      expect(view.signals.map((item) => item.code)).not.toContain('newsletter_unavailable');
+    }
+    expect(configStatus({ ...CONFIG, last_attempt_time: '2026-10-02T23:30:00Z' }).signals).toContainEqual(signal('current'));
+  });
+  it('shows an effective pin independently of an old or absent remote target', () => {
+    expect(configStatus({ ...CONFIG, pinned_digest: CONFIG.active_digest, wanted_digest: 'b'.repeat(64) }).signals).toContainEqual(signal('pinned'));
+    expect(configStatus({
+      active_revision: CONFIG.active_revision, active_digest: CONFIG.active_digest,
+      pinned_digest: CONFIG.active_digest, last_attempt_time: CONFIG.last_attempt_time,
+    }).signals).toContainEqual(signal('pinned'));
+    expect(configStatus({ ...CONFIG, pinned_digest: 'b'.repeat(64) }).signals).toContainEqual(signal('pending'));
+  });
+  it.each([{}, { active_revision: 'packaged' }, { ...CONFIG, wanted_digest: undefined }])('keeps incomplete metadata unobserved: %j', (config) => {
+    expect(configStatus(config).signals).toContainEqual(signal('unobserved'));
+    expect(configStatus(config).signals).not.toContainEqual(signal('current'));
+  });
+  it('keeps an older producer without the optional config child unobserved', () => {
+    const legacy = parseReport(JSON.stringify(fixture), 'vps', '1', NOW);
+    expect(statusSnapshot('newsletter', legacy, NOW, NOW, 'fleet.example.test').signals).toContainEqual(signal('unobserved'));
+  });
+  it('does not reuse config signals or clocks after the host observation becomes stale', () => {
+    const view = statusSnapshot('newsletter', configReport(), NOW, NOW + 600_001, 'fleet.example.test');
+    expect(view.signals).toEqual([{ code: 'host_stale', severity: 'warning', metrics: {} }]);
+    expect(view.counters).toEqual({ heartbeat_age_seconds: 600 });
+  });
+  it('tolerates two minutes of clock skew but keeps later clocks out of fresh configuration evidence', () => {
+    const allowed = '2026-10-03T00:02:00Z';
+    const future = '2026-10-03T00:02:00.001Z';
+    const skewed = configStatus({ ...CONFIG, last_attempt_time: allowed, last_success_time: allowed });
+    expect(skewed.signals).toContainEqual(signal('current'));
+    expect(skewed.counters).toMatchObject({
+      newsletter_config_last_attempt_at: NOW / 1000 + 120,
+      newsletter_config_last_success_at: NOW / 1000 + 120,
+      newsletter_config_attempt_age_seconds: 0,
+    });
+    const unobserved = configStatus({ ...CONFIG, last_attempt_time: future, last_success_time: future });
+    expect(unobserved.signals).toContainEqual(signal('unobserved'));
+    expect(Object.keys(unobserved.counters).filter((key) => key.startsWith('newsletter_config_'))).toEqual([]);
+    expect(configStatus({ ...CONFIG, last_success_time: future }).counters).not.toHaveProperty('newsletter_config_last_success_at');
+  });
+  it.each([{ error: 'private error text' }, { active_digest: 'short' }, { last_attempt_time: 'yesterday' }, { url: 'https://private.invalid' }])('rejects unsafe configuration metadata %j', (patch) => {
+    expect(() => configReport({ ...CONFIG, ...patch })).toThrow('invalid_report');
+  });
+});
+
+describe('FleetState change tracking, retention cap, and ops entrypoints', () => {
+  const hashText = (text: string) => createHash('sha256').update(text).digest('hex');
+
+  it('records state transitions (first_receipt, added, resolved) and caps change history at 256 rows', () => {
+    const { db, state } = createFleetState();
+    const firstText = JSON.stringify({ ...fixture, sequence: 1, receipt_id: '11111111-2222-4333-8444-555555555501' });
+    const firstHash = hashText(firstText);
+    expect(state.accept(firstText, firstHash, NOW)).toEqual({ accepted: true, sequence: 1 });
+    // Duplicate retry with identical hash is idempotent and adds no change row.
+    expect(state.accept(firstText, firstHash, NOW)).toEqual({ accepted: false, sequence: 1 });
+    expect(() => state.accept(firstText, '0'.repeat(64), NOW)).toThrow(ReceiptError);
+
+    // Alternate ssh failed / active across 135 sequences (> 256 state transitions) to verify the 256-entry cap.
+    for (let seq = 2; seq <= 270; seq += 1) {
+      const sshState = seq % 2 === 0 ? 'failed' : 'active';
+      const payload = JSON.stringify({
+        ...fixture,
+        sequence: seq,
+        receipt_id: `11111111-2222-4333-8444-${String(seq).padStart(12, '0')}`,
+        daemons: { ...fixture.daemons, ssh: { state: sshState } },
+      });
+      expect(state.accept(payload, hashText(payload), NOW)).toEqual({ accepted: true, sequence: seq });
+    }
+
+    const totalChanges = (db.prepare('SELECT COUNT(*) AS n FROM changes').get() as { n: number }).n;
+    expect(totalChanges).toBe(256);
+
+    const view = JSON.parse(state.view(NOW)) as { changes: { code: string }[] };
+    expect(view.changes).toHaveLength(32);
+    expect(view.changes[0]?.code).toBe('daemon_ssh_failed');
+    expect(view.changes[1]?.code).toBe('resolved_daemon_ssh_failed');
+  });
+
+  it('delegates Ops, NewsletterOps, and CodexGatewayOps status() and rejects setGuard()', async () => {
+    const { env } = createFleetState();
+    const ctx = {} as ExecutionContext;
+    const fleetOps = new Ops(ctx, env);
+    const newsletterOps = new NewsletterOps(ctx, env);
+    const codexOps = new CodexGatewayOps(ctx, env);
+
+    expect((await fleetOps.status()).app).toBe('fleet');
+    expect((await newsletterOps.status()).app).toBe('newsletter');
+    expect((await codexOps.status()).app).toBe('codex-gateway');
+
+    expect(() => fleetOps.setGuard()).toThrow('invalid_input');
+    expect(() => newsletterOps.setGuard()).toThrow('invalid_input');
+    expect(() => codexOps.setGuard()).toThrow('invalid_input');
+  });
+});
+
+describe('HTTP and receipt error surfaces (http.ts & receipt.ts)', () => {
+  const signBytes = (secret: string, bytes: Uint8Array) =>
+    createHmac('sha256', Buffer.from(secret, 'hex')).update(bytes).digest('hex');
+
+  it('rejects malformed receipt methods, headers, unconfigured HMAC key, empty/invalid UTF-8/oversized bodies, and DO exceptions', async () => {
+    const { env } = createFleetState();
+    const url = `https://fleet.example.test${REPORT_PATH}`;
+
+    // 405 Method Not Allowed
+    const getRes = await handleReceipt(new Request(url, { method: 'GET' }), env, NOW);
+    expect(getRes.status).toBe(405);
+    expect(getRes.headers.get('allow')).toBe('POST');
+
+    // 415 Unsupported Media Type
+    const textRes = await handleReceipt(new Request(url, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: '{}' }), env, NOW);
+    expect(textRes.status).toBe(415);
+
+    // 401 Missing x-fleet-key-id or malformed signature
+    const noKeyRes = await handleReceipt(new Request(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-fleet-signature': 'a'.repeat(64) },
+      body: '{}',
+    }), env, NOW);
+    expect(noKeyRes.status).toBe(401);
+
+    // 503 Unconfigured REPORT_HMAC_KEY
+    const unconfiguredRes = await handleReceipt(new Request(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-fleet-key-id': REPORT_KEY_ID, 'x-fleet-signature': 'a'.repeat(64) },
+      body: '{}',
+    }), { ...env, REPORT_HMAC_KEY: '' }, NOW);
+    expect(unconfiguredRes.status).toBe(503);
+
+    // 400 Empty (null) body
+    const emptyBodyRes = await handleReceipt(new Request(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-fleet-key-id': REPORT_KEY_ID, 'x-fleet-signature': 'a'.repeat(64) },
+    }), env, NOW);
+    expect(emptyBodyRes.status).toBe(400);
+
+    // 400 Invalid UTF-8 bytes with valid HMAC signature
+    const badUtf8 = new Uint8Array([0xff, 0xfe]);
+    const badUtf8Res = await handleReceipt(new Request(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-fleet-key-id': REPORT_KEY_ID,
+        'x-fleet-signature': signBytes(env.REPORT_HMAC_KEY!, badUtf8),
+      },
+      body: badUtf8,
+    }), env, NOW);
+    expect(badUtf8Res.status).toBe(400);
+
+    // 413 Oversized body
+    const huge = new Uint8Array(MAX_REPORT_BYTES + 1);
+    const hugeRes = await handleReceipt(new Request(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-fleet-key-id': REPORT_KEY_ID, 'x-fleet-signature': 'a'.repeat(64) },
+      body: huge,
+    }), env, NOW);
+    expect(hugeRes.status).toBe(413);
+
+    // 503 Unexpected DO exception
+    const validBytes = new TextEncoder().encode(JSON.stringify(fixture));
+    const validSig = signBytes(env.REPORT_HMAC_KEY!, validBytes);
+    const brokenEnv: Env = {
+      ...env,
+      FLEET: {
+        idFromName: (name: string) => name as unknown as DurableObjectId,
+        get: () => ({ accept: () => Promise.reject(new Error('sqlite_io_error')) }) as unknown as DurableObjectStub<FleetState>,
+      } as unknown as DurableObjectNamespace<FleetState>,
+    };
+    const doErrRes = await handleReceipt(new Request(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-fleet-key-id': REPORT_KEY_ID, 'x-fleet-signature': validSig },
+      body: validBytes,
+    }), brokenEnv, NOW);
+    expect(doErrRes.status).toBe(503);
+    expect(await doErrRes.json()).toEqual({ error: 'unavailable' });
+  });
+
+  it('handles owner HTTP surface: wrong host 404, auth 503, non-GET 405, non-empty pageToken 400, DO exception 503, unknown /api/* 404, and asset fallback', async () => {
+    const { env } = createFleetState({
+      DEV_AUTH_BYPASS: 'true',
+      DEV_NOW: '2026-10-03T00:00:00Z',
+      ACCESS_OWNER: 'owner@example.test',
+    });
+
+    // Wrong host / non-local HTTP -> 404
+    const wrongHost = await handleRequest(new Request('https://wrong.example.test/api/v1/status'), env);
+    expect(wrongHost.status).toBe(404);
+
+    // Auth not_configured / keys_unavailable -> 503
+    const unconfiguredAuth = await handleRequest(
+      new Request('https://fleet.example.test/api/v1/status'),
+      { ...env, DEV_AUTH_BYPASS: undefined, ACCESS_AUDIENCE: undefined },
+    );
+    expect(unconfiguredAuth.status).toBe(503);
+
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network_down')));
+    const keysUnavailableAuth = await handleRequest(
+      new Request('https://fleet.example.test/api/v1/status', {
+        headers: { 'cf-access-jwt-assertion': 'eyJhbGciOiJSUzI1NiIsImtpZCI6ImxIn0.e30.sig' },
+      }),
+      {
+        ...env,
+        DEV_AUTH_BYPASS: undefined,
+        ACCESS_ISSUER: 'https://issuer.example.test',
+        ACCESS_AUDIENCE: 'b'.repeat(64),
+        ACCESS_OWNER: 'owner@example.test',
+      },
+    );
+    expect(keysUnavailableAuth.status).toBe(503);
+    vi.unstubAllGlobals();
+
+    // Non-GET/HEAD on owner surface -> 405
+    const postOwner = await handleRequest(new Request('http://127.0.0.1/api/v1/status', { method: 'POST' }), env);
+    expect(postOwner.status).toBe(405);
+    expect(postOwner.headers.get('allow')).toBe('GET, HEAD');
+
+    // listNodes with non-empty page_token -> 400
+    const badPageToken = await handleRequest(new Request('http://127.0.0.1/api/v1/nodes?page_token=next'), env);
+    expect(badPageToken.status).toBe(400);
+
+    // Unknown /api/* route -> 404
+    const unknownApi = await handleRequest(new Request('http://127.0.0.1/api/v1/unknown'), env);
+    expect(unknownApi.status).toBe(404);
+
+    // DO exception in fromState -> 503
+    const brokenDoEnv: Env = {
+      ...env,
+      FLEET: {
+        idFromName: (name: string) => name as unknown as DurableObjectId,
+        get: () => ({ view: () => Promise.reject(new Error('do_down')) }) as unknown as DurableObjectStub<FleetState>,
+      } as unknown as DurableObjectNamespace<FleetState>,
+    };
+    const doFailure = await handleRequest(new Request('http://127.0.0.1/api/v1/status'), brokenDoEnv);
+    expect(doFailure.status).toBe(503);
+
+    // Asset fallback with STRICT_CSP
+    const assetRes = await handleRequest(new Request('http://127.0.0.1/'), env);
+    expect(assetRes.status).toBe(200);
+    expect(assetRes.headers.get('content-security-policy')).toContain("default-src 'self'");
+  });
+});
+

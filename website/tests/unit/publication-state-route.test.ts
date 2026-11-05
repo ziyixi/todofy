@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { hashContentSnapshot, sha256 } from "../../src/lib/content/hash";
 import { PublicationStateSchema } from "../../src/lib/content/publication-state";
-import { CONTENT_SCHEMA_VERSION, type ContentSnapshot } from "../../src/lib/content/schema";
+import { CONTENT_SCHEMA_VERSION } from "../../src/lib/content/schema";
+import { makePost, makeSnapshot } from "../support/deployment-contract";
 
 const { getContentBundle } = vi.hoisted(() => ({ getContentBundle: vi.fn() }));
 
@@ -25,28 +26,7 @@ afterEach(() => {
 
 describe("publication-state.json", () => {
   it("uses the same manifest and code identity as build-info.json with a no-store response", async () => {
-    const sourceKey = sha256("public-article");
-    const snapshot: ContentSnapshot = {
-      schemaVersion: CONTENT_SCHEMA_VERSION,
-      sourceMode: "fixture",
-      posts: [
-        {
-          sourceKey,
-          feedGuid: `urn:ziyixi:post:${sourceKey}`,
-          slug: "public-article",
-          title: "A public article",
-          summary: "A public summary.",
-          language: "en",
-          publishedAt: "2026-01-01T00:00:00.000Z",
-          tags: [],
-          blocks: [],
-          toc: [],
-          media: [],
-        },
-      ],
-      media: [],
-      redirects: [],
-    };
+    const snapshot = makeSnapshot([makePost("public-article")]);
     const contentHash = hashContentSnapshot(snapshot);
     getContentBundle.mockResolvedValue({
       snapshot,

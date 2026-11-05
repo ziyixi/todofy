@@ -7,38 +7,26 @@ import {
 } from "../../scripts/content/adapters/notion";
 import type { NotionClientLike } from "../../scripts/content/notion/types";
 import { comparePostsNewestFirst } from "../../src/lib/content/date";
-import { hashContentSnapshot, sha256 } from "../../src/lib/content/hash";
+import { hashContentSnapshot } from "../../src/lib/content/hash";
 import { buildCandidateRegistry } from "../../src/lib/content/registry";
 import { PostSchema, type ContentSnapshot, type Post } from "../../src/lib/content/schema";
 import { getPostTranslations, groupPostsByTranslation } from "../../src/lib/content/translations";
 import { validateContentSnapshot } from "../../src/lib/content/validate";
+import { makeNotionPage, makePost, makeSnapshot } from "../support/deployment-contract";
 
 function post(slug: string, language: Post["language"], translationKey?: string): Post {
-  const sourceKey = sha256(slug);
-  return {
-    sourceKey,
-    feedGuid: `urn:ziyixi:post:${sourceKey}`,
-    slug,
+  return makePost(slug, {
     title: slug,
     summary: `Summary for ${slug}`,
     language,
     ...(translationKey ? { translationKey } : {}),
     publishedAt: "2025-01-01T00:00:00.000Z",
-    tags: [],
     blocks: [],
-    toc: [],
-    media: [],
-  };
+  });
 }
 
 function snapshot(posts: Post[]): ContentSnapshot {
-  return {
-    schemaVersion: 1,
-    sourceMode: "fixture",
-    posts: [...posts].sort(comparePostsNewestFirst),
-    media: [],
-    redirects: [],
-  };
+  return makeSnapshot([...posts].sort(comparePostsNewestFirst));
 }
 
 const propertyNames = {
@@ -62,26 +50,6 @@ const notionSchema = {
     Tags: { type: "multi_select" },
   },
 };
-
-function notionPage(index: number, value: Post, status = "Published") {
-  const richText = (text: string) => ({ type: "rich_text", rich_text: [{ plain_text: text }] });
-  return {
-    id: index.toString(16).padStart(32, "0"),
-    last_edited_time: "2025-02-01T00:00:00.000Z",
-    properties: {
-      Title: { type: "title", title: [{ plain_text: value.title }] },
-      Slug: richText(value.slug),
-      Summary: richText(value.summary),
-      Status: { type: "status", status: { name: status } },
-      PublishedAt: { type: "date", date: { start: value.publishedAt } },
-      Language: { type: "select", select: { name: value.language } },
-      Tags: { type: "multi_select", multi_select: [] },
-      ...(value.translationKey !== undefined
-        ? { TranslationKey: richText(value.translationKey) }
-        : {}),
-    },
-  };
-}
 
 describe("translation groups", () => {
   it("keeps old snapshots compatible and hashes an explicitly added translation relationship", () => {
@@ -186,8 +154,8 @@ describe("Notion translation metadata", () => {
       }),
     ).toThrow(/TranslationKey must have type rich_text/);
 
-    const missing = notionPage(1, post("missing-key", "en"));
-    const empty = notionPage(2, { ...post("empty-key", "zh-CN"), translationKey: "   " });
+    const missing = makeNotionPage(1, post("missing-key", "en"));
+    const empty = makeNotionPage(2, { ...post("empty-key", "zh-CN"), translationKey: "   " });
     const result = collectPublicPages([missing, empty]);
     expect(result.pages).toHaveLength(2);
     for (const page of result.pages) expect(page).not.toHaveProperty("translationKey");
@@ -203,7 +171,7 @@ describe("Notion translation metadata", () => {
         names,
       ),
     ).not.toThrow();
-    const page = notionPage(1, post("renamed-key", "en"));
+    const page = makeNotionPage(1, post("renamed-key", "en"));
     const result = collectPublicPages(
       [
         {
@@ -224,10 +192,10 @@ describe("Notion translation metadata", () => {
     const chinese = post("paired-zh", "zh-CN", "pair");
     const duplicate = post("unpublished-duplicate", "en", "pair");
     const rows = [
-      notionPage(1, english),
-      notionPage(2, chinese),
-      notionPage(3, duplicate, "Draft"),
-      notionPage(4, {
+      makeNotionPage(1, english),
+      makeNotionPage(2, chinese),
+      makeNotionPage(3, duplicate, "Draft"),
+      makeNotionPage(4, {
         ...duplicate,
         slug: "future-duplicate",
         publishedAt: "2099-01-01T00:00:00.000Z",
@@ -237,13 +205,13 @@ describe("Notion translation metadata", () => {
     expect(result.pages.map((page) => page.slug)).toEqual(["paired-en", "paired-zh"]);
     expect(result).toMatchObject({ draftCount: 1, futureCount: 1 });
     expect(() =>
-      collectPublicPages([notionPage(1, english), notionPage(3, duplicate)]),
+      collectPublicPages([makeNotionPage(1, english), makeNotionPage(3, duplicate)]),
     ).toThrowError(expect.objectContaining({ code: "DUPLICATE_TRANSLATION_LANGUAGE" }));
   });
 
   it("retries a sync when only the translation relationship changes during collection", async () => {
-    const before = notionPage(1, post("moving-key", "en", "before"));
-    const after = notionPage(1, post("moving-key", "en", "after"));
+    const before = makeNotionPage(1, post("moving-key", "en", "before"));
+    const after = makeNotionPage(1, post("moving-key", "en", "after"));
     const query = vi
       .fn()
       .mockResolvedValueOnce({ results: [before], has_more: false, next_cursor: null })

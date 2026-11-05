@@ -1,9 +1,35 @@
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import type { ReadHomeRequest, ReadHomeResponse } from '@ziyixi/proto/dashboard/mcp/v1/home_service_wire';
-import { expect, it } from 'vitest';
-import { baselineSource, pollSource, rebaselineSource, type SourceEnv, type SourceState } from '../src/events.ts';
+import { afterEach, expect, it, vi } from 'vitest';
+
+vi.mock('cloudflare:workers', () => ({
+  DurableObject: class {
+    ctx: unknown;
+    env: unknown;
+    constructor(ctx: unknown, env: unknown) {
+      this.ctx = ctx;
+      this.env = env;
+    }
+  },
+  WorkerEntrypoint: class {
+    env: unknown;
+    constructor(_ctx?: unknown, env?: unknown) {
+      this.env = env;
+    }
+  },
+}));
+
+import type { Env } from '../src/env.ts';
+import { baselineSource, pollSource, rebaselineSource, RESTORED, type SourceEnv, type SourceState } from '../src/events.ts';
+import { SubscriptionStore } from '../src/store.ts';
 
 const AT = '2026-10-20T12:00:00Z';
 const NO_OWN_CHANGES = () => new Map<string, string>();
+const databases: DatabaseSync[] = [];
+afterEach(() => {
+  vi.restoreAllMocks();
+  for (const database of databases.splice(0)) database.close();
+});
 
 function snapshot(extra: Partial<ReadHomeResponse> = {}): ReadHomeResponse {
   return { generated_at: AT, build: 'synthetic', rev: 1,
@@ -229,3 +255,185 @@ it('re-baselines a restored source at the current head, and moves must-start rev
   expect((await pollSource('task.must_start', { name: 'task.must_start', ids: [], revision: minutes }, env, NO_OWN_CHANGES)).events[0]?.id)
     .toBe(`must_start_${String(minutes + 1)}`);
 });
+
+function createTestStore(overrides: Partial<Env> = {}) {
+  const database = new DatabaseSync(':memory:');
+  databases.push(database);
+  const kvMap = new Map<string, unknown>();
+  let alarmAt: number | null = null;
+  const sql = {
+    exec(query: string, ...bindings: SqlStorageValue[]) {
+      const trimmed = query.trimStart();
+      if (bindings.length === 0 && !/^(SELECT|PRAGMA)/i.test(trimmed)) {
+        database.exec(query);
+        return { toArray: () => [], one: () => ({}), raw: () => [][Symbol.iterator]() };
+      }
+      const values = bindings.map(value => value instanceof ArrayBuffer ? new Uint8Array(value) : value) satisfies SQLInputValue[];
+      const statement = database.prepare(query);
+      if (/^(SELECT|PRAGMA)/i.test(trimmed)) {
+        const rows = statement.all(...values) as Record<string, unknown>[];
+        return {
+          toArray: () => rows,
+          one: () => rows[0] ?? {},
+          raw: () => rows.map(row => Object.values(row))[Symbol.iterator](),
+        };
+      }
+      statement.run(...values);
+      return { toArray: () => [], one: () => ({}), raw: () => [][Symbol.iterator]() };
+    },
+  } as unknown as SqlStorage;
+  let transaction = 0;
+  const storage = {
+    sql,
+    kv: {
+      get: <T>(key: string) => kvMap.get(key) as T | undefined,
+      put: (key: string, value: unknown) => { kvMap.set(key, structuredClone(value)); },
+      delete: (key: string) => kvMap.delete(key),
+      list: () => new Map(kvMap),
+    },
+    get: <T>(key: string) => Promise.resolve(kvMap.get(key) as T | undefined),
+    put: (key: string, value: unknown) => { kvMap.set(key, structuredClone(value)); return Promise.resolve(); },
+    delete: (key: string) => Promise.resolve(kvMap.delete(key)),
+    getAlarm: () => Promise.resolve(alarmAt),
+    setAlarm: (time: number) => { alarmAt = time; return Promise.resolve(); },
+    deleteAlarm: () => { alarmAt = null; return Promise.resolve(); },
+    transactionSync<T>(action: () => T): T {
+      const savepoint = `store_test_${String(++transaction)}`;
+      database.exec(`SAVEPOINT ${savepoint}`);
+      try {
+        const result = action();
+        database.exec(`RELEASE ${savepoint}`);
+        return result;
+      } catch (error) {
+        database.exec(`ROLLBACK TO ${savepoint}`);
+        database.exec(`RELEASE ${savepoint}`);
+        throw error;
+      }
+    },
+  } as unknown as DurableObjectStorage;
+  const ctx = {
+    id: { equals: () => true },
+    storage,
+    blockConcurrencyWhile: <T>(fn: () => Promise<T>) => fn(),
+  } as unknown as DurableObjectState;
+  const env = {
+    SUBSCRIPTIONS: { idFromName: () => ({}) },
+    ACCESS_OWNER: 'owner@example.org',
+    CALLBACK_HOSTS: 'receiver.example.org',
+    TASKS: { fetch: () => Promise.resolve(Response.json({ next_page_token: '1' })) },
+    TODOFY_MAIL: { fetch: () => Promise.resolve(Response.json({ cursor: '1' })) },
+    RECALL: { fetch: () => Promise.resolve(Response.json({})) },
+    WATCH: { fetch: () => Promise.resolve(Response.json({ cursor: '1' })) },
+    HOME: { readHome: () => Promise.resolve(snapshot()) },
+    ...overrides,
+  } as unknown as Env;
+  return { store: new SubscriptionStore(ctx, env), sql };
+}
+
+it('retries 408/429/5xx callback deliveries with backoff before failing and deletes deliveries for expired subscriptions', async () => {
+  const now = Date.parse(AT);
+  vi.spyOn(Date, 'now').mockReturnValue(now);
+  const { store, sql } = createTestStore();
+  const secret = `whsec_${btoa('s'.repeat(32))}`;
+  const url = 'https://receiver.example.org/callback';
+  sql.exec(
+    'INSERT INTO subscriptions (id, owner, name, url, secret, expires_at, verified_at, arguments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    'sub_retry', 'owner@example.org', 'personal_cloud.test', url, secret, null, now, '{}',
+  );
+  sql.exec(
+    'INSERT INTO subscriptions (id, owner, name, url, secret, expires_at, verified_at, arguments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    'sub_expired', 'owner@example.org', 'personal_cloud.test', url, secret, now - 1, now - 10_000, '{}',
+  );
+  sql.exec(
+    "INSERT INTO deliveries (subscription_id, event_id, body, state, attempts, next_at) VALUES (?, ?, ?, 'pending', 0, ?)",
+    'sub_retry', 'evt_retry', '{"eventId":"evt_retry"}', now,
+  );
+  sql.exec(
+    "INSERT INTO deliveries (subscription_id, event_id, body, state, attempts, next_at) VALUES (?, ?, ?, 'pending', 0, ?)",
+    'sub_expired', 'evt_expired', '{"eventId":"evt_expired"}', now,
+  );
+
+  const statuses = [429, 503, 408];
+  vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+    Promise.resolve(new Response(null, { status: statuses.shift() ?? 500 })),
+  );
+
+  await store.alarm();
+  // Expired subscription delivery is deleted without calling fetch.
+  expect(sql.exec("SELECT * FROM deliveries WHERE subscription_id = 'sub_expired'").toArray()).toEqual([]);
+  // Attempt 1 (429): stays pending with 60_000ms backoff.
+  expect(sql.exec("SELECT state, attempts, next_at, error_code FROM deliveries WHERE event_id = 'evt_retry'").one()).toEqual({
+    state: 'pending',
+    attempts: 1,
+    next_at: now + 60_000,
+    error_code: 'callback_http_429',
+  });
+
+  // Advance past first backoff and run Attempt 2 (503): stays pending with 300_000ms backoff.
+  vi.spyOn(Date, 'now').mockReturnValue(now + 60_000);
+  await store.alarm();
+  expect(sql.exec("SELECT state, attempts, next_at, error_code FROM deliveries WHERE event_id = 'evt_retry'").one()).toEqual({
+    state: 'pending',
+    attempts: 2,
+    next_at: now + 60_000 + 300_000,
+    error_code: 'callback_http_503',
+  });
+
+  // Advance past second backoff and run Attempt 3 (408): exhausts RETRY_MS and transitions to failed.
+  vi.spyOn(Date, 'now').mockReturnValue(now + 360_000);
+  await store.alarm();
+  expect(sql.exec("SELECT state, attempts, error_code FROM deliveries WHERE event_id = 'evt_retry'").one()).toEqual({
+    state: 'failed',
+    attempts: 3,
+    error_code: 'callback_http_408',
+  });
+});
+
+it('records cursor_reset_required when pollSources catches CURSOR_RESET_REQUIRED and preserves restored marks', async () => {
+  const now = Date.parse(AT);
+  vi.spyOn(Date, 'now').mockReturnValue(now);
+  const { store, sql } = createTestStore({
+    TASKS: {
+      fetch: () => Promise.resolve(Response.json({
+        error: {
+          code: 400,
+          status: 'OUT_OF_RANGE',
+          message: 'Cursor expired',
+          details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'CURSOR_RESET_REQUIRED', domain: 'tasks.ziyixi.science' }],
+        },
+      }, { status: 400 })),
+    } as unknown as Fetcher,
+    TODOFY_MAIL: {
+      fetch: () => Promise.resolve(Response.json({ error: { code: 503, status: 'UNAVAILABLE', message: 'Mail outage' } }, { status: 503 })),
+    } as unknown as Fetcher,
+  });
+
+  const secret = `whsec_${btoa('s'.repeat(32))}`;
+  const url = 'https://receiver.example.org/callback';
+  for (const [id, name] of [['sub_tasks', 'task.changed'], ['sub_mail', 'mail.ready']] as const) {
+    sql.exec(
+      'INSERT INTO subscriptions (id, owner, name, url, secret, expires_at, verified_at, arguments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      id, 'owner@example.org', name, url, secret, null, now, '{}',
+    );
+  }
+  sql.exec(
+    'INSERT INTO event_sources (name, state, checked_at, error_code) VALUES (?, ?, ?, NULL)',
+    'task.changed', JSON.stringify({ name: 'task.changed', cursor: '10' }), now - 120_000,
+  );
+  sql.exec(
+    'INSERT INTO event_sources (name, state, checked_at, error_code) VALUES (?, ?, ?, ?)',
+    'mail.ready', JSON.stringify({ name: 'mail.ready', cursor: '20' }), 0, RESTORED,
+  );
+
+  await store.alarm();
+  expect(sql.exec("SELECT error_code, checked_at FROM event_sources WHERE name = 'task.changed'").one()).toEqual({
+    error_code: 'cursor_reset_required',
+    checked_at: now,
+  });
+  // A restored source keeps its 'restored' mark when rebaseline fails.
+  expect(sql.exec("SELECT error_code, checked_at FROM event_sources WHERE name = 'mail.ready'").one()).toEqual({
+    error_code: RESTORED,
+    checked_at: now,
+  });
+});
+

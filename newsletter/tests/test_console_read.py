@@ -1,8 +1,12 @@
 """The console reads one consistent story from Newsletter's own records."""
 
+import concurrent.futures
 import datetime
+import hashlib
 import json
 import sqlite3
+import subprocess
+import sys
 
 import pytest
 import ziyixi_proto.newsletter.ui.v1.backup_status_pb as backup_pb
@@ -13,6 +17,7 @@ import ziyixi_proto.newsletter.ui.v1.overview_pb as overview_pb
 import ziyixi_proto.newsletter.ui.v1.run_pb as run_pb
 import ziyixi_proto.newsletter.ui.v1.source_catalog_pb as catalog_pb
 
+import newsletter.console_api as console_api
 import newsletter.console_read as console_read
 import newsletter.console_views as views
 import newsletter.monitoring_status as monitoring_status
@@ -28,6 +33,7 @@ REPLICA = backup_pb.Replica_State
 @pytest.fixture
 def world(tmp_path):
     built = console_world.build(tmp_path)
+    built.store.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     yield built
     built.close()
 
@@ -507,3 +513,149 @@ def test_a_database_without_optional_tables_reads_empty(tmp_path):
         assert reader.list_runs(service_pb.ListRunsRequest()).runs == ()
     finally:
         store.close()
+
+
+def test_routes_are_the_generated_bindings_under_the_prefix(tmp_path):
+    reader = console_read.ConsoleReader(
+        newsletter_settings.Settings(data_dir=tmp_path)
+    )
+    app = console_api.create_console_app(reader, None, lambda: True)
+    routes = {
+        (method, route.path)
+        for route in app.routes
+        for method in getattr(route, "methods", ())
+    }
+    assert routes == {
+        ("GET", console_api.route_path(binding.path_template))
+        for binding in service_pb.HTTP_BINDINGS
+    }
+    assert {path for _, path in routes} == {
+        "/api/newsletter/v1/overview",
+        "/api/newsletter/v1/runs",
+        "/api/newsletter/v1/runs/{segment0}",
+        "/api/newsletter/v1/runs/{segment0}/modelCalls",
+        "/api/newsletter/v1/runs:summarizeModelUsage",
+        "/api/newsletter/v1/editions",
+        "/api/newsletter/v1/editions/{segment0}",
+        "/api/newsletter/v1/editions/{segment0}/rendering",
+        "/api/newsletter/v1/sourceCatalog",
+        "/api/newsletter/v1/backupStatus",
+    }
+    assert app.openapi_url is None and app.docs_url is None
+
+
+@pytest.mark.parametrize("template", ["/v1/runs", "/api/v2/runs"])
+def test_only_api_v1_bindings_are_served(template):
+    with pytest.raises(ValueError, match="binding prefix"):
+        console_api.route_path(template)
+
+
+def test_the_views_need_no_http_or_engine(tmp_path):
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import newsletter.console_views, sys; "
+            "assert 'fastapi' not in sys.modules; "
+            "assert 'newsletter.app' not in sys.modules; "
+            "assert 'newsletter.store' not in sys.modules",
+        ],
+        cwd=tmp_path,
+        env={"PYTHONDONTWRITEBYTECODE": "1"},
+        check=True,
+        timeout=15,
+    )
+
+
+def _every_answer(reader):
+    run = "runs/" + console_world.RUN_27
+    edition = "editions/" + console_world.EDITION_27
+    return [
+        reader.overview(healthy=True),
+        reader.list_runs(service_pb.ListRunsRequest()),
+        reader.get_run(service_pb.GetRunRequest(name=run)),
+        reader.list_model_calls(service_pb.ListModelCallsRequest(parent=run)),
+        reader.summarize_model_usage(
+            service_pb.SummarizeModelUsageRequest(day_count=90)
+        ),
+        reader.list_editions(service_pb.ListEditionsRequest()),
+        reader.get_edition(service_pb.GetEditionRequest(name=edition)),
+        reader.get_edition_rendering(
+            service_pb.GetEditionRenderingRequest(name=edition + "/rendering")
+        ),
+        reader.get_source_catalog(
+            service_pb.GetSourceCatalogRequest(name="sourceCatalog")
+        ),
+        reader.get_backup_status(
+            service_pb.GetBackupStatusRequest(name="backupStatus")
+        ),
+    ]
+
+
+def _state(world):
+    path = world.settings.data_dir / "newsletter.sqlite3"
+    files = sorted(world.settings.data_dir.iterdir())
+    return (
+        hashlib.sha256(path.read_bytes()).hexdigest(),
+        [p.name for p in files],
+        world.store.db.execute("PRAGMA data_version").fetchone()[0],
+        world.store.db.execute(
+            "SELECT COUNT(*) FROM deployment_activities"
+        ).fetchone()[0],
+        world.store.db.execute(
+            "SELECT name FROM sqlite_master ORDER BY name"
+        ).fetchall(),
+    )
+
+
+def test_reading_every_answer_changes_nothing(world):
+    before = _state(world)
+    _every_answer(world.reader)
+    assert _state(world) == before
+
+
+def test_the_connection_refuses_every_write(world):
+    with world.reader.snapshot() as snap:
+        assert snap.one("SELECT value FROM json_each('[1]')")[0] == 1
+        for statement in (
+            "INSERT INTO metadata VALUES ('x','y')",
+            "UPDATE editions SET state='failed'",
+            "DELETE FROM collection_runs",
+            "CREATE TABLE monitoring_unknowns (x)",
+            "PRAGMA journal_mode=DELETE",
+            "PRAGMA query_only=OFF",
+            "ATTACH DATABASE ':memory:' AS other",
+        ):
+            with pytest.raises(sqlite3.DatabaseError):
+                snap.db.execute(statement)
+    assert (
+        world.store.db.execute(
+            "SELECT COUNT(*) FROM metadata WHERE key='x'"
+        ).fetchone()[0]
+        == 0
+    )
+
+
+def test_reads_continue_beside_an_open_write_and_the_engines_lock(world):
+    world.store.db.execute("BEGIN IMMEDIATE")
+    world.store.db.execute(
+        "UPDATE collection_runs SET state='failed' WHERE id=?",
+        (console_world.RUN_29,),
+    )
+    with (
+        world.store.lock,
+        concurrent.futures.ThreadPoolExecutor(1) as pool,
+    ):
+        answers = pool.submit(_every_answer, world.reader).result(timeout=20)
+    world.store.db.execute("ROLLBACK")
+    assert answers[0].latest_run.state == run_pb.Run_State.READY
+
+
+def test_one_answer_reads_one_snapshot(world):
+    query = "SELECT COUNT(*) FROM metadata WHERE key='later'"
+    with world.reader.snapshot() as snap:
+        assert snap.one(query)[0] == 0
+        world.store.db.execute("INSERT INTO metadata VALUES ('later','x')")
+        assert snap.one(query)[0] == 0
+    with world.reader.snapshot() as snap:
+        assert snap.one(query)[0] == 1

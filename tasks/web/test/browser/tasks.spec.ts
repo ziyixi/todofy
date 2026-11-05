@@ -1,4 +1,5 @@
 import { dragTask } from "./drag";
+import { seedTask } from "./seed";
 import { expect, test, type APIRequestContext } from "@playwright/test";
 
 test("retrying Quick Add after a lost response keeps one persisted task", async ({
@@ -42,17 +43,7 @@ async function createTask(
   title: string,
   fields: Record<string, unknown> = {},
 ) {
-  const csrf = await request.get("/api/tasks/csrf");
-  const { token } = await csrf.json();
-  const result = await request.post(
-    `/api/tasks/v1/tasks?request_id=${crypto.randomUUID()}`,
-    {
-      headers: { "x-csrf-token": token, origin: "http://127.0.0.1:8798" },
-      data: { title, ...fields },
-    },
-  );
-  expect(result.status()).toBe(200);
-  return result.json();
+  return seedTask(request, { title, ...fields });
 }
 
 test("a task link opens once, and closing a dialog returns focus to its opener", async ({

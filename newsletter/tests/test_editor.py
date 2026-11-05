@@ -5,11 +5,14 @@ import copy
 import dataclasses
 import json
 
+import google.protobuf.json_format as json_format
 import pytest
+import ziyixi_protos.newsletter.editorial_pb2 as editorial_pb2
 
 import newsletter.collection.instructions as instructions
 import newsletter.contracts as contracts
 import newsletter.editor as newsletter_editor
+import newsletter.editor_schema as editor_schema
 import newsletter.errors as newsletter_errors
 import newsletter.workflow.content as newsletter_workflow_content
 import newsletter.workflow.schema as newsletter_workflow_schema
@@ -402,3 +405,370 @@ async def test_mock_chart_tag_does_not_invent_numbers(tmp_path, packet):
             [packet], "2026-09-05", tmp_path / "job"
         )
     assert error.value.code == "invalid_input"
+
+
+def sample_output(packet):
+    return {
+        "draft": editor.make_draft([packet]),
+        "review": {
+            "passed": True,
+            "findings": ["All claims match the frozen source."],
+        },
+        "supplemental_packets": [],
+    }
+
+
+def make_packet(packet, identifier, url, *, scope="full_text", excerpt=None):
+    content = copy.deepcopy(packet["content"])
+    content["sources"][0].update(
+        id="s1",
+        url=url,
+        access_scope=scope,
+        excerpt=excerpt or content["sources"][0]["excerpt"],
+    )
+    return {"id": identifier, "content": content}
+
+
+async def test_draft_correction_reuses_thread_and_checks_validated_schema(
+    tmp_path, fake_router, packet
+):
+    output = sample_output(packet)
+    output["supplemental_packets"] = [
+        make_packet(packet, "sup-1", "https://example.com/evidence")
+    ]
+    output["draft"]["sections"][0]["paragraphs"].append(
+        {"text": packet["content"]["body"], "citations": ["sup-1/s1"]}
+    )
+    first = editor.FakeTurn(output)
+    first.omit_action = "openPage"
+    second = editor.FakeTurn(output)
+    second.omit_action = "search"
+    fake_router.turns = [first, second]
+    result = await editor.live_editor(tmp_path).prepare(
+        [packet], "2026-09-05", tmp_path / "job"
+    )
+    assert result.supplemental_packets[0]["id"] == "sup-1"
+    assert (
+        result.supplemental_packets[0]["content"]["sources"][0]["provenance"]
+        == "web_open"
+    )
+    assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 2
+    assert fake_router.prompts[1]["unverified_urls"] == [
+        "https://example.com/evidence"
+    ]
+    assert fake_router.closed
+
+
+@pytest.mark.parametrize(
+    "mutator",
+    [
+        lambda out, _: out["supplemental_packets"][0]["content"]["sources"][
+            0
+        ].update(url="https://example.com/unread-pdf"),
+        lambda out, _: out["draft"]["sections"][0]["paragraphs"].append(
+            {"text": "invented", "citations": ["missing/source"]}
+        ),
+        lambda out, _: out.update(
+            review={"passed": False, "findings": ["Rejected by review."]}
+        ),
+    ],
+)
+async def test_draft_correction_still_validates_the_corrected_output(
+    tmp_path, fake_router, packet, mutator
+):
+    first = sample_output(packet)
+    first["supplemental_packets"] = [
+        make_packet(packet, "sup-1", "https://example.com/unread-pdf")
+    ]
+    second = copy.deepcopy(first)
+    second["supplemental_packets"][0]["content"]["sources"][0]["url"] = (
+        "https://example.com/evidence"
+    )
+    mutator(second, packet)
+    fake_router.turns = [editor.FakeTurn(first), editor.FakeTurn(second)]
+    with pytest.raises(newsletter_errors.EditorError) as caught:
+        await editor.live_editor(tmp_path).prepare(
+            [packet], "2026-09-05", tmp_path / "job"
+        )
+    assert caught.value.code == "invalid_output"
+    assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 2
+    assert fake_router.closed
+
+
+async def test_unused_unopened_supplemental_source_is_discarded_without_retry(
+    tmp_path, fake_router, packet
+):
+    output = sample_output(packet)
+    output["supplemental_packets"] = [
+        make_packet(packet, "unused", "https://example.com/unread-pdf"),
+        make_packet(packet, "used", "https://example.com/evidence"),
+    ]
+    output["draft"]["sections"][0]["paragraphs"].append(
+        {"text": packet["content"]["body"], "citations": ["used/s1"]}
+    )
+    fake_router.turn = editor.FakeTurn(output)
+    result = await editor.live_editor(tmp_path).prepare(
+        [packet], "2026-09-05", tmp_path / "job"
+    )
+    assert [item["id"] for item in result.supplemental_packets] == ["used"]
+    assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 1
+
+
+async def test_cited_unopened_supplement_requests_only_cited_url_then_drops_unused(
+    tmp_path, fake_router, packet
+):
+    output = sample_output(packet)
+    output["supplemental_packets"] = [
+        make_packet(packet, "unused", "https://example.com/unread-pdf"),
+        make_packet(packet, "used", "https://example.com/evidence"),
+    ]
+    output["draft"]["sections"][0]["paragraphs"].append(
+        {"text": packet["content"]["body"], "citations": ["used/s1"]}
+    )
+    first = editor.FakeTurn(output)
+    first.omit_action = "openPage"
+    fake_router.turns = [first, editor.FakeTurn(output)]
+    result = await editor.live_editor(tmp_path).prepare(
+        [packet], "2026-09-05", tmp_path / "job"
+    )
+    assert [item["id"] for item in result.supplemental_packets] == ["used"]
+    assert len(fake_router.prompts) == 2
+    assert fake_router.prompts[1]["unverified_urls"] == [
+        "https://example.com/evidence"
+    ]
+
+
+async def test_supporting_reading_citation_must_also_be_opened(
+    tmp_path, fake_router, packet
+):
+    excerpt = "Synthetic primary source excerpt."
+    output = sample_output(packet)
+    output["supplemental_packets"] = [
+        make_packet(
+            packet,
+            "primary",
+            "https://example.com/evidence",
+            scope="abstract",
+            excerpt=excerpt,
+        ),
+        make_packet(
+            packet,
+            "support",
+            "https://example.com/unread-pdf",
+            scope="full_text",
+            excerpt=excerpt,
+        ),
+    ]
+    output["draft"]["recommended_reading"] = {
+        "title": "Synthetic paper",
+        "reason": "Synthetic primary source excerpt.",
+        "citation": "primary/s1",
+        "supporting_citations": ["support/s1"],
+    }
+    fake_router.turn = editor.FakeTurn(output)
+    with pytest.raises(newsletter_errors.EditorError) as caught:
+        await editor.live_editor(tmp_path).prepare(
+            [packet], "2026-09-05", tmp_path / "job"
+        )
+    assert caught.value.code == "invalid_output"
+    assert len(fake_router.prompts) == 2
+    assert fake_router.prompts[1]["unverified_urls"] == [
+        "https://example.com/unread-pdf"
+    ]
+
+
+@pytest.fixture
+def proto_packet():
+    return editorial_pb2.Packet(
+        id="p1",
+        content=editorial_pb2.PacketContent(
+            title="Packet",
+            body="Fact",
+            tags=["ai"],
+            sources=[
+                editorial_pb2.Source(
+                    id="s1",
+                    title="Source",
+                    url="https://example.com/s1",
+                    excerpt="Fact",
+                    access_scope="full_text",
+                    provenance="provided",
+                )
+            ],
+        ),
+    )
+
+
+@pytest.fixture
+def proto_draft():
+    return editorial_pb2.Draft(
+        subject="Subject",
+        title="Title",
+        introduction="Fact",
+        limitations="Limited",
+        sections=[
+            editorial_pb2.Section(
+                kind="briefing",
+                heading="Heading",
+                paragraphs=[
+                    editorial_pb2.Paragraph(text="Fact", citations=["p1/s1"])
+                ],
+                limitations="Section limits",
+            )
+        ],
+    )
+
+
+def as_dict(message):
+    return json_format.MessageToDict(
+        message,
+        preserving_proto_field_name=True,
+        always_print_fields_with_no_presence=True,
+    )
+
+
+def test_output_schema_stays_strict_recursive_and_aligned_with_proto():
+    schema = editor_schema.output_schema()
+    assert set(schema["properties"]) == {
+        field.name for field in editorial_pb2.EditorOutput.DESCRIPTOR.fields
+    }
+    section_schema = schema["properties"]["draft"]["properties"]["sections"][
+        "items"
+    ]
+    assert section_schema["properties"]["kind"]["enum"] == list(
+        contracts.SECTION_KINDS
+    )
+    chart = schema["properties"]["draft"]["properties"]["chart"]["anyOf"][0]
+    assert set(chart["properties"]) == {
+        field.name for field in editorial_pb2.ChartSpec.DESCRIPTOR.fields
+    }
+    point = chart["properties"]["points"]["items"]
+    assert set(point["required"]) == {
+        "series",
+        "category",
+        "decimal_value",
+        "missing_reason",
+        "citations",
+    }
+
+    def check_objects(node):
+        if isinstance(node, dict):
+            if node.get("type") == "object":
+                assert node["additionalProperties"] is False
+                assert set(node["required"]) == set(node["properties"])
+            for value in node.values():
+                check_objects(value)
+        elif isinstance(node, list):
+            for item in node:
+                check_objects(item)
+
+    check_objects(schema)
+
+
+def test_normalize_output_strips_nullable_Reading_and_chart_wrappers(
+    proto_packet, proto_draft
+):
+    raw = {
+        "draft": {
+            **as_dict(proto_draft),
+            "recommended_reading": None,
+            "chart": {
+                "title": "Latency",
+                "subtitle": "",
+                "kind": "bar",
+                "unit": "ms",
+                "source_label": "Source",
+                "caption": "Fact",
+                "points": [
+                    {
+                        "series": "S",
+                        "category": "A",
+                        "decimal_value": "1.5",
+                        "missing_reason": None,
+                        "citations": ["p1/s1"],
+                    },
+                    {
+                        "series": "S",
+                        "category": "B",
+                        "decimal_value": None,
+                        "missing_reason": "Not reported",
+                        "citations": ["p1/s1"],
+                    },
+                ],
+            },
+        },
+        "review": {"passed": True, "findings": ["Verified"]},
+        "supplemental_packets": [],
+    }
+    normalized = editor_schema.normalize_output(json.dumps(raw))
+    assert "recommended_reading" not in normalized["draft"]
+    points = normalized["draft"]["chart"]["points"]
+    assert points[0] == {
+        "series": "S",
+        "category": "A",
+        "decimal_value": "1.5",
+        "citations": ["p1/s1"],
+    }
+    assert points[1] == {
+        "series": "S",
+        "category": "B",
+        "missing_reason": "Not reported",
+        "citations": ["p1/s1"],
+    }
+    contracts.validate_draft(normalized["draft"], [as_dict(proto_packet)])
+
+
+def test_normalize_output_preserves_reading_card(proto_packet, proto_draft):
+    raw = {
+        "draft": {
+            **as_dict(proto_draft),
+            "recommended_reading": {
+                "title": "Paper",
+                "reason": "Fact",
+                "citation": "p1/s1",
+            },
+            "chart": None,
+        },
+        "review": {"passed": True, "findings": ["Verified"]},
+        "supplemental_packets": [],
+    }
+    normalized = editor_schema.normalize_output(json.dumps(raw))
+    assert "chart" not in normalized["draft"]
+    assert normalized["draft"]["recommended_reading"]["citation"] == "p1/s1"
+    contracts.validate_draft(normalized["draft"], [as_dict(proto_packet)])
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "not-json",
+        "[]",
+        json.dumps({"draft": "bad", "review": {}, "supplemental_packets": []}),
+        json.dumps(
+            {
+                "draft": {"chart": "bad"},
+                "review": {},
+                "supplemental_packets": [],
+            }
+        ),
+        json.dumps(
+            {
+                "draft": {"chart": {"points": "bad"}},
+                "review": {},
+                "supplemental_packets": [],
+            }
+        ),
+        json.dumps(
+            {
+                "draft": {"chart": {"points": ["bad"]}},
+                "review": {},
+                "supplemental_packets": [],
+            }
+        ),
+    ],
+)
+def test_normalize_output_rejects_malformed_shapes(payload):
+    with pytest.raises(newsletter_errors.EditorError) as error:
+        editor_schema.normalize_output(payload)
+    assert error.value.code == "invalid_output"
+

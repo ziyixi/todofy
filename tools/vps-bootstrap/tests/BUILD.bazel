@@ -160,29 +160,10 @@ unittest_test(
     modules = ["test_repair"],
     deps = [
         "//tools/vps-bootstrap:config",
-        "//tools/vps-bootstrap:repair",
-        "//tools/vps-bootstrap:repair_checks",
-        "//tools/vps-bootstrap:repair_kube",
-    ],
-)
-
-unittest_test(
-    name = "test_repair_cli",
-    srcs = ["test_repair_cli.py"],
-    data = [
-        "//tools:repository_test_data",
-        "//tools/vps-bootstrap:python_sources",
-    ],
-    imports = [
-        ".",
-        "..",
-    ],
-    modules = ["test_repair_cli"],
-    deps = [
-        "//tools/vps-bootstrap:config",
         "//tools/vps-bootstrap:install",
         "//tools/vps-bootstrap:reader",
         "//tools/vps-bootstrap:repair",
+        "//tools/vps-bootstrap:repair_checks",
         "//tools/vps-bootstrap:repair_kube",
     ],
 )
@@ -212,7 +193,6 @@ test_suite(
         ":test_reader",
         ":test_recover",
         ":test_repair",
-        ":test_repair_cli",
         ":test_repair_gate",
     ],
 )

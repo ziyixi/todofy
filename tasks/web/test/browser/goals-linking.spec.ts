@@ -4,29 +4,9 @@ import {
   type APIRequestContext,
   type Locator,
 } from "@playwright/test";
+import { createResource } from "./seed";
 
 test.use({ serviceWorkers: "block", viewport: { width: 1440, height: 1100 } });
-
-async function createResource(
-  request: APIRequestContext,
-  kind: string,
-  fields: Record<string, unknown>,
-) {
-  const { token } = await (await request.get("/api/tasks/csrf")).json();
-  const response = await request.post(
-    `/api/tasks/v1/${kind}?request_id=${crypto.randomUUID()}`,
-    {
-      headers: { "x-csrf-token": token, origin: "http://127.0.0.1:8798" },
-      data: fields,
-    },
-  );
-  expect(response.status(), await response.text()).toBe(200);
-  return response.json() as Promise<{
-    id: string;
-    title: string;
-    etag: string;
-  }>;
-}
 
 async function seedGoal(request: APIRequestContext) {
   const catalog = await (await request.get("/api/tasks/v1/goalCatalog")).json();

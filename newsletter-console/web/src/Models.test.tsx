@@ -1,13 +1,7 @@
-import { cleanup, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { screen, within } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
 import { callBudgetNote } from './Models.tsx';
 import { fixture, serve, show, USAGE, world } from './test/world.tsx';
-
-afterEach(() => {
-  cleanup();
-  vi.unstubAllGlobals();
-  window.location.hash = '';
-});
 
 const section = async (name: string) => within(await screen.findByRole('region', { name }));
 

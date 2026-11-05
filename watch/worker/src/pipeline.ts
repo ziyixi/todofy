@@ -154,7 +154,7 @@ function applyFailure(deps: CheckDeps, row: WatchRow, config: WatchConfig, at: S
 }
 
 /** Confirms a pending change as it was seen (no confirmation fetch could compare it), with `note` in its summary. */
-function decideAsSeen(deps: CheckDeps, row: WatchRow, config: WatchConfig, pending: ChangeRow, now: number, note: string): void {
+export function decideAsSeen(deps: CheckDeps, row: WatchRow, config: WatchConfig, pending: ChangeRow, now: number, note: string): void {
   deps.store.updateChange(pending.id, { state: 'confirmed', resolve_time: now, summary: `${pending.summary}${note}`, before_snapshot_id: null });
   deps.store.updateWatch(row.id, { pending_change: null, ...(pending.snapshot_id === null ? {} : { baseline_id: pending.snapshot_id }) });
   deps.store.enqueue('change_confirmed', row.id, pending.id, config.notify, now);

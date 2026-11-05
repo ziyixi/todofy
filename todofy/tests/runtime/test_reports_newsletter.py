@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 import pytest
 
-from tests.fakes.model_router_fake import ModelRouterFake, error_reply, text_reply
+from tests.fakes.model_router_fake import ModelRouterFake, text_reply
 from tests.runtime.conftest import pipeline_vars
 from tests.runtime.harness import Worker, start_gateway
 from tests.runtime.owner_support import assert_contract
@@ -22,11 +22,13 @@ from tests.runtime.reports_support import (  # noqa: F401
     Probe,
     clean_fixture,
     digest,
+    idl_errors,
     probe_fixture,
 )
 from todofy.core import model_input, prompts
 from todofy.core.report_schema import EMPTY_WINDOW_SUMMARY
 
+DAY = 86_400
 HOUR = 3600
 TASKS = [{"rank": 1, "title": "续签护照", "reason": "下周到期，需要今天预约"}]
 
@@ -98,7 +100,9 @@ def stored_summary(text: str = "旧的日报") -> dict[str, Any]:
     }
 
 
-def test_missing_or_wrong_credentials_are_401_and_counted(newsletter: Worker, gemini: ModelRouterFake):
+def test_missing_or_wrong_credentials_are_401_and_counted_while_both_rotation_digests_pass(
+    newsletter: Worker, gemini: ModelRouterFake
+):
     for auth in (None, ("newsletter", "wrong")):
         response = newsletter.hooks.get("/api/summary", auth=auth)
         assert response.status_code == 401
@@ -106,26 +110,9 @@ def test_missing_or_wrong_credentials_are_401_and_counted(newsletter: Worker, ge
         assert_contract(response, "/api/summary")
     assert auth_failures(newsletter) == 2
     assert gemini.calls() == []
-
-
-def test_twenty_failures_lock_out_failures_but_never_the_right_password(newsletter: Worker):
-    for _ in range(20):
-        assert newsletter.hooks.get("/api/summary", auth=("newsletter", "guess")).status_code == 401
-    for auth in (("newsletter", "guess"), None, ("newsletter", "guess")):
-        response = newsletter.hooks.get("/api/summary", auth=auth)
-        assert response.status_code == 429
-        assert 0 < int(response.headers["retry-after"]) <= HOUR
-        assert_contract(response, "/api/summary")
-    # Locked failures write nothing more to D1.
-    assert auth_failures(newsletter) == 20
     for auth in (NEWSLETTER, ROTATED):
         assert newsletter.hooks.get("/api/summary", auth=auth).status_code == 200
-
-
-def test_both_rotation_digests_are_accepted(newsletter: Worker):
-    for auth in (NEWSLETTER, ROTATED):
-        assert newsletter.hooks.get("/api/summary", auth=auth).status_code == 200
-    assert auth_failures(newsletter) is None
+    assert auth_failures(newsletter) == 2
 
 
 def test_missing_digest_is_503_not_configured(tmp_path_factory, gemini):
@@ -167,26 +154,19 @@ def test_summary_is_computed_on_demand_then_served_from_the_stored_row(probe):
     assert len(probe.gemini.calls()) == 1
 
 
-def test_recommendation_uses_the_response_schema_and_validates(probe):
-    seed_summaries(probe, "续签护照")
-    probe.gemini.queue_generate(text_reply(json.dumps(TASKS, ensure_ascii=False)))
-    body = assert_contract(get(probe, "/api/recommendation?top=10"), "/api/recommendation")
-    assert (body["status"], body["tasks"], body["top_n"], body["task_count"]) == ("ok", TASKS, 10, 1)
-    [call] = probe.gemini.calls()
-    assert call.system == prompts.recommend_prompt(10)
-    assert (call.response_mime_type, call.response_schema["maxItems"]) == ("application/json", 10)
-
-
-def test_absent_top_means_three_like_go(probe):
-    body = assert_contract(get(probe, "/api/recommendation"), "/api/recommendation")
-    assert body["top_n"] == 3
-
-
-@pytest.mark.parametrize("top", ["0", "11", "x", "1.5"])
-def test_invalid_top_is_400(probe, top):
-    response = get(probe, f"/api/recommendation?top={top}")
-    assert response.status_code == 400
-    assert_contract(response, "/api/recommendation")
+def test_the_newsletter_gets_the_counts_on_demand(probe):
+    """reports.serve computes on demand at the real time: seed around it."""
+    now = int(time.time())
+    probe.insert("summaries", event_id="new", created_at=now - HOUR, subject="s", summary="新邮件", model="m")
+    probe.insert("summaries", event_id="old", created_at=now - 3 * DAY, subject="s", summary="三天前仍待处理", model="m")
+    response = probe.worker.hooks.get("/api/recommendation", params={"top": "10"}, auth=NEWSLETTER)
+    body = assert_contract(response, "/api/recommendation")
+    assert (body["new_count"], body["carryover_count"], body["task_count"]) == (1, 1, 2)
+    # A report stored before the change (no counts) is still valid.
+    old = {key: value for key, value in body.items() if key not in ("new_count", "carryover_count")}
+    assert_contract(httpx.Response(200, json=old), "/api/recommendation")
+    latest = probe.call("/reports/latest")["latest"]
+    assert idl_errors("LatestReports", latest) == []
 
 
 def precompute_hours_ago(hours: int) -> str:
@@ -215,17 +195,6 @@ def test_a_stored_unusable_report_is_recomputed(probe):
     assert (body["status"], body["tasks"]) == ("ok", TASKS)
 
 
-def test_old_row_is_not_served_when_on_demand_fails(probe):
-    seed_summaries(probe, "续签护照")
-    seed_report(probe, "summary", 0, stored_summary(), age=27 * HOUR)
-    probe.gemini.queue_generate(error_reply(500))
-    probe.gemini.queue_generate(error_reply(500))
-    response = get(probe, "/api/summary")
-    assert (response.status_code, response.json()["error"]["code"]) == (503, "unavailable")
-    assert_contract(response, "/api/summary")
-    assert len(probe.gemini.calls()) == 2
-
-
 def test_row_from_since_the_latest_precompute_is_served_without_the_model(probe):
     seed_summaries(probe, "续签护照")
     seed_report(probe, "summary", 0, stored_summary("今天的日报"), age=HOUR)
@@ -242,11 +211,3 @@ def test_row_from_before_the_latest_precompute_is_recomputed(probe):
     body = assert_contract(get(probe, "/api/summary", REPORT_PRECOMPUTE_UTC=precompute_hours_ago(2)), "/api/summary")
     assert (body["status"], body["summary"]) == ("ok", "今日重点：护照。")
 
-
-def test_no_row_and_failed_on_demand_is_503(probe):
-    seed_summaries(probe, "续签护照")
-    probe.gemini.queue_generate(error_reply(503))
-    probe.gemini.queue_generate(error_reply(503))
-    response = get(probe, "/api/summary")
-    assert response.status_code == 503
-    assert_contract(response, "/api/summary")

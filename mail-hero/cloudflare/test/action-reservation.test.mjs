@@ -1,15 +1,14 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFile, readdir } from 'node:fs/promises'
-import { fileURLToPath } from 'node:url'
-import { build } from 'esbuild'
-import { Miniflare, convertV4MiniflareOptions } from 'miniflare'
-import { migrationStatements } from './migrations.mjs'
+import { startRuntime } from './runtime-harness.mjs'
 
 test('workerd action reservation rolls back on read failure and preserves retry, owner and request identity', { timeout: 30000 }, async () => {
-  const root = fileURLToPath(new URL('..', import.meta.url))
-  const bundle = await build({
-    stdin: { contents: `
+  const { mf, db, close } = await startRuntime({
+    persist: false,
+    name: 'action-reservation-test',
+    entry: {
+      sourcefile: 'action-reservation-entry.ts',
+      contents: `
       import { action } from './src/native/api-common';
       import { HttpError } from './src/native/security';
       export default { async fetch(request, env) {
@@ -30,21 +29,12 @@ test('workerd action reservation rolls back on read failure and preserves retry,
           return Response.json({ code: error instanceof HttpError ? error.code : 'dependency_failed' },
             { status: error instanceof HttpError ? error.status : 503 });
         }
-      }};`, resolveDir: root, sourcefile: 'action-reservation-entry.ts', loader: 'ts' },
-    bundle: true, format: 'esm', platform: 'neutral', conditions: ['browser'], external: ['cloudflare:workers'], write: false,
-  })
-  const mf = new Miniflare(convertV4MiniflareOptions({
-    name: 'action-reservation-test', modules: true, script: bundle.outputFiles[0].text,
-    compatibilityDate: '2026-09-07', host: '127.0.0.1', port: 0,
+      }};`,
+    },
     d1Databases: { DB: 'action-reservation-test' },
     bindings: { CREDENTIAL_KEY: '12'.repeat(32) },
-  }))
+  })
   try {
-    const db = await mf.getD1Database('DB')
-    const directory = new URL('../migrations/', import.meta.url)
-    for (const name of (await readdir(directory)).filter(name => name.endsWith('.sql')).sort()) {
-      await db.batch(migrationStatements(await readFile(new URL(name, directory), 'utf8')).map(sql => db.prepare(sql)))
-    }
     const input = { owner: 'owner@example.org', request_id: crypto.randomUUID(), operation: 'send',
       resource: crypto.randomUUID(), value: crypto.randomUUID() }
     async function reserve(overrides = {}) {
@@ -84,5 +74,5 @@ test('workerd action reservation rolls back on read failure and preserves retry,
     assert.equal(otherOwner.status, 200)
     assert.notEqual(otherOwner.body.id, first.body.id, 'owner scope remains part of the ledger identity')
     assert.equal(await count(), 3)
-  } finally { await mf.dispose() }
+  } finally { await close() }
 })

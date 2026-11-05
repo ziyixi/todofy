@@ -14,15 +14,6 @@ import newsletter.store as newsletter_store
 import newsletter.worker as newsletter_worker
 
 
-@pytest.fixture
-def settings(tmp_path):
-    return newsletter_settings.Settings(
-        data_dir=tmp_path / "first",
-        editor_token="e" * 32,
-        send_token="s" * 32,
-    )
-
-
 def test_factory_does_not_open_storage_or_start_dependencies(
     settings, monkeypatch
 ):

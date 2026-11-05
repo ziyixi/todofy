@@ -1,9 +1,11 @@
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import { parse } from "smol-toml";
 import { describe, expect, it, vi } from "vitest";
 
-import { CloudflareApi } from "../../scripts/release/cloudflare";
+import { CloudflareApi, WranglerCli } from "../../scripts/release/cloudflare";
 import { waitForIdentity } from "../../scripts/release/verify";
 import { liveOrigin, otherOrigins, parseWorkerConfig } from "../../scripts/release/worker-config";
 
@@ -119,19 +121,99 @@ describe("website wrangler.toml", () => {
 
   const base = `name = "ziyixi-website"\naccount_id = "${"f".repeat(32)}"\nworkers_dev = false\npreview_urls = false\n`;
 
-  it("relies on wrangler replacing the Worker's Custom Domains with the listed set (docs: wrangler.toml)", async () => {
-    // wrangler.toml says its Custom Domains are the complete set: `wrangler triggers deploy` sends the
-    // replace_state changeset and then PUTs the listed domains with override_scope, but only when at
-    // least one Custom Domain is listed (and the route PUT only when a zone route is). After a wrangler
-    // upgrade, re-read publishCustomDomains and triggersDeploy and update the comment if this changed.
-    const cli = await readFile("node_modules/wrangler/wrangler-dist/cli.js", "utf8");
-    expect(cli).toContain("if (customDomainsOnly.length > 0) {");
-    expect(cli).toContain("if (routesOnly.length > 0) {");
-    expect(cli).toContain("/domains/changeset?replace_state=true");
-    expect(cli).toMatch(/override_scope: true,[\s\S]{0,8000}?\$\{workerUrl\}\/domains\/records`/);
+  it("documents Custom Domain replacement and runs WranglerCli via output file", async () => {
     const config = await readFile("wrangler.toml", "utf8");
     expect(config).toContain("complete set of Custom Domains");
     expect(config).toMatch(/Removing a\s+(#\s+)?line detaches that hostname/);
+
+    const dir = await mkdtemp(path.join(tmpdir(), "wrangler-cli-test-"));
+    const argsLog = path.join(dir, "args.jsonl");
+    const pnpmBin = path.join(dir, "pnpm");
+    const version = "11111111-1111-4111-8111-111111111111";
+    try {
+      await writeFile(
+        pnpmBin,
+        [
+          `#!${process.execPath}`,
+          'const fs = require("node:fs");',
+          `const logPath = ${JSON.stringify(argsLog)};`,
+          'fs.appendFileSync(logPath, JSON.stringify(process.argv.slice(2)) + "\\n");',
+          "const exitCode = Number(process.env.FAKE_WRANGLER_EXIT || 0);",
+          "if (exitCode) process.exit(exitCode);",
+          "const outPath = process.env.WRANGLER_OUTPUT_FILE_PATH;",
+          "if (process.env.FAKE_WRANGLER_OUTPUT && outPath) {",
+          "  fs.writeFileSync(outPath, process.env.FAKE_WRANGLER_OUTPUT);",
+          "}",
+        ].join("\n"),
+        { mode: 0o755 },
+      );
+      const makeCli = (extraEnv: NodeJS.ProcessEnv = {}) =>
+        new WranglerCli({
+          cwd: dir,
+          env: {
+            ...process.env,
+            PATH: `${dir}:${process.env.PATH ?? ""}`,
+            ...extraEnv,
+          },
+        });
+
+      await expect(
+        makeCli({
+          FAKE_WRANGLER_OUTPUT: `${JSON.stringify({ type: "deploy", version_id: version })}\n`,
+        }).firstDeploy("bootstrap msg"),
+      ).resolves.toEqual({ versionId: version });
+
+      const uploadLine = JSON.stringify({ type: "version-upload", version_id: version });
+      await expect(
+        makeCli({ FAKE_WRANGLER_OUTPUT: `${uploadLine}\n` }).uploadVersion("upload msg"),
+      ).resolves.toEqual({ versionId: version });
+
+      await expect(makeCli().deployVersion(version, "deploy msg")).resolves.toBeUndefined();
+      await expect(makeCli().deployTriggers()).resolves.toBeUndefined();
+
+      const recorded = (await readFile(argsLog, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as string[]);
+      expect(recorded).toEqual([
+        ["exec", "wrangler", "deploy", "--message", "bootstrap msg", "--config", "wrangler.toml"],
+        [
+          "exec",
+          "wrangler",
+          "versions",
+          "upload",
+          "--message",
+          "upload msg",
+          "--config",
+          "wrangler.toml",
+        ],
+        [
+          "exec",
+          "wrangler",
+          "versions",
+          "deploy",
+          `${version}@100%`,
+          "--message",
+          "deploy msg",
+          "--yes",
+          "--config",
+          "wrangler.toml",
+        ],
+        ["exec", "wrangler", "triggers", "deploy", "--config", "wrangler.toml"],
+      ]);
+
+      await expect(makeCli().deployVersion("not-a-uuid", "bad")).rejects.toThrow();
+      await expect(
+        makeCli({ FAKE_WRANGLER_OUTPUT: `${JSON.stringify({ type: "deploy" })}\n` }).firstDeploy(
+          "missing version",
+        ),
+      ).rejects.toThrow();
+      await expect(makeCli({ FAKE_WRANGLER_EXIT: "2" }).deployTriggers()).rejects.toThrow(
+        /wrangler triggers deploy exited with 2/,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("verifies the canonical host once attached, otherwise the first hostname", () => {

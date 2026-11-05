@@ -26,6 +26,7 @@ import {
   type Manifest,
 } from '../../src/backup.ts';
 import { RESTORE_EVIDENCE_LOOKS, RESTORE_SEQUENCE_GAP } from '../../src/restore.ts';
+import { dump } from './harness.ts';
 
 const DAY = 86_400_000;
 /** 2026-10-28T11:23:00Z: the daily slot. */
@@ -83,15 +84,6 @@ beforeAll(async () => {
         const { op, args } = await request.json();
         try {
           if (op === 'sql') return Response.json({ ok: this.store.all(args[0], ...(args[1] ?? [])) });
-          if (op === 'dump') {
-            const out = {};
-            for (const { name } of this.store.all("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT GLOB '_cf_*' AND name NOT GLOB '__cf_*' ORDER BY name")) {
-              const columns = this.store.all('PRAGMA table_info("' + name + '")').map(row => row.name);
-              out[name] = this.store.all('SELECT ' + columns.map(c => 'quote("' + c + '") AS "' + c + '"').join(', ') + ' FROM "' + name + '"')
-                .map(row => JSON.stringify(row)).sort();
-            }
-            return Response.json({ ok: out });
-          }
           if (op === 'fail') { this.failing = { put: 0, get: 0, putKey: '', ...args[0] }; return Response.json({ ok: null }); }
           if (op === 'calls') { const calls = this.calls; this.calls = { put: 0, get: 0 }; return Response.json({ ok: calls }); }
           if (op === 'evidence_calls') { const calls = this.evidenceCalls; this.evidenceCalls = { get: 0, head: 0, put: 0 }; return Response.json({ ok: calls }); }
@@ -249,11 +241,7 @@ async function seed(object: string, options: { largeRequests?: number; evidence?
 
 /** Every table but the backup's own, row for row (SQL literals, so BLOBs and types compare exactly). */
 async function tables(object: string): Promise<Record<string, string[]>> {
-  const dump = await call<Record<string, string[]>>(object, 'dump');
-  delete dump.backup_evidence;
-  delete dump.previews;
-  dump.meta = (dump.meta ?? []).filter((row) => !/"key":"'(backup|restore|schema_version)'"/.test(row));
-  return dump;
+  return dump({ sql: <T = Record<string, unknown>>(query: string, ...params: (string | number | null)[]) => call<T[]>(object, 'sql', query, params) });
 }
 
 describe('the daily backup', () => {

@@ -14,15 +14,6 @@ import newsletter.types as types
 import newsletter.workflow.story_replay_repository as replay_repository
 
 
-@pytest.fixture
-def store(tmp_path: pathlib.Path) -> Iterator[newsletter_store.Store]:
-    database = newsletter_store.Store(tmp_path / "state.sqlite3", "mock")
-    try:
-        yield database
-    finally:
-        database.close()
-
-
 def add_run(
     store: newsletter_store.Store, identifier: str, state: str, body: str
 ) -> None:

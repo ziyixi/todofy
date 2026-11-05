@@ -5,7 +5,7 @@ import re
 import unittest
 
 from proto_test_support import PROTO, REPO
-from ziyixi_proto.http_routes import decode_json_body, decode_request, match_path
+from ziyixi_proto.http_routes import HttpBinding, decode_json_body, decode_request, match_path
 from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb, runtime_service_pb as service
 from ziyixi_proto.prototest.v1 import prototest_pb as prototest
 from ziyixi_proto.rpc_status import CODE, HTTP_STATUS, RpcError, status_body
@@ -184,6 +184,74 @@ class HttpMetadata(unittest.TestCase):
                       [('include_labels', '')], [('include_labels', 'false'), ('include_labels', 'true')]):
             with self.subTest(query=query), self.assertRaises(WireJsonError):
                 decode_request(binding, path, query)
+
+    def test_http_route_bounds_templates_methods_and_query_kinds(self):
+        routes = {binding.rpc: binding for binding in service.HTTP_BINDINGS}
+        workload_binding = routes['GetWorkload']
+        for bad_path in (
+            '/' + 'a' * 2048,
+            'api/v1/workloads/newsletter',
+            '/api/v1/workloads/newsletter?page_size=1',
+            '/api/v1/workloads/newsletter#section',
+            '/api/v1/workloads/news%00letter',
+            '/api/v1/workloads/news%5cletter',
+            '/api/v1/workloads/news\x1fletter',
+            '/api/v1/workloads/news\x7fletter',
+        ):
+            with self.subTest(bad_path=bad_path[:48]):
+                self.assertIsNone(match_path(workload_binding, bad_path))
+                with self.assertRaises(WireJsonError):
+                    decode_request(workload_binding, bad_path, [])
+
+        for bad_template in (
+            '/api/v1/{name=workloads/**}',
+            '/api/v1/{name=*}/items/{name=*}',
+        ):
+            bad_binding = HttpBinding(
+                'PlatformRuntime', 'BadRoute', 'GET', bad_template,
+                service.GetWorkloadRequest, pb.WorkloadStatus, '',
+            )
+            with self.subTest(template=bad_template), self.assertRaises(ValueError):
+                match_path(bad_binding, '/api/v1/workloads/newsletter')
+
+        with self.assertRaises(ValueError):
+            decode_request(
+                HttpBinding('PlatformRuntime', 'HeadNode', 'HEAD', '/api/v1/nodeStatus',
+                            service.GetNodeStatusRequest, pb.NodeStatus, ''),
+                '/api/v1/nodeStatus', [],
+            )
+
+        with self.assertRaises(WireJsonError):
+            decode_request(
+                HttpBinding('PlatformRuntime', 'GetWithBody', 'GET', '/api/v1/releases',
+                            service.CreateReleaseRequest, pb.Release, 'release'),
+                '/api/v1/releases', [], create_body(),
+            )
+
+        for bad_body_field in ('missing_field', 'release.targets'):
+            with self.subTest(body_field=bad_body_field), self.assertRaises(ValueError):
+                decode_request(
+                    HttpBinding('PlatformRuntime', 'BadBody', 'POST', '/api/v1/releases',
+                                service.CreateReleaseRequest, pb.Release, bad_body_field),
+                    '/api/v1/releases', [], create_body(),
+                )
+
+        with self.assertRaises(WireJsonError):
+            decode_request(
+                HttpBinding('PlatformRuntime', 'OverrideNamedBody', 'POST', '/api/v1/releases/{release=*}',
+                            service.CreateReleaseRequest, pb.Release, 'release'),
+                '/api/v1/releases/override', [], create_body(),
+            )
+
+        with self.assertRaises(WireJsonError):
+            decode_request(routes['ListWorkloads'], '/api/v1/workloads', [('page_size', '1')] * 9)
+
+        with self.assertRaises(WireJsonError):
+            decode_request(
+                HttpBinding('PlatformRuntime', 'QueryMessageField', 'GET', '/api/v1/releases',
+                            service.CreateReleaseRequest, pb.Release, ''),
+                '/api/v1/releases', [('release', 'unsupported')],
+            )
 
 
 class RpcStatus(unittest.TestCase):

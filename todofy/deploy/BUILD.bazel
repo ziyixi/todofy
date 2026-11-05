@@ -91,7 +91,9 @@ filegroup(
         "//todofy:conftest.py",
         "//todofy:core_application_sources",
         "//todofy:pyproject.toml",
+        "//todofy:wrangler.test.toml",
         "//todofy/gateway:application_sources",
+        "//todofy/gateway:runtime_test_inputs",
         "//tools/cloud-config:worker-secrets",
     ],
     env = {

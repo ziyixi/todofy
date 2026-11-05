@@ -10,6 +10,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
@@ -114,6 +115,42 @@ test('recovers a dead local lock and cleans abandoned staging directories', () =
   expect(result.status, result.stderr).toBe(0);
   expect(result.stderr).toContain('no longer runs');
   expect(existsSync(join(f.proto, '.generate-abandoned'))).toBe(false);
+});
+
+test('takes over a stale lock past LOCK_STALE_MS and waits when contended by a live holder', async () => {
+  const f = fixture();
+  const lockDir = join(f.proto, '.generate.lock');
+  mkdirSync(lockDir);
+  writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({ pid: 999999, host: 'remote-host.invalid' }));
+  const staleTime = new Date(Date.now() - 650_000);
+  utimesSync(lockDir, staleTime, staleTime);
+
+  const staleResult = f.run();
+  expect(staleResult.status, staleResult.stderr).toBe(0);
+  expect(staleResult.stderr).toMatch(/taking over .*\.generate\.lock: it is \d+ s old/);
+
+  mkdirSync(lockDir);
+  writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({ pid: process.pid, host: hostname() }));
+  const waiter = new Promise<{ code: number | null; stderr: string }>((resolve, reject) => {
+    const child = spawn(process.execPath, f.args, {
+      cwd: f.root,
+      env: f.env,
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let stderr = '';
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8');
+    });
+    child.once('error', reject);
+    child.once('exit', (code) => resolve({ code, stderr }));
+  });
+  setTimeout(() => {
+    rmSync(lockDir, { recursive: true, force: true });
+  }, 250);
+  const contended = await waiter;
+  expect(contended.code, contended.stderr).toBe(0);
+  expect(contended.stderr).toContain(`waiting for ${lockDir}, held by pid ${String(process.pid)} on ${hostname()}`);
+  expect(existsSync(lockDir)).toBe(false);
 });
 
 test('concurrent raw consumers serialize materialization and finish with the same bytes', async () => {

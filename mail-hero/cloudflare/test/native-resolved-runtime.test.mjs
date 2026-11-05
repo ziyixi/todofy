@@ -1,24 +1,19 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFile, readdir, mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { build } from 'esbuild'
-import { Miniflare, convertV4MiniflareOptions } from 'miniflare'
-import { migrationStatements } from './migrations.mjs'
+import { buildWorker, startRuntime } from './runtime-harness.mjs'
 import { query, reasonOf } from './owner-api.mjs'
 
 // Owner-resolved exception retention in workerd with the real migrations, D1
 // and R2. The Worker keeps its real clock: tests move time by seeding past
 // resolution and attempt times, never by mocking Date.
-const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const DAY = 86400000, HOUR = 3600000
 const iso = time => new Date(time).toISOString()
 const ago = ms => iso(Date.now() - ms)
 let bundled
 async function script() {
-  bundled ??= (await build({ stdin: { contents: `
+  bundled ??= await buildWorker({
+    sourcefile: 'native-resolved-entry.ts',
+    contents: `
     import app from './src/native/index';
     import { runLifecycle } from './src/native/lifecycle';
     import { deleteMessageContent, runMaintenance } from './src/native/pipeline';
@@ -61,27 +56,26 @@ async function script() {
         catch (error) { return Response.json({ deleted: false, status: error.status ?? null }); }
       }
       return app.fetch(request, env, ctx);
-    }};`, resolveDir: root, sourcefile: 'native-resolved-entry.ts', loader: 'ts' },
-  bundle: true, format: 'esm', platform: 'neutral', conditions: ['browser'], external: ['cloudflare:workers'], write: false })).outputFiles[0].text
+    }};`,
+  })
   return bundled
 }
 async function runtime(t) {
-  const temp = await mkdtemp(join(tmpdir(), 'mail-hero-resolved-'))
-  const mf = new Miniflare(convertV4MiniflareOptions({ name: 'mail-hero-resolved-test', modules: true, script: await script(),
-    compatibilityDate: '2026-09-07', host: '127.0.0.1', port: 0,
-    d1Databases: { DB: 'resolved-test' }, d1Persist: join(temp, 'd1'), r2Buckets: ['MAIL_STORE'], r2Persist: join(temp, 'r2'),
+  const { mf, db, close } = await startRuntime({
+    prefix: 'mail-hero-resolved-',
+    name: 'mail-hero-resolved-test',
+    script: await script(),
+    d1Databases: { DB: 'resolved-test' },
+    r2Buckets: ['MAIL_STORE'],
     durableObjects: { COORDINATOR: { className: 'StubCoordinator' } },
     bindings: { RECEIVE_ADDRESS: 'inbox@mail.example.org', DEV_AUTH_BYPASS: 'true', ACCESS_ISSUER: 'https://synthetic.cloudflareaccess.com',
       ACCESS_AUDIENCE: 'synthetic', ACCESS_OWNER: 'owner@example.org', CREDENTIAL_KEY: 'a'.repeat(64), WEBHOOK_ALLOWED_HOSTS: 'consumer.example.org',
       FORCE_SEND_PAUSED: 'true', MAINTENANCE_MODE: 'false' },
     serviceBindings: { ASSETS: () => new Response('synthetic') },
-    outboundService: () => { throw new Error('no outbound request is expected') } }))
-  t.after(async () => { await mf.dispose(); await rm(temp, { recursive: true, force: true }) })
-  await mf.ready
-  const db = await mf.getD1Database('DB'), store = await mf.getR2Bucket('MAIL_STORE')
-  for (const name of (await readdir(join(root, 'migrations'))).filter(name => name.endsWith('.sql')).sort()) {
-    await db.batch(migrationStatements(await readFile(join(root, 'migrations', name), 'utf8')).map(sql => db.prepare(sql)))
-  }
+    outboundService: () => { throw new Error('no outbound request is expected') },
+  })
+  t.after(close)
+  const store = await mf.getR2Bucket('MAIL_STORE')
   const post = async (path, input) => {
     const response = await mf.dispatchFetch('http://localhost' + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input ?? {}) })
     assert.equal(response.status, 200, await response.clone().text())

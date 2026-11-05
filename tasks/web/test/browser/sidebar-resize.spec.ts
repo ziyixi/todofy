@@ -1,11 +1,6 @@
-import {
-  expect,
-  test,
-  type APIRequestContext,
-  type Locator,
-  type Page,
-} from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 import { stubPlanning } from "./planning-stub";
+import { createResource } from "./seed";
 
 async function width(page: Page) {
   return (await page.locator(".sidebar").boundingBox())!.width;
@@ -158,24 +153,6 @@ test("Plan Review and Week fit the window after navigation resizing", async ({
     }
   }
 });
-
-async function createResource(
-  request: APIRequestContext,
-  kind: string,
-  fields: Record<string, unknown>,
-) {
-  const csrf = await request.get("/api/tasks/csrf");
-  const { token } = await csrf.json();
-  const response = await request.post(
-    `/api/tasks/v1/${kind}?request_id=${crypto.randomUUID()}`,
-    {
-      headers: { "x-csrf-token": token, origin: "http://127.0.0.1:8798" },
-      data: fields,
-    },
-  );
-  expect(response.status()).toBe(200);
-  return response.json();
-}
 
 async function expectInsideWindow(page: Page, element: Locator) {
   const box = (await element.boundingBox())!;

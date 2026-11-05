@@ -16,12 +16,6 @@ COMMON_TEST_DATA = [
     "//model-router/migrations:all",
 ]
 
-COMMON_TEST_DEPS = [
-    "//model-router/worker/src:lib",
-    "//proto/modelrouter/inference/v1:ts",
-    "//proto/ts:http-client",
-]
-
 exports_files(
     glob(
         ["**"],
@@ -33,13 +27,9 @@ exports_files(
 copied_source_files(
     name = "typecheck_project_srcs",
     srcs = [
-        "array-output.test.ts",
         "backup.test.ts",
-        "cost-backfill.test.ts",
         "executor.test.ts",
-        "failure-reason.test.ts",
         "openai.test.ts",
-        "openai-runtime.test.ts",
         "pricing.test.ts",
         "providers.test.ts",
         "runtime.test.ts",
@@ -61,17 +51,6 @@ copied_source_files(
 )
 
 proto_vitest_test(
-    name = "array-output_test",
-    config = "//model-router/worker:test_config",
-    data = COMMON_TEST_DATA,
-    project = "model-router/worker",
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = [":array-output.test.ts"],
-    deps = COMMON_TEST_DEPS,
-)
-
-proto_vitest_test(
     name = "backup_test",
     config = "//model-router/worker:test_config",
     data = [
@@ -90,28 +69,6 @@ proto_vitest_test(
 )
 
 proto_vitest_test(
-    name = "cost-backfill_test",
-    config = "//model-router/worker:test_config",
-    data = [
-        ":runtime-entry.ts",
-        ":runtime-harness.ts",
-        "//model-router/migrations:0003_missing_cost_estimates.sql_data",
-        "//model-router/migrations:all",
-        "//model-router/worker:node_modules/esbuild",
-        "//model-router/worker:node_modules/jose",
-        "//model-router/worker:node_modules/miniflare",
-        "//model-router/worker:node_modules/vitest",
-        "//model-router/worker:package_json",
-        "//model-router/worker:runtime_edge_auth_link",
-    ],
-    project = "model-router/worker",
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = [":cost-backfill.test.ts"],
-    deps = COMMON_TEST_DEPS,
-)
-
-proto_vitest_test(
     name = "executor_test",
     config = "//model-router/worker:test_config",
     data = [
@@ -123,28 +80,6 @@ proto_vitest_test(
     tags = ["unit"],
     tests = [":executor.test.ts"],
     deps = ["//model-router/worker/src:executor"],
-)
-
-proto_vitest_test(
-    name = "failure-reason_test",
-    config = "//model-router/worker:test_config",
-    data = COMMON_TEST_DATA,
-    project = "model-router/worker",
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = [":failure-reason.test.ts"],
-    deps = COMMON_TEST_DEPS,
-)
-
-proto_vitest_test(
-    name = "openai-runtime_test",
-    config = "//model-router/worker:test_config",
-    data = COMMON_TEST_DATA,
-    project = "model-router/worker",
-    runner = vitest.vitest_test,
-    tags = ["unit"],
-    tests = [":openai-runtime.test.ts"],
-    deps = COMMON_TEST_DEPS,
 )
 
 proto_vitest_test(
@@ -172,6 +107,8 @@ proto_vitest_test(
     name = "pricing_test",
     config = "//model-router/worker:test_config",
     data = [
+        "//model-router/migrations:0001_router.sql_data",
+        "//model-router/migrations:0003_missing_cost_estimates.sql_data",
         "//model-router/worker:node_modules/vitest",
         "//model-router/worker:package_json",
     ],

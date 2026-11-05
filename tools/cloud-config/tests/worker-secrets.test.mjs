@@ -9,7 +9,7 @@ import { mergeWorkerSecrets, workerSecretSpec, validWorkerSecrets } from '../wor
 
 const NODE_EXECUTABLE = process.env.JS_BINARY__NODE_BINARY ?? process.execPath;
 
-const applications = { dashboard: 'home', fleet: 'fleet', links: 'links', watch: 'watch', 'mail-hero': 'mail-hero', 'website/relay': 'ziyixi-notion-publish' }
+const applications = { dashboard: 'home', fleet: 'fleet', links: 'links', storage: 'storage', watch: 'watch', 'mail-hero': 'mail-hero', 'website/relay': 'ziyixi-notion-publish' }
 const privateValue = 'synthetic-private-value'
 class SettingError extends Error {
   constructor(name) { super(`Invalid deploy field: ${name}`); this.setting = name }

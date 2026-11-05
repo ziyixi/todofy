@@ -5,27 +5,16 @@ import {
   type Page,
 } from "@playwright/test";
 import { beginTaskDrag, dragTask } from "./drag";
+import { createResource } from "./seed";
 
 async function fixture(request: APIRequestContext) {
-  const { token } = await (await request.get("/api/tasks/csrf")).json();
-  const create = async (kind: string, values: Record<string, unknown>) => {
-    const response = await request.post(
-      `/api/tasks/v1/${kind}?request_id=${crypto.randomUUID()}`,
-      {
-        headers: { origin: "http://127.0.0.1:8798", "x-csrf-token": token },
-        data: values,
-      },
-    );
-    expect(response.status()).toBe(200);
-    return response.json();
-  };
-  const project = await create("projects", {
+  const project = await createResource(request, "projects", {
     title: `Synthetic drag ${crypto.randomUUID()}`,
   });
   return {
     project,
     create: (values: Record<string, unknown>) =>
-      create("tasks", { project_id: project.id, ...values }),
+      createResource(request, "tasks", { project_id: project.id, ...values }),
     read: async (id: string) =>
       (await request.get(`/api/tasks/v1/tasks/${id}`)).json(),
   };

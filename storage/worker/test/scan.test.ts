@@ -6,7 +6,7 @@ import type { Dropbox } from '../src/dropbox.ts';
 import { handlers, type OwnerContext } from '../src/owner.ts';
 import { addPage, runScan, SCAN_MAX_PAGES, SCAN_PAGES_PER_RUN, SCAN_STALE_MS, startScan, storedScan, type Scan } from '../src/scan.ts';
 import type { Store } from '../src/store.ts';
-import { sqliteStore } from './sqlite.ts';
+import { setupConnected, sqliteStore } from './sqlite.ts';
 
 const NOW = Date.parse('2026-11-03T12:00:00Z');
 const RECENT = '2026-11-01T08:00:00Z';
@@ -205,7 +205,7 @@ describe('owner scan API', () => {
     const scheduleScan = vi.fn(() => Promise.resolve());
     await expect(handlers.startObjectScan({ name: 'objectScan' } as never, context(store, scheduleScan))).rejects.toMatchObject({ reason: 'NOT_CONFIGURED' });
     await expect(handlers.startObjectScan({ name: 'scan' } as never, context(store, scheduleScan))).rejects.toMatchObject({ reason: 'BAD_REQUEST' });
-    store.set('connection', { appKey: 'syntheticappkey', refreshToken: 'synthetic-private-refresh', generation: 'synthetic' });
+    setupConnected(store);
     const started = toWire(ObjectScanSchema, await handlers.startObjectScan({ name: 'objectScan' } as never, context(store, scheduleScan)) as ObjectScan) as Record<string, unknown>;
     expect(started).toMatchObject({ name: 'objectScan', state: 'running' });
     await handlers.startObjectScan({ name: 'objectScan' } as never, context(store, scheduleScan));
@@ -215,7 +215,7 @@ describe('owner scan API', () => {
 
   it('answers namespaces in name order with their eight largest folders', async () => {
     const { store } = sqliteStore();
-    store.set('connection', { appKey: 'syntheticappkey', refreshToken: 'synthetic-private-refresh', generation: 'synthetic' });
+    setupConnected(store);
     const value = scan();
     addPage(value, [
       ...Array.from({ length: 10 }, (_, index) => file('/namespaces/zeta/f' + String(index) + '/a', (index + 1) * 100, index === 9 ? RECENT : OLD)),

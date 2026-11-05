@@ -1,13 +1,7 @@
-import { cleanup, fireEvent, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, screen, within } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
 import { routerHref } from './RunDetail.tsx';
 import { BLOCKED_RUN, READY_RUN, fixture, serve, show, world } from './test/world.tsx';
-
-afterEach(() => {
-  cleanup();
-  vi.unstubAllGlobals();
-  window.location.hash = '';
-});
 
 const section = async (name: string) => within(await screen.findByRole('region', { name }));
 

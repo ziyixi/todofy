@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-from personal_cloud.status_daemon.adapters import Business, newsletter
+from personal_cloud.status_daemon.adapters import Business, codex_gateway, newsletter
 from personal_cloud.status_daemon.config import Workload, configuration
 from personal_cloud.status_daemon.evidence import workload
 from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb
@@ -344,6 +344,73 @@ class Config(unittest.TestCase):
                 configuration(json.dumps(change))
         with self.assertRaises(ValueError):
             configuration('{"version":1,"version":1}')
+
+
+class CodexGatewayAdapterTests(unittest.TestCase):
+    def test_gateway_identity_is_independent_of_configmap_claims(self):
+        value = codex_gateway(
+            {
+                "service": "codex-gateway",
+                "status": "ok",
+                "source_sha": "a" * 40,
+                "release_request_id": "e72013ab-1338-4928-8cec-d853ed778167",
+            }
+        )
+        self.assertEqual(value.health, "healthy")
+        self.assertEqual(value.admission, "unsupported")
+        self.assertEqual(value.source_sha, "a" * 40)
+        self.assertEqual(value.request_id, "e72013ab-1338-4928-8cec-d853ed778167")
+
+    def test_gateway_health_without_valid_build_or_request_cannot_verify_a_release(
+        self,
+    ):
+        value = codex_gateway(
+            {
+                "service": "codex-gateway",
+                "status": "ok",
+                "source_sha": "dev",
+                "release_request_id": "pending",
+            }
+        )
+        self.assertIsNone(value.source_sha)
+        self.assertIsNone(value.request_id)
+
+    def test_gateway_failed_or_foreign_response_is_unknown(self):
+        for response in (
+            {},
+            {"service": "newsletter", "status": "ok"},
+            {"service": "codex-gateway", "status": "failed"},
+        ):
+            with self.subTest(response=response):
+                self.assertEqual(codex_gateway(response).health, "unknown")
+
+    def test_older_gateway_usage_fields_are_ignored_and_never_reported(self):
+        business = codex_gateway(
+            {
+                "service": "codex-gateway",
+                "status": "ok",
+                "inference_status": {"request_count": 3, "active_count": 1},
+            }
+        )
+        self.assertEqual(business.health, "healthy")
+        self.assertIsNone(business.active_count)
+        observed = workload(
+            Workload(
+                "codex-gateway",
+                "codex-gateway",
+                "codex-gateway",
+                "codex-gateway-release",
+                "codex-gateway",
+            ),
+            None,
+            None,
+            None,
+            business,
+            datetime(2026, 10, 25, 12, tzinfo=UTC),
+        )
+        wire = to_wire(observed)
+        self.assertNotIn("inference_status", wire)
+        self.assertNotIn("active_count", wire)
 
 
 if __name__ == "__main__":

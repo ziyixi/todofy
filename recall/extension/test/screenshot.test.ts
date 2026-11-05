@@ -1,6 +1,6 @@
 /** Verify the actual native encoder's reported type, rather than assuming that requesting WebP produced WebP. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { compressScreenshot } from '../src/screenshot.ts';
+import { compressScreenshot, visiblyChanged } from '../src/screenshot.ts';
 
 afterEach(() => { vi.unstubAllGlobals(); });
 
@@ -12,8 +12,16 @@ function canvasWith(types: string[]) {
   }
   vi.stubGlobal('OffscreenCanvas', Canvas);
   vi.stubGlobal('createImageBitmap', () => Promise.resolve({ width: 390, height: 844, close: () => undefined }));
-  vi.stubGlobal('fetch', () => Promise.resolve(new Response(new Blob(['png']))));
+  vi.stubGlobal('fetch', () => Promise.resolve(new Blob(['png']).stream() ? new Response(new Blob(['png'])) : new Response()));
   return encodings;
+}
+
+function previewOf(size: string, customize?: (rgba: Uint8Array) => void): string {
+  const rgba = new Uint8Array(4096);
+  customize?.(rgba);
+  let binary = '';
+  for (const byte of rgba) binary += String.fromCharCode(byte);
+  return `${size}:${btoa(binary)}`;
 }
 
 describe('native screenshot encoding', () => {
@@ -45,3 +53,35 @@ describe('native screenshot encoding', () => {
     expect(await compressScreenshot('data:image/png;base64,cG5n')).toBeNull();
   });
 });
+
+describe('visiblyChanged preview pixel threshold', () => {
+  it('requires at least 82 of 1024 pixels to change by >= 24 in RGB, or a size/format change', () => {
+    const base = previewOf('800x600');
+    expect(visiblyChanged(undefined, base)).toBe(true);
+    expect(visiblyChanged(base, base)).toBe(false);
+    expect(visiblyChanged(base, previewOf('600x800'))).toBe(true);
+    expect(visiblyChanged('800x600:' + btoa('short'), base)).toBe(true);
+
+    // 81 pixels changed by 24 in R channel (< 82 threshold) -> false
+    const changed81 = previewOf('800x600', (rgba) => {
+      for (let p = 0; p < 81; p++) rgba[p * 4] = 24;
+    });
+    expect(visiblyChanged(base, changed81)).toBe(false);
+
+    // 82 pixels changed by 24 in G channel (>= 82 threshold) -> true
+    const changed82 = previewOf('800x600', (rgba) => {
+      for (let p = 0; p < 82; p++) rgba[p * 4 + 1] = 24;
+    });
+    expect(visiblyChanged(base, changed82)).toBe(true);
+
+    // 200 pixels changed by 23 in B channel and 255 in alpha (< 24 RGB threshold) -> false
+    const noiseOnly = previewOf('800x600', (rgba) => {
+      for (let p = 0; p < 200; p++) {
+        rgba[p * 4 + 2] = 23;
+        rgba[p * 4 + 3] = 255;
+      }
+    });
+    expect(visiblyChanged(base, noiseOnly)).toBe(false);
+  });
+});
+

@@ -8,15 +8,12 @@ from collections.abc import Iterator
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
-from ziyixi_proto.todofy.ui.v1 import status_pb
 
-from tests.runtime.harness import GATEWAY_AUTH_CONFIG, OWNER, AccessIssuer, Worker, start_gateway
+from tests.runtime.harness import GATEWAY_AUTH_CONFIG, AccessIssuer, Worker, start_gateway
 from tests.runtime.owner_support import (
     ORIGIN,
-    assert_message,
     assert_private,
     assert_status,
-    csrf_headers,
 )
 
 ALIAS = "owner.alias@example.org"
@@ -76,23 +73,6 @@ def test_writes_check_access_before_csrf(jwt_worker: Worker) -> None:
     )
     assert_status(response, 401, "UNAUTHORIZED")
     assert_private(response)
-
-
-def test_an_alias_login_acts_as_the_owner(jwt_worker: Worker, access: AccessIssuer) -> None:
-    alias = _login(access, email=ALIAS)
-    integration = jwt_worker.owner.get("/api/v1/integration", headers=alias)
-    assert assert_message(integration, status_pb.Integration)["access_owner"] == OWNER
-    second = jwt_worker.owner.get("/api/v1/integration", headers=_login(access, email="Second@Example.NET"))
-    assert second.status_code == 200
-
-    # The write header is not identity-bound; both verified logins pass the write gate.
-    headers = csrf_headers()
-    for login in (alias, _login(access)):
-        response = jwt_worker.owner.post(
-            RECONCILE, headers=headers | login | {"content-type": "application/json"}, content=b"{}"
-        )
-        # Past Access and write intent: the empty object lacks the REQUIRED action and etag.
-        assert_status(response, 400, "BAD_REQUEST")
 
 
 def test_cross_site_and_missing_write_intent_get_403(jwt_worker: Worker, access: AccessIssuer) -> None:

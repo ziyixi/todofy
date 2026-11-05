@@ -1,6 +1,6 @@
 load("@rules_python//python:defs.bzl", "py_library")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
-load("//tools/bazel/python:tests.bzl", "pytest_test", "unittest_test")
+load("//tools/bazel/python:tests.bzl", "unittest_test")
 
 package(default_visibility = ["//platform:__subpackages__"])
 
@@ -21,27 +21,6 @@ py_library(
         "//platform/src/personal_cloud/status_daemon:evidence",
         "//proto:python_runtime",
         "//proto/platform/runtime/v1:python",
-    ],
-)
-
-pytest_test(
-    name = "status_daemon_test_codex_gateway",
-    srcs = ["test_codex_gateway.py"],
-    config = "//platform:pyproject.toml",
-    data = [],
-    env = {"PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
-    imports = [
-        ".",
-        "..",
-        "../..",
-        "../../src",
-    ],
-    deps = [
-        ":package",
-        "//platform/src/personal_cloud/status_daemon:adapters",
-        "//platform/src/personal_cloud/status_daemon:config",
-        "//platform/src/personal_cloud/status_daemon:evidence",
-        "//proto:python_runtime",
     ],
 )
 
@@ -96,7 +75,6 @@ unittest_test(
 test_suite(
     name = "tests",
     tests = [
-        ":status_daemon_test_codex_gateway",
         ":status_daemon_test_status",
         ":status_daemon_test_transport",
     ],

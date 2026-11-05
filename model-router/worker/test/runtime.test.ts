@@ -6,8 +6,18 @@ import { newBackup, type BackupStep, type BackupComplete } from '../src/backup.t
 
 const generatePath = '/api/model/v1/generations:generate'
 const sol = 'gpt-6.1-sol'
+const api = 'openai/gpt-6.1-sol'
 const gemini = 'gemini-3.5-flash-lite'
+const bge = '@cf/baai/bge-m3'
 const schema = JSON.stringify({ type: 'object', properties: { answer: { type: 'string' } }, required: ['answer'], additionalProperties: false })
+
+async function seedCost(h: Awaited<ReturnType<typeof startHarness>>, cost: number, { model = api, state = 'succeeded', started = Date.now(), legacy = false } = {}) {
+  const id = crypto.randomUUID()
+  const generation = { usage: { estimated_cost_microusd: cost, billing_kind: 'api' } }
+  await h.db.prepare('INSERT INTO requests VALUES (?,?,?,?,?,?,?,?,?,?)').bind(id, 'console', model, state,
+    started, started, `requests/console/${id}.json`, started + 86400000, '',
+    JSON.stringify(legacy ? generation : { generation })).run()
+}
 
 describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
   let harness: Awaited<ReturnType<typeof startHarness>>
@@ -19,6 +29,9 @@ describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
     if (objects.objects.length) await harness.bucket.delete(objects.objects.map((object) => object.key))
     harness.calls.length = 0
     harness.geminiOutputs.length = 0
+    harness.executorOutputs.length = 0
+    harness.openaiOutputs.length = 0
+    harness.openaiReplies.length = 0
   })
 
   it('authenticates and checks Origin, custom header and JSON before reading input', async () => {
@@ -82,8 +95,10 @@ describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
   it('limits the external Newsletter token to Codex models before registering a request', async () => {
     for (const refused of [
       () => harness.newsletter.generate({ model: gemini, input: 'Synthetic API-billed attempt' }),
-      () => harness.newsletter.embed({ model: '@cf/baai/bge-m3', inputs: ['Synthetic embedding attempt'] }),
-    ]) await expect(refused()).rejects.toMatchObject({ status: { status: 'PERMISSION_DENIED', reason: 'MODEL_NOT_ALLOWED' } })
+      () => harness.newsletter.embed({ model: bge, inputs: ['Synthetic embedding attempt'] }),
+      () => harness.newsletter.generate({ model: api, input: 'Synthetic denied API call' }),
+      () => harness.models.createConversation({ name: `conversations/${crypto.randomUUID()}`, model: api }),
+    ]) await expect(refused()).rejects.toMatchObject({ status: { reason: expect.stringMatching(/^(MODEL_NOT_ALLOWED|MODEL_CAPABILITY_UNSUPPORTED)$/) } })
     expect(harness.calls).toHaveLength(0)
     expect(await harness.db.prepare('SELECT count(*) AS n FROM requests').first('n')).toBe(0)
     const answer = await harness.newsletter.generate({ model: sol, input: 'Synthetic Codex input' })
@@ -93,6 +108,44 @@ describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
     expect((await harness.forCaller('mailsort').generate({ model: gemini, input: 'Synthetic binding input' })).error).toBeUndefined()
   })
 
+  it('validates embedding requests and records Workers AI embeddings in D1 and R2', async () => {
+    for (const invalidReq of [
+      { model: sol, inputs: ['Synthetic non-embedding model'] },
+      { model: bge, inputs: [] },
+      { model: bge, inputs: Array.from({ length: 51 }, (_, index) => `item-${index}`) },
+      { model: bge, inputs: ['valid', ''] },
+      { model: bge, inputs: ['x'.repeat(32769)] },
+    ]) {
+      await expect(harness.models.embed(invalidReq)).rejects.toMatchObject({
+        status: { status: 'INVALID_ARGUMENT', reason: 'INVALID_EMBEDDING_REQUEST' },
+      })
+    }
+    expect(await harness.db.prepare('SELECT count(*) AS n FROM requests').first('n')).toBe(0)
+
+    const embedding = await harness.forCaller('todofy').embed({
+      model: bge,
+      inputs: ['first synthetic text', 'second synthetic text'],
+    })
+    expect(embedding.error).toBeUndefined()
+    expect(embedding.model).toBe(bge)
+    expect(embedding.vectors).toHaveLength(2)
+    expect(embedding.vectors[0]?.values).toHaveLength(1024)
+    expect(embedding.vectors[0]?.values[0]).toBe(1)
+    expect(embedding.vectors[1]?.values[0]).toBe(2)
+    expect(embedding.usage).toMatchObject({ available: false, billingKind: 'platform_quota' })
+    expect(embedding.usage?.estimatedQuotaUnits).toBeGreaterThan(0)
+
+    const detail = await harness.owner.getRequest({ name: embedding.name })
+    expect(detail).toMatchObject({
+      app: 'todofy',
+      provider: 'cloudflare',
+      state: 'succeeded',
+      contentAvailable: true,
+    })
+    expect(detail.request?.input).toBe(JSON.stringify(['first synthetic text', 'second synthetic text']))
+    expect(JSON.parse(detail.generation!.output)).toHaveLength(2)
+  })
+
   it('keeps failed structured output and consumed tokens visible without returning invalid JSON as success', async () => {
     harness.geminiOutputs.push('{"wrong":true}')
     const answer = await harness.models.generate({ model: gemini, input: 'Synthetic schema input', outputSchemaJson: schema })
@@ -100,6 +153,13 @@ describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
     expect(answer.output).toBe('')
     expect(answer.usage?.inputTokens).toBe(12)
     expect((await harness.owner.getRequest({ name: answer.name })).state).toBe('failed')
+  })
+
+  it('preserves the safe executor error reason instead of replacing it with generic unavailability', async () => {
+    harness.failNextGeneration('ACCESS_KEYS_UNAVAILABLE')
+    const answer = await harness.models.generate({ model: sol, input: 'Synthetic diagnostic' })
+    expect(answer.error).toMatchObject({ code: 14, reason: 'ACCESS_KEYS_UNAVAILABLE' })
+    expect((await harness.owner.getRequest({ name: answer.name })).generation?.error?.reason).toBe('ACCESS_KEYS_UNAVAILABLE')
   })
 
   it('reports the Router deadline as MODEL_TIMEOUT, not a cancellation', async () => {
@@ -121,6 +181,185 @@ describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
     await harness.models.closeConversation({ name })
     await expect(harness.models.generate({ conversation: name, input: 'After close' })).rejects.toMatchObject({ status: { reason: 'CONVERSATION_CLOSED' } })
     expect(harness.calls.filter((call) => call.path.endsWith(':close'))).toHaveLength(1)
+  })
+
+  it('rejects concurrent turns, cross-app closes, and aborts in-flight turns as MODEL_CANCELLED on closeConversation', async () => {
+    const name = `conversations/${crypto.randomUUID()}`
+    await harness.models.createConversation({ name, model: sol })
+    await expect(
+      harness.models.generate({ conversation: name, model: sol, input: 'Invalid turn override' }),
+    ).rejects.toMatchObject({ status: { status: 'INVALID_ARGUMENT', reason: 'INVALID_MODEL_REQUEST' } })
+    await expect(
+      harness.forCaller('mailsort').closeConversation({ name }),
+    ).rejects.toMatchObject({ status: { status: 'NOT_FOUND', reason: 'CONVERSATION_NOT_FOUND' } })
+
+    harness.delayNextExecutor(5000)
+    const inFlight = harness.models.generate({ conversation: name, input: 'In-flight turn' })
+    await expect.poll(() => harness.calls.filter((call) => call.path.endsWith('generations:generate')).length, {
+      timeout: 2000,
+      interval: 20,
+    }).toBe(1)
+
+    await expect(
+      harness.models.generate({ conversation: name, input: 'Concurrent turn' }),
+    ).rejects.toMatchObject({ status: { status: 'FAILED_PRECONDITION', reason: 'CONVERSATION_BUSY' } })
+
+    await harness.models.closeConversation({ name })
+    const cancelled = await inFlight
+    expect(cancelled.error).toMatchObject({ code: 1, reason: 'MODEL_CANCELLED' })
+    expect(cancelled.output).toBe('')
+    expect((await harness.owner.getRequest({ name: cancelled.name })).state).toBe('cancelled')
+  })
+
+  it('routes the same native model through separate connections and preserves canonical request identities', async () => {
+    const subscription = await harness.models.generate({ model: sol, input: 'Synthetic subscription call' })
+    const paid = await harness.forCaller('todofy').generate({ model: api, input: 'Synthetic API call', effort: 'high', maxOutputTokens: 1000 })
+    expect(subscription).toMatchObject({ model: sol, usage: { billingKind: 'subscription' } })
+    expect(paid).toMatchObject({ model: api, output: '{"answer":"synthetic API result"}', usage: { available: true,
+      billingKind: 'api', inputTokens: 100, outputTokens: 50, cachedInputTokens: 20, estimatedCostMicrousd: 662 } })
+    expect(harness.calls.map(call => call.path)).toEqual(['/api/codex/v1/model/generations:generate', '/v1/responses'])
+    expect(harness.calls[1]?.body.model).toBe('gpt-6.1-sol')
+    expect(harness.calls[1]?.caller).toBeNull()
+    const detail = await harness.owner.getRequest({ name: paid.name })
+    expect(detail).toMatchObject({ app: 'todofy', provider: 'openai', reportedModel: sol, generation: { model: api } })
+    expect(detail.request?.model).toBe(api)
+    const filtered = await harness.owner.listRequests({ model: api })
+    expect(filtered.requests.map(row => row.generation?.name)).toEqual([paid.name])
+    const buckets = (await harness.owner.getUsage({ days: 1 })).buckets
+    expect(buckets.find(row => row.model === api)).toMatchObject({ provider: 'openai', billingKind: 'api', requestCount: 1, estimatedCostMicrousd: 662 })
+    expect(buckets.find(row => row.model === sol)).toMatchObject({ provider: 'codex', billingKind: 'subscription', requestCount: 1 })
+    const stored = await harness.db.prepare('SELECT generation_json FROM requests WHERE id = ?').bind(paid.name.slice(9)).first<string>('generation_json')
+    expect(stored).not.toContain('Synthetic API call')
+    expect(stored).not.toContain('synthetic-openai-key')
+  })
+
+  it('keeps reported snapshots separate from filterable API model IDs without guessing their price', async () => {
+    harness.openaiReplies.push({ body: { model: 'gpt-6.1-sol-synthetic-snapshot', status: 'completed', service_tier: 'default',
+      output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Synthetic snapshot result' }] }],
+      usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15, input_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 } } } })
+    const answer = await harness.models.generate({ model: api, input: 'Synthetic snapshot request' })
+    expect(answer.model).toBe(api)
+    expect(answer.usage?.estimatedCostMicrousd).toBeUndefined()
+    expect(await harness.owner.getRequest({ name: answer.name })).toMatchObject({ reportedModel: 'gpt-6.1-sol-synthetic-snapshot', generation: { model: api } })
+  })
+
+  it('retains a Standard/default-cache estimate through the Mailsort binding and usage ledger when billing details are omitted', async () => {
+    harness.openaiReplies.push({ body: { model: 'gpt-6.1-sol', status: 'completed',
+      output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Synthetic classification result' }] }],
+      usage: { input_tokens: 1200, output_tokens: 12, total_tokens: 1212,
+        input_tokens_details: { cached_tokens: 200, cache_write_tokens: 400 } } } })
+    const answer = await harness.forCaller('mailsort').generate({ model: api, input: 'Synthetic classification request' })
+    expect(answer.error).toBeUndefined()
+    expect(answer.usage).toMatchObject({ available: true, billingKind: 'api', inputTokens: 1200, outputTokens: 12,
+      cachedInputTokens: 200, cacheWriteTokens: 400, estimatedCostMicrousd: 2340 })
+    expect(harness.calls[0]?.body.service_tier).toBe('default')
+    expect(await harness.owner.getRequest({ name: answer.name })).toMatchObject({ app: 'mailsort', state: 'succeeded',
+      generation: { usage: { estimatedCostMicrousd: 2340 } } })
+    expect((await harness.owner.getUsage({ days: 1 })).buckets.find(row => row.model === api)).toMatchObject({
+      provider: 'openai', billingKind: 'api', estimatedCostMicrousd: 2340 })
+  })
+
+  it('uses the root-array envelope across OpenAI and Codex and rejects invalid output while retaining consumed usage', async () => {
+    const arraySchema = { type: 'array', maxItems: 2, items: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'], additionalProperties: false } }
+    const items = [{ title: 'Synthetic reading' }]
+    harness.openaiOutputs.push(JSON.stringify({ result: items }), '{"result":[{"wrong":true}]}')
+    const request = { model: api, input: 'Synthetic recommendations', outputSchemaJson: JSON.stringify(arraySchema) }
+    const answer = await harness.models.generate(request)
+    expect(answer.error).toBeUndefined()
+    expect(JSON.parse(answer.output)).toEqual(items)
+    expect(harness.calls[0]?.body.text).toEqual({ format: { type: 'json_schema', name: 'router_output', strict: true,
+      schema: { type: 'object', properties: { result: arraySchema }, required: ['result'], additionalProperties: false } } })
+    const invalid = await harness.models.generate(request)
+    expect(invalid.output).toBe('')
+    expect(invalid.error?.reason).toBe('MODEL_INVALID_ANSWER')
+    expect(invalid.usage).toMatchObject({ available: true, inputTokens: 100, outputTokens: 50 })
+    expect((await harness.owner.getRequest({ name: invalid.name })).state).toBe('failed')
+
+    harness.executorOutputs.push(JSON.stringify({ result: items }))
+    const codexAnswer = await harness.models.generate({ model: sol, input: 'Synthetic Codex recommendations', outputSchemaJson: JSON.stringify(arraySchema) })
+    expect(codexAnswer.error).toBeUndefined()
+    expect(JSON.parse(codexAnswer.output)).toEqual(items)
+    const detail = await harness.owner.getRequest({ name: codexAnswer.name })
+    expect(JSON.parse(detail.request!.outputSchemaJson)).toEqual(arraySchema)
+    expect(JSON.parse(detail.generation!.output)).toEqual(items)
+  })
+
+  it('keeps exhausted credits separate from rate limiting without retrying or falling back', async () => {
+    for (const code of ['credit_balance_exhausted', 'insufficient_quota', 'rate_limit_exceeded']) {
+      harness.openaiReplies.push({ status: 429, headers: { 'retry-after': '12' }, body: { error: { code, message: 'Synthetic private provider detail' } } })
+      const answer = await harness.models.generate({ model: api, input: 'Synthetic credit boundary', allowFallback: true })
+      expect(answer.error?.reason).toBe(code === 'rate_limit_exceeded' ? 'MODEL_RATE_LIMIT' : 'MODEL_SPEND_LIMIT')
+      expect(answer.usage).toMatchObject({ billingKind: 'api', available: true, estimatedCostMicrousd: 0 })
+      const detail = await harness.owner.getRequest({ name: answer.name })
+      expect(detail.generation?.error?.message).not.toContain('Synthetic private provider detail')
+    }
+    expect(harness.calls).toHaveLength(3)
+    expect(harness.calls.every(call => call.path === '/v1/responses')).toBe(true)
+  })
+
+  it('stops new API calls at the monthly estimated limit before registering or calling a provider', async () => {
+    await seedCost(harness, 40_000_000)
+    await seedCost(harness, 40_000_000, { model: 'openai/gpt-6-luna', state: 'failed', legacy: true })
+    const bodiesBefore = (await harness.bucket.list()).objects.length
+    await expect(harness.models.generate({ model: api, input: 'Synthetic monthly limit refusal' })).rejects.toMatchObject({
+      status: { status: 'RESOURCE_EXHAUSTED', reason: 'MODEL_SPEND_LIMIT' },
+    })
+    expect(harness.calls).toHaveLength(0)
+    expect(await harness.db.prepare('SELECT count(*) AS n FROM requests').first('n')).toBe(2)
+    expect((await harness.bucket.list()).objects).toHaveLength(bodiesBefore)
+  })
+
+  it('allows a call just below the estimated limit and stops the next call after its cost is recorded', async () => {
+    await seedCost(harness, 79_999_999)
+    expect((await harness.models.generate({ model: api, input: 'Synthetic below-limit request' })).error).toBeUndefined()
+    await expect(harness.models.generate({ model: api, input: 'Synthetic after-limit request' })).rejects.toMatchObject({
+      status: { reason: 'MODEL_SPEND_LIMIT' },
+    })
+    expect(harness.calls).toHaveLength(1)
+    expect(await harness.db.prepare('SELECT count(*) AS n FROM requests').first('n')).toBe(2)
+  })
+
+  it('counts only the current UTC month and the OpenAI API model prefix', async () => {
+    const now = new Date()
+    const start = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
+    const next = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)
+    await seedCost(harness, 80_000_000, { started: start - 1 })
+    await seedCost(harness, 80_000_000, { started: next })
+    await seedCost(harness, 80_000_000, { model: sol, started: start })
+    await seedCost(harness, 79_000_000, { started: start })
+    expect((await harness.models.generate({ model: api, input: 'Synthetic current-month request' })).error).toBeUndefined()
+    expect(harness.calls).toHaveLength(1)
+  })
+
+  it('leaves Codex and Claude on their existing paths when the OpenAI API estimate is at the limit', async () => {
+    await seedCost(harness, 80_000_000)
+    expect((await harness.models.generate({ model: sol, input: 'Synthetic Codex request at API limit' })).error).toBeUndefined()
+    const claude = await harness.models.generate({ model: 'claude-opus-5-5', input: 'Synthetic Claude request at API limit' })
+    // This harness has no Claude key; its usual configuration error still registers the invocation.
+    expect(claude.error?.reason).toBe('MODEL_NOT_CONFIGURED')
+    expect((await harness.owner.getRequest({ name: claude.name })).provider).toBe('anthropic')
+    expect(await harness.db.prepare('SELECT count(*) AS n FROM requests').first('n')).toBe(3)
+    expect(harness.calls.map(call => call.path)).toEqual(['/api/codex/v1/model/generations:generate'])
+  })
+
+  it('reads historical OpenAI-labelled subscription records as Codex without rewriting metadata or bodies', async () => {
+    const answer = await harness.models.generate({ model: sol, input: 'Synthetic historical subscription input' })
+    const id = answer.name.slice(9)
+    const original = await harness.db.prepare('SELECT generation_json,body_key FROM requests WHERE id = ?').bind(id).first<{ generation_json: string; body_key: string }>()
+    const raw = JSON.parse(original!.generation_json) as { provider: string }
+    raw.provider = 'openai'
+    const historical = JSON.stringify(raw)
+    await harness.db.prepare('UPDATE requests SET generation_json = ? WHERE id = ?').bind(historical, id).run()
+    const body = await harness.bucket.get(original!.body_key)
+    const bodyBefore = await body!.text()
+    expect((await harness.owner.getRequest({ name: answer.name })).provider).toBe('codex')
+    expect((await harness.owner.listRequests({})).requests[0]?.provider).toBe('codex')
+    expect((await harness.owner.getUsage({ days: 1 })).buckets[0]?.provider).toBe('codex')
+    // Older catalog aliases also carry an explicit subscription billing identity.
+    await harness.db.prepare('UPDATE requests SET model = ? WHERE id = ?').bind('models/sol-6-1', id).run()
+    expect((await harness.owner.getRequest({ name: answer.name })).provider).toBe('codex')
+    expect(await harness.db.prepare('SELECT generation_json FROM requests WHERE id = ?').bind(id).first('generation_json')).toBe(historical)
+    expect(await (await harness.bucket.get(original!.body_key))!.text()).toBe(bodyBefore)
   })
 
   it('paginates metadata and aggregates actual-model hourly/daily usage with separate billing kinds', async () => {
@@ -263,7 +502,7 @@ describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
     } finally { await isolated.dispose() }
   }, 15000)
 
-  it('keeps Ops content-free and does not offer quota shedding', async () => {
+  it('keeps Ops content-free, reports backup_stale when backup exceeds 26h, and does not offer quota shedding', async () => {
     await harness.models.generate({ model: sol, input: 'Synthetic private Ops input' })
     const ops = await harness.mf.getWorker('router-ops-probe')
     const status = await (await ops.fetch(origin)).json() as { counters: Record<string, number> }
@@ -271,6 +510,24 @@ describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
     expect(JSON.stringify(status)).not.toContain('Synthetic private Ops input')
     const guard = await ops.fetch(origin + '/guard', { method: 'POST', body: JSON.stringify({ level: 'shed' }) })
     expect(guard.status).toBe(400)
+
+    await harness.mf.dispatchFetch(origin + '/__test/set-backup-time', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ time: Date.now() - 27 * 3600 * 1000 }),
+    })
+    const staleStatus = await (await ops.fetch(origin)).json() as {
+      health: string
+      counters: Record<string, number>
+      signals: { code: string; severity: string; metrics: Record<string, number> }[]
+    }
+    expect(staleStatus.health).toBe('degraded')
+    expect(staleStatus.counters.backup_age_seconds).toBeGreaterThanOrEqual(27 * 3600)
+    expect(staleStatus.signals).toContainEqual({
+      code: 'backup_stale',
+      severity: 'warning',
+      metrics: { age_hours: 27 },
+    })
   })
 })
 

@@ -44,15 +44,6 @@ def test_personal_fetch_has_separate_budget_from_editor(settings):
         assert current(client, edition)["state"] == "ready"
 
 
-@pytest.fixture
-def settings(tmp_path):
-    return newsletter_settings.Settings(
-        data_dir=tmp_path / "service",
-        editor_token="e" * 32,
-        send_token="s" * 32,
-    )
-
-
 def auth(role="editor"):
     return {
         "Authorization": "Bearer "

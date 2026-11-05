@@ -166,6 +166,31 @@ describe('fixed priorities', () => {
     expect(p2.querySelector('h3')?.textContent).toBe('历史例子 2')
     expect(server.calls.filter((call) => call.method === 'GET' && call.path.startsWith('/api/v2/examples'))).toHaveLength(1)
   })
+
+  it('pages through historical examples with 再看 50 个 and shows a toast when loading fails', async () => {
+    const server = new FakeServer()
+    server.labels[1]!.exampleCount = 52
+    server.examples = Array.from({ length: 52 }, (_, index) => example(`e${String(index + 1)}`, 'p2'))
+    const root = await open(server)
+    const p2 = expand(root, 'P2')
+    button(p2, '查看').click()
+    await settle()
+    expect(p2.querySelectorAll('.example-list li')).toHaveLength(50)
+    const moreBtn = button(p2, '再看 50 个')
+    moreBtn.click()
+    await settle()
+    expect(p2.querySelectorAll('.example-list li')).toHaveLength(52)
+    expect([...p2.querySelectorAll('button')].some((node) => node.textContent === '再看 50 个')).toBe(false)
+
+    // Error toast when loading historical examples fails
+    server.labels[2]!.exampleCount = 1
+    const rootErr = await open(server)
+    const p3 = expand(rootErr, 'P3')
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(JSON.stringify({ error: { code: 503, status: 'UNAVAILABLE', message: 'busy' } }), { status: 503, headers: { 'content-type': 'application/json' } })))
+    button(p3, '查看').click()
+    await settle()
+    expect(rootErr.querySelector('#toast')?.textContent).toContain('UNAVAILABLE')
+  })
 })
 
 describe('priority setup', () => {

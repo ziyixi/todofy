@@ -19,15 +19,6 @@ import newsletter.workflow.story_editor as story_editor
 
 
 @pytest.fixture
-def settings(tmp_path):
-    return newsletter_settings.Settings(
-        data_dir=tmp_path / "data",
-        editor_token="e" * 32,
-        send_token="s" * 32,
-    )
-
-
-@pytest.fixture
 def live(settings, tmp_path):
     home = tmp_path / "isolated-auth"
     home.mkdir()

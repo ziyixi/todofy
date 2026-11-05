@@ -6,6 +6,7 @@ load("//tools/bazel/audit:sources.bzl", "source_audit_files", SOURCE_AUDIT_EXCLU
 package(default_visibility = ["//personal-mcp:__subpackages__"])
 
 COMMON_TEST_DATA = [
+    ":harness.ts",
     "//personal-mcp/worker:package_json",
     "//personal-mcp/worker:node_modules/@modelcontextprotocol/server",
     "//personal-mcp/worker:node_modules/vitest",
@@ -64,6 +65,9 @@ proto_vitest_test(
     name = "backup_test",
     config = "//personal-mcp/worker:test_config",
     data = [
+        ":auth_test_edge_auth_link",
+        "//personal-mcp/worker:node_modules/@modelcontextprotocol/server",
+        "//personal-mcp/worker:node_modules/standardwebhooks",
         "//personal-mcp/worker:node_modules/vitest",
         "//personal-mcp/worker:package_json",
     ],
@@ -73,6 +77,8 @@ proto_vitest_test(
     tests = [":backup.test.ts"],
     deps = [
         "//personal-mcp/worker/src:backup",
+        "//personal-mcp/worker/src:module_group_15",
+        "//personal-mcp/worker/src:restore",
         "//proto/ops/v1:ts",
     ],
 )
@@ -95,6 +101,9 @@ proto_vitest_test(
     name = "events_test",
     config = "//personal-mcp/worker:test_config",
     data = [
+        ":auth_test_edge_auth_link",
+        "//personal-mcp/worker:node_modules/@modelcontextprotocol/server",
+        "//personal-mcp/worker:node_modules/standardwebhooks",
         "//personal-mcp/worker:node_modules/vitest",
         "//personal-mcp/worker:package_json",
     ],
@@ -104,6 +113,7 @@ proto_vitest_test(
     tests = [":events.test.ts"],
     deps = [
         "//personal-mcp/worker/src:events",
+        "//personal-mcp/worker/src:module_group_15",
         "//proto/dashboard/mcp/v1:ts",
     ],
 )
@@ -122,10 +132,7 @@ proto_vitest_test(
 proto_vitest_test(
     name = "watch-events_test",
     config = "//personal-mcp/worker:test_config",
-    data = [
-        "//personal-mcp/worker:node_modules/vitest",
-        "//personal-mcp/worker:package_json",
-    ],
+    data = COMMON_TEST_DATA,
     project = "personal-mcp/worker",
     runner = vitest.vitest_test,
     tags = ["unit"],
@@ -194,7 +201,10 @@ proto_vitest_test(
 
 js_library(
     name = "runtime_helpers",
-    srcs = [":runtime/test-store.ts"],
+    srcs = [
+        ":harness.ts",
+        ":runtime/test-store.ts",
+    ],
 )
 
 workerd_vitest_test(
@@ -237,13 +247,6 @@ workerd_vitest_test(
         "//proto/ts:protobuf",
         "//proto/ts:wire-json",
     ],
-)
-
-workerd_vitest_test(
-    name = "runtime_work_test",
-    project = "personal-mcp/worker",
-    runner = vitest.vitest_test,
-    tests = [":runtime/work.test.ts"],
 )
 
 source_audit_files(

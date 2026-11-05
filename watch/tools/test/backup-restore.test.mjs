@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
-import { RestoreError, verifyDownload } from '../backup-restore.ts';
+import { BUCKET, bucketOf, readManifest, RestoreError, verifyDownload } from '../backup-restore.ts';
 
 // CLI children keep their minimal environment and use the pinned interpreter directly.
 const NODE_EXECUTABLE = process.env.JS_BINARY__NODE_BINARY ?? process.execPath
@@ -162,3 +162,53 @@ test('upload puts the evidence and the parts, then the manifest, never latest.js
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('readManifest, verifyDownload, and bucketOf reject invalid names, row counts, column widths, and bucket names', () => {
+  assert.equal(bucketOf(['--bucket', 'watch-backups-new']), 'watch-backups-new');
+  assert.equal(bucketOf([], BUCKET), 'watch-backups');
+  for (const invalid of ['ab', '-bad', 'bad-', 'Bad_Bucket', 'a..b']) {
+    assert.throws(() => bucketOf(['--bucket', invalid]), (err) => err instanceof RestoreError && /not a bucket name/.test(err.message));
+  }
+  assert.throws(() => bucketOf([]), (err) => err instanceof RestoreError && /not a bucket name/.test(err.message));
+
+  const root = mkdtempSync(join(tmpdir(), 'watch-tool-unit-'));
+  try {
+    bucket(join(root, 'r2'));
+    const out = join(root, 'restore');
+    assert.equal(run(join(root, 'r2'), 'download', '--out', out, '--local').status, 0);
+    const baseManifest = JSON.parse(readFileSync(join(out, 'manifest.json'), 'utf8'));
+
+    // Invalid table name regex
+    const badTable = structuredClone(baseManifest);
+    badTable.tables[0].name = 'Watches-Bad';
+    writeFileSync(join(out, 'manifest.json'), JSON.stringify(badTable));
+    assert.throws(() => readManifest(out), (err) => err instanceof RestoreError && /invalid table or column name/.test(err.message));
+
+    // Invalid column name regex
+    const badColumn = structuredClone(baseManifest);
+    badColumn.tables[0].columns = ['id', 'bad-col;DROP'];
+    writeFileSync(join(out, 'manifest.json'), JSON.stringify(badColumn));
+    assert.throws(() => readManifest(out), (err) => err instanceof RestoreError && /invalid table or column name/.test(err.message));
+
+    // Part row count mismatch vs manifest part.rows
+    const badPartRows = structuredClone(baseManifest);
+    badPartRows.tables[0].parts[0].rows = 99;
+    writeFileSync(join(out, 'manifest.json'), JSON.stringify(badPartRows));
+    assert.throws(() => verifyDownload(out), (err) => err instanceof RestoreError && /2 rows, manifest says 99/.test(err.message));
+
+    // Table total row count mismatch vs sum of parts
+    const badTableRows = structuredClone(baseManifest);
+    badTableRows.tables[0].rows = 5;
+    writeFileSync(join(out, 'manifest.json'), JSON.stringify(badTableRows));
+    assert.throws(() => verifyDownload(out), (err) => err instanceof RestoreError && /parts hold 2 rows, manifest says 5/.test(err.message));
+
+    // Row width mismatch vs table.columns.length
+    const badWidth = structuredClone(baseManifest);
+    badWidth.tables[0].columns = ['id', 'settings', 'extra_col'];
+    writeFileSync(join(out, 'manifest.json'), JSON.stringify(badWidth));
+    assert.throws(() => verifyDownload(out), (err) => err instanceof RestoreError && /does not match the manifest's columns/.test(err.message));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+

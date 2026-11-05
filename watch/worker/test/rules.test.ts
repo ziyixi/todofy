@@ -279,3 +279,175 @@ describe('snapshots', () => {
     expect((await decodeSnapshot(big.bytes)).truncated).toBe(true);
   });
 });
+
+// ---- HTML selector helpers, JPEG dimensions, scheduler, pipeline & backup cell helpers ----
+
+import { decodeCell, encodeCell } from '../src/backup.ts';
+import { jpegDimensions } from '../src/browser.ts';
+import { selectorOf, supportedSelector, type Frame } from '../src/extract/html.ts';
+import { confirmWindowMs, decideAsSeen, storedConfig, type CheckDeps } from '../src/pipeline.ts';
+import { errorCode, laneOf } from '../src/scheduler.ts';
+import type { ChangeRow, WatchRow } from '../src/store.ts';
+
+function frameOf(tag: string, id = '', parent: Frame | null = null, nthOfType = 1): Frame {
+  return {
+    tag,
+    id,
+    parent,
+    nthOfType,
+    typeCounts: new Map(),
+    block: true,
+    serial: 1,
+    skip: false,
+    landmark: false,
+    include: false,
+    optIn: false,
+    exclude: false,
+    closed: false,
+    href: null,
+    selector: null,
+  };
+}
+
+describe('extract/html selector helpers', () => {
+  it('builds selectors anchored at a stable id or body, skips generated ids, and truncates deep trees', () => {
+    const body = frameOf('body');
+    const stableSection = frameOf('section', 'reviews', body, 2);
+    const para = frameOf('p', '', stableSection, 3);
+    expect(selectorOf(para)).toBe('section#reviews > p:nth-of-type(3)');
+
+    // Generated/unstable ids (3+ digits, hashes, CSS modules, BEM) are ignored in favor of :nth-of-type up to body.
+    for (const unstable of ['item123', 'a1b2c3d4', 'css-1a2b3', 'card__title', 'btn--primary']) {
+      const div = frameOf('div', unstable, body, 1);
+      const child = frameOf('p', '', div, 2);
+      expect(selectorOf(child), unstable).toBe('body > div:nth-of-type(1) > p:nth-of-type(2)');
+    }
+
+    // Over 200 chars falls back to "<anchor> <leaf>".
+    let deep: Frame = body;
+    for (let i = 0; i < 15; i++) deep = frameOf('section', '', deep, i + 1);
+    const leaf = frameOf('article', '', deep, 4);
+    expect(selectorOf(leaf)).toBe('body article:nth-of-type(4)');
+  });
+
+  it('supportedSelector rejects blank or >200-char selectors and delegates to HTMLRewriter', () => {
+    expect(supportedSelector('')).toBe(false);
+    expect(supportedSelector('   ')).toBe(false);
+    expect(supportedSelector('div > '.repeat(40))).toBe(false);
+
+    const prev = (globalThis as { HTMLRewriter?: unknown }).HTMLRewriter;
+    try {
+      (globalThis as { HTMLRewriter?: unknown }).HTMLRewriter = class {
+        on(sel: string) {
+          if (sel.includes(':has(')) throw new Error('unsupported selector');
+          return this;
+        }
+      };
+      expect(supportedSelector('main > article:nth-of-type(2)')).toBe(true);
+      expect(supportedSelector('div:has(p)')).toBe(false);
+    } finally {
+      (globalThis as { HTMLRewriter?: unknown }).HTMLRewriter = prev;
+    }
+  });
+});
+
+describe('jpegDimensions', () => {
+  it('parses baseline (0xc0) and progressive (0xc2) JPEGs and rejects truncated, missing-EOI, or oversize frames', () => {
+    // Baseline 0xc0 (3x2)
+    const baseline = Uint8Array.from([0xff, 0xd8, 0xff, 0xc0, 0, 11, 8, 0, 2, 0, 3, 1, 1, 0x11, 0, 0xff, 0xd9]);
+    expect(jpegDimensions(baseline)).toEqual({ width: 3, height: 2 });
+
+    // Progressive 0xc2 with 0xff fill bytes and an APP0 (0xe0) segment before SOF2 (640x480)
+    const progressive = Uint8Array.from([
+      0xff, 0xd8,
+      0xff, 0xff, 0xe0, 0, 4, 0, 0,
+      0xff, 0xc2, 0, 11, 8, 0x01, 0xe0, 0x02, 0x80, 1, 1, 0x11, 0,
+      0xff, 0xd9,
+    ]);
+    expect(jpegDimensions(progressive)).toEqual({ width: 640, height: 480 });
+
+    // Missing EOI (0xff 0xd9)
+    expect(jpegDimensions(baseline.slice(0, -1))).toBeNull();
+    // Too short (< 12 bytes)
+    expect(jpegDimensions(Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]))).toBeNull();
+    // Truncated segment length extending beyond buffer
+    const truncated = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0, 50, 0, 0, 0, 0, 0xff, 0xd9]);
+    expect(jpegDimensions(truncated)).toBeNull();
+    // SOF segment with size < 8
+    const shortSof = Uint8Array.from([0xff, 0xd8, 0xff, 0xc2, 0, 6, 8, 0, 2, 0, 0xff, 0xd9]);
+    expect(jpegDimensions(shortSof)).toBeNull();
+    // Exceeds 1280x960 viewport
+    const oversize = Uint8Array.from([0xff, 0xd8, 0xff, 0xc0, 0, 11, 8, 0x03, 0xc0, 0x05, 0x01, 1, 1, 0x11, 0, 0xff, 0xd9]);
+    expect(jpegDimensions(oversize)).toBeNull();
+  });
+});
+
+describe('scheduler, pipeline, and backup cell helpers', () => {
+  it('formats safe error codes and assigns browser vs host lanes in scheduler.ts', () => {
+    expect(errorCode(new Error('storage_error'))).toBe('storage_error');
+    expect(errorCode(new TypeError('Failed to fetch https://private.example.com/secret'))).toBe('TypeError');
+    expect(errorCode('raw string')).toBe('error');
+
+    const baseRow = { id: 'w1', host: 'news.example.com' } as WatchRow;
+    expect(laneOf({ ...baseRow, settings: JSON.stringify({ display_name: 'News', uri: 'https://news.example.com/' }) })).toBe('news.example.com');
+    expect(laneOf({ ...baseRow, settings: JSON.stringify({ display_name: 'SPA', uri: 'https://news.example.com/', fetcher: 'BROWSER' }) })).toBe(':browser');
+    expect(laneOf({ ...baseRow, settings: '{invalid-json' })).toBe('news.example.com');
+  });
+
+  it('computes confirmWindowMs and settles pending changes with decideAsSeen in pipeline.ts', () => {
+    const cfg = storedConfig({ settings: JSON.stringify({ display_name: 'Shop', uri: 'https://shop.example.com/', stability: { confirm_delay_minutes: 20 } }) });
+    expect(confirmWindowMs(cfg)).toBe(4 * 20 * MINUTE + 15 * MINUTE);
+
+    const defaultCfg = storedConfig({ settings: JSON.stringify({ display_name: 'Shop', uri: 'https://shop.example.com/', stability: { skip_confirmation: true } }) });
+    expect(confirmWindowMs(defaultCfg)).toBe(4 * 15 * MINUTE + 15 * MINUTE);
+
+    const calls: { change?: unknown; watch?: unknown; enqueue?: unknown } = {};
+    const deps = {
+      store: {
+        updateChange: (id: string, fields: unknown) => {
+          calls.change = { id, fields };
+        },
+        updateWatch: (id: string, fields: unknown) => {
+          calls.watch = { id, fields };
+        },
+        enqueue: (...args: unknown[]) => {
+          calls.enqueue = args;
+        },
+      },
+    } as unknown as CheckDeps;
+    const row = { id: 'w1' } as WatchRow;
+    const pending = { id: 'c1', summary: '新增 1 行', snapshot_id: 42 } as ChangeRow;
+    decideAsSeen(deps, row, cfg, pending, T, '（未完成二次确认）');
+    expect(calls.change).toEqual({
+      id: 'c1',
+      fields: { state: 'confirmed', resolve_time: T, summary: '新增 1 行（未完成二次确认）', before_snapshot_id: null },
+    });
+    expect(calls.watch).toEqual({
+      id: 'w1',
+      fields: { pending_change: null, baseline_id: 42 },
+    });
+    expect(calls.enqueue).toEqual(['change_confirmed', 'w1', 'c1', cfg.notify, T]);
+  });
+
+  it('encodes and decodes SQLite cells (strings, numbers, nulls, large ArrayBuffers) and rejects malformed cells', () => {
+    expect(encodeCell('text')).toBe('text');
+    expect(encodeCell(42)).toBe(42);
+    expect(encodeCell(null)).toBeNull();
+    expect(decodeCell('text')).toBe('text');
+    expect(decodeCell(42)).toBe(42);
+    expect(decodeCell(null)).toBeNull();
+
+    const raw = new Uint8Array(9000);
+    for (let i = 0; i < raw.length; i++) raw[i] = (i * 17) & 0xff;
+    const encoded = encodeCell(raw.buffer);
+    expect(encoded).toEqual({ base64: expect.any(String) });
+    const decoded = decodeCell(encoded);
+    expect(decoded).toBeInstanceOf(ArrayBuffer);
+    expect(new Uint8Array(decoded as ArrayBuffer)).toEqual(raw);
+
+    for (const bad of [undefined, Number.NaN, Number.POSITIVE_INFINITY, [1], {}, { base64: 123 }, { base64: 'AA==', extra: true }]) {
+      expect(() => decodeCell(bad)).toThrow('part_invalid');
+    }
+  });
+});
+

@@ -110,5 +110,6 @@ def test_no_time_left_does_not_invoke_the_router(probe: Worker, fake: ModelRoute
 def test_hanging_binding_is_cancelled_at_the_step_deadline(probe: Worker, fake: ModelRouterFake):
     fake.queue_generate(Reply(hang=True))
     result = generate(probe, budget_ms=1500)
-    assert not result["ok"] and result["elapsed_ms"] < 4000
-    fake.wait_for(lambda: GENERATE_PATH in fake.disconnects)
+    assert not result["ok"] and 1450 <= result["elapsed_ms"] < 4000
+    assert fake.wait_for(lambda: fake.disconnects, timeout_s=5) == [GENERATE_PATH]
+

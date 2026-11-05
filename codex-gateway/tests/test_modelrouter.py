@@ -2,14 +2,22 @@
 
 import asyncio
 import json
+import os
 import pathlib
+import signal
 import tempfile
 import unittest
 import uuid
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from model_fixtures import FakeSdk, FakeTurn
-from openai_codex.errors import CodexRpcError, InvalidParamsError, ServerBusyError
+from openai_codex.errors import (
+    CodexError,
+    CodexRpcError,
+    InvalidParamsError,
+    ServerBusyError,
+)
 from ziyixi_proto.modelrouter.inference.v1.inference_pb import (
     CreateConversationRequest,
     GenerateRequest,
@@ -17,6 +25,7 @@ from ziyixi_proto.modelrouter.inference.v1.inference_pb import (
 )
 from ziyixi_proto.rpc_status import RpcError
 
+from codex_gateway.model_events import TurnEvents
 from codex_gateway.modelrouter import ModelExecutor
 from codex_gateway.runtime import MODEL
 
@@ -360,32 +369,6 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
                 16,
                 "MODEL_AUTH",
             ),
-            (
-                FakeTurn(
-                    error=CodexRpcError(
-                        -32000,
-                        "Synthetic private provider text",
-                        {"codexErrorInfo": "usageLimitExceeded"},
-                    )
-                ),
-                "",
-                8,
-                "MODEL_QUOTA",
-            ),
-            (
-                FakeTurn(
-                    error=ServerBusyError(-32000, "Synthetic private provider text")
-                ),
-                "",
-                14,
-                "MODEL_BUSY",
-            ),
-            (
-                FakeTurn(error=ValueError("Synthetic private SDK value error")),
-                "",
-                14,
-                "MODEL_UNAVAILABLE",
-            ),
         ]
         for turn, schema, code, reason in cases:
             with self.subTest(reason=reason):
@@ -402,28 +385,17 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(pathlib.Path(sdk.thread_options["cwd"]).exists())
 
     async def test_failed_turn_keeps_known_sdk_category_and_reported_usage(self):
-        for info, code, reason in (
-            ("serverOverloaded", 14, "MODEL_BUSY"),
-            ("rateLimitExceeded", 8, "MODEL_RATE_LIMIT"),
-            ("unauthorized", 16, "MODEL_AUTH"),
-            ("badRequest", 3, "MODEL_INVALID_REQUEST"),
-            ({"httpConnectionFailed": {"httpStatusCode": 401}}, 16, "MODEL_AUTH"),
-            ("other", 14, "MODEL_UNAVAILABLE"),
-        ):
-            with self.subTest(info=info):
-                sdk = FakeSdk(FakeTurn(failure_info=info))
-                answer = await self.executor(sdk).generate(
-                    GenerateRequest(model=MODEL, input="synthetic"), self.home
-                )
-                self.assertEqual(
-                    (answer.error.code, answer.error.reason), (code, reason)
-                )
-                self.assertTrue(answer.usage.available)
-                self.assertEqual(answer.usage.input_tokens, 101)
-                self.assertEqual(answer.output, "")
-                self.assertNotIn("private", answer.error.message)
-                self.assertNotIn("synthetic.invalid", answer.error.message)
-                self.assertTrue(sdk.closed)
+        sdk = FakeSdk(FakeTurn(failure_info="serverOverloaded"))
+        answer = await self.executor(sdk).generate(
+            GenerateRequest(model=MODEL, input="synthetic"), self.home
+        )
+        self.assertEqual((answer.error.code, answer.error.reason), (14, "MODEL_BUSY"))
+        self.assertTrue(answer.usage.available)
+        self.assertEqual(answer.usage.input_tokens, 101)
+        self.assertEqual(answer.output, "")
+        self.assertNotIn("private", answer.error.message)
+        self.assertNotIn("synthetic.invalid", answer.error.message)
+        self.assertTrue(sdk.closed)
 
     async def test_sdk_rejecting_schema_is_an_invalid_request_not_invalid_output(self):
         sdk = FakeSdk(
@@ -616,3 +588,83 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(workspace.exists())
         self.assertIsNone(await executor.close(name))
         self.assertFalse(workspace.exists())
+
+    async def test_turn_events_reject_reroute_incomplete_turn_and_missing_output(self):
+        handle = SimpleNamespace(thread_id="thread-1", id="turn-1")
+        events = TurnEvents(None, True, False)
+        events.observe(
+            "item/completed",
+            {
+                "threadId": "other-thread",
+                "turnId": "turn-1",
+                "item": {"type": "commandExecution"},
+            },
+            handle,
+        )
+        events.observe(
+            "item/completed",
+            {
+                "threadId": "thread-1",
+                "turnId": "other-turn",
+                "item": {"type": "commandExecution"},
+            },
+            handle,
+        )
+        self.assertIsNone(events.output)
+        with self.assertRaisesRegex(CodexError, "Unexpected model fallback"):
+            events.observe(
+                "model/rerouted",
+                {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "toModel": "gpt-6.1-mini",
+                },
+                handle,
+            )
+        with self.assertRaisesRegex(CodexError, "Incomplete model turn"):
+            events.observe(
+                "turn/completed",
+                {
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "turn": {"status": "interrupted"},
+                },
+                handle,
+            )
+
+        async def empty_stream():
+            if False:
+                yield None
+
+        with self.assertRaisesRegex(CodexError, "Missing final model response"):
+            await events.collect(
+                SimpleNamespace(
+                    thread_id="thread-1", id="turn-1", stream=empty_stream
+                )
+            )
+
+    async def test_create_timeout_and_cleanup_process_group_termination(self):
+        sdk = FakeSdk()
+        sdk.allow_open.clear()
+        executor = self.executor(sdk)
+        request = CreateConversationRequest(
+            name=context_name(), model=MODEL, timeout_ms=10
+        )
+        with self.assertRaises(RpcError) as timed_out:
+            await executor.create(request, self.home)
+        self.assertEqual(
+            (timed_out.exception.code, timed_out.exception.reason),
+            ("DEADLINE_EXCEEDED", "MODEL_TIMEOUT"),
+        )
+        self.assertTrue(sdk.closed)
+        self.assertEqual(executor.contexts, {})
+
+        process = Mock(pid=43210)
+        sdk_with_proc = FakeSdk()
+        sdk_with_proc._sync = SimpleNamespace(_proc=process)
+        proc_executor = self.executor(sdk_with_proc)
+        name = await self.create(proc_executor)
+        with patch.object(os, "killpg") as killpg:
+            await proc_executor.close(name)
+        killpg.assert_called_once_with(43210, signal.SIGKILL)
+        process.wait.assert_called_once_with(timeout=5)

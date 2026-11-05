@@ -812,15 +812,6 @@ workerd_vitest_test(
 )
 
 workerd_vitest_test(
-    name = "runtime_guard-independence_test",
-    data = COMMON_TEST_DATA_4,
-    project = "dashboard/worker",
-    runner = vitest.vitest_test,
-    tests = [":runtime/guard-independence.test.ts"],
-    deps = COMMON_TEST_DEPS,
-)
-
-workerd_vitest_test(
     name = "runtime_guard_test",
     data = COMMON_TEST_DATA_4,
     project = "dashboard/worker",
@@ -861,7 +852,7 @@ workerd_vitest_test(
 
 workerd_vitest_test(
     name = "runtime_views_test",
-    data = COMMON_TEST_DATA_3,
+    data = COMMON_TEST_DATA_4,
     project = "dashboard/worker",
     runner = vitest.vitest_test,
     tests = [":runtime/views.test.ts"],

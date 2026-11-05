@@ -1,12 +1,33 @@
+import { PassThrough } from "node:stream";
+
 import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToPipeableStream, renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { ArticleBody } from "../../src/components/ArticleBody";
 import type { ContentBlock, RichTextSpan, TableBlock } from "../../src/lib/content";
+import { trustedVideoEmbedUrl } from "../../src/lib/content/video-embed";
 
 function renderBlocks(blocks: ContentBlock[]): string {
   return renderToStaticMarkup(createElement(ArticleBody, { blocks }));
+}
+
+async function renderAsyncBlocks(blocks: ContentBlock[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    const stream = new PassThrough();
+    stream.on("data", (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+    stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    stream.on("error", reject);
+    const { pipe } = renderToPipeableStream(createElement(ArticleBody, { blocks }), {
+      onAllReady() {
+        pipe(stream);
+      },
+      onError(error) {
+        reject(error);
+      },
+    });
+  });
 }
 
 function cell(text: string): RichTextSpan[] {
@@ -115,6 +136,7 @@ describe("article body markup", () => {
     expect(html).toMatch(/<details[^>]*open=""[^>]*><summary><h2 id="expandable-heading">/);
     expect(html).toContain("Inside text");
   });
+
   it("makes article images expandable while keeping their captions in the article", () => {
     const html = renderBlocks([
       {
@@ -238,5 +260,140 @@ describe("article body markup", () => {
 
     expect(html).toContain('role="math"');
     expect(html).toContain('aria-label="Equation: E = mc^2"');
+  });
+
+  it("groups list items by style and renders quote, callout, toggle, and inline math", () => {
+    const html = renderBlocks([
+      {
+        id: "bullet-1",
+        type: "listItem",
+        style: "bulleted",
+        richText: [{ text: "First bullet", bold: true }],
+        children: [
+          {
+            id: "nested-bullet",
+            type: "listItem",
+            style: "bulleted",
+            richText: [{ text: "Nested bullet" }],
+            children: [],
+          },
+        ],
+      },
+      {
+        id: "bullet-2",
+        type: "listItem",
+        style: "bulleted",
+        richText: [{ text: "Second bullet", strikethrough: true, underline: true }],
+        children: [],
+      },
+      {
+        id: "num-1",
+        type: "listItem",
+        style: "numbered",
+        richText: [{ text: "x^2 + y^2 = z^2", equation: true }],
+        children: [],
+      },
+      {
+        id: "quote-1",
+        type: "quote",
+        richText: [{ text: "Quoted thought", italic: true }],
+        children: [
+          {
+            id: "quote-note",
+            type: "paragraph",
+            richText: [{ text: "Quote child" }],
+            children: [],
+          },
+        ],
+      },
+      {
+        id: "callout-1",
+        type: "callout",
+        icon: "💡",
+        richText: [{ text: "Callout text", code: true }],
+        children: [],
+      },
+      {
+        id: "toggle-1",
+        type: "toggle",
+        richText: [{ text: "Toggle summary" }],
+        children: [
+          {
+            id: "toggle-child",
+            type: "paragraph",
+            richText: [{ text: "Toggle details" }],
+            children: [],
+          },
+        ],
+      },
+      { id: "divider-1", type: "divider" },
+    ]);
+
+    expect(html.match(/<ul\b/g)).toHaveLength(2);
+    expect(html.match(/<ol\b/g)).toHaveLength(1);
+    expect(html).toContain("<strong>First bullet</strong>");
+    expect(html).toContain("<u><s>Second bullet</s></u>");
+    expect(html).toContain('class="katex"');
+    expect(html).toContain("<blockquote><p><span><em>Quoted thought</em></span></p>");
+    expect(html).toContain("Quote child");
+    expect(html).toContain('<span aria-hidden="true">💡 </span>');
+    expect(html).toContain("<code>Callout text</code>");
+    expect(html).toContain("<details><summary><span>Toggle summary</span></summary>");
+    expect(html).toContain("Toggle details");
+    expect(html).toContain("<hr/>");
+  });
+
+  it("highlights supported code languages with Shiki and falls back for unknown ones", async () => {
+    const html = await renderAsyncBlocks([
+      {
+        id: "ts-code",
+        type: "code",
+        language: "typescript",
+        highlighted: true,
+        code: "const answer: number = 42;",
+        caption: [{ text: "TypeScript snippet" }],
+      },
+      {
+        id: "unknown-code",
+        type: "code",
+        language: "fortran",
+        highlighted: false,
+        code: "PRINT *, 'HELLO'",
+        caption: [],
+      },
+    ]);
+
+    expect(html).toContain("shiki");
+    expect(html).toContain("<figcaption><span>TypeScript snippet</span></figcaption>");
+    expect(html).toContain(
+      '<pre data-language="fortran" tabIndex="0"><code>PRINT *, &#x27;HELLO&#x27;</code></pre>',
+    );
+  });
+});
+
+describe("trusted video embeds", () => {
+  it("rewrites known providers to narrow, canonical iframe URLs", () => {
+    expect(trustedVideoEmbedUrl("https://youtu.be/dQw4w9WgXcQ?t=42")).toBe(
+      "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ",
+    );
+    expect(trustedVideoEmbedUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ")).toBe(
+      "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ",
+    );
+    expect(trustedVideoEmbedUrl("https://player.vimeo.com/video/226053498?h=a1599a8ee9")).toBe(
+      "https://player.vimeo.com/video/226053498?h=a1599a8ee9",
+    );
+  });
+
+  it("refuses arbitrary hosts, credentials, ports, and malformed IDs", () => {
+    for (const href of [
+      "https://youtube.com.evil.example/watch?v=dQw4w9WgXcQ",
+      "https://user:pass@youtube.com/watch?v=dQw4w9WgXcQ",
+      "https://youtube.com:8443/watch?v=dQw4w9WgXcQ",
+      "http://youtu.be/dQw4w9WgXcQ",
+      "https://youtu.be/not-an-id",
+      "https://example.com/widget",
+    ]) {
+      expect(trustedVideoEmbedUrl(href)).toBeUndefined();
+    }
   });
 });

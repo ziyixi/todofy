@@ -3,11 +3,13 @@
 import contextlib
 import io
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from personal_cloud import __main__ as entrypoint
 from personal_cloud.observer import cli
 from personal_cloud.observer import systemd_snapshot as snapshot
 from personal_cloud.observer.transport import ObserverError
@@ -92,3 +94,43 @@ class CliTests(unittest.TestCase):
                 },
             )
             self.assertNotIn("private", output.getvalue() + termination.read_text())
+
+    def test_entrypoint_dispatches_all_subcommands_and_rejects_unknown_command(self):
+        output = io.StringIO()
+        with (
+            patch.object(sys, "argv", ["personal-cloud", "identity"]),
+            patch(
+                "personal_cloud.status_daemon.adapters.baked_source_sha",
+                return_value="a" * 40,
+            ),
+            contextlib.redirect_stdout(output),
+        ):
+            self.assertEqual(entrypoint.main(), 0)
+        self.assertEqual(json.loads(output.getvalue()), {"source_sha": "a" * 40})
+        with (
+            patch.object(sys, "argv", ["personal-cloud", "identity"]),
+            patch(
+                "personal_cloud.status_daemon.adapters.baked_source_sha",
+                return_value=None,
+            ),
+        ):
+            self.assertEqual(entrypoint.main(), 1)
+        for command, target, expected in (
+            ("observer", "personal_cloud.observer.cli.main", 0),
+            ("observer-systemd", "personal_cloud.observer.systemd_snapshot.main", 0),
+            ("status-daemon", "personal_cloud.status_daemon.server.main", 0),
+        ):
+            with (
+                self.subTest(command=command),
+                patch.object(sys, "argv", ["personal-cloud", command]),
+                patch(target, return_value=expected) as run,
+            ):
+                self.assertEqual(entrypoint.main(), expected)
+                run.assert_called_once_with()
+        with (
+            patch.object(sys, "argv", ["personal-cloud", "unknown"]),
+            contextlib.redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit) as exited,
+        ):
+            entrypoint.main()
+        self.assertEqual(exited.exception.code, 2)

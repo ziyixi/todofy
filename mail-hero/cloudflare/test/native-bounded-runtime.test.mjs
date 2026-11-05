@@ -1,23 +1,18 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFile, readdir, mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
-import { build } from 'esbuild'
-import { Miniflare, convertV4MiniflareOptions } from 'miniflare'
-import { migrationStatements } from './migrations.mjs'
+import { buildWorker, startRuntime } from './runtime-harness.mjs'
 import { canonicalJSON } from '../src/native/backup.ts'
 import { lifecycleDueSQL, terminalAnchorSQL } from '../src/native/lifecycle.ts'
 
 // Production runs on Workers Free: D1 and DO SQLite each allow 5M rows read
 // per day. These tests measure real workerd rows_read, not a JS model.
-const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
 const uuid = `lower(hex(randomblob(4)))||'-'||lower(hex(randomblob(2)))||'-4'||substr(lower(hex(randomblob(2))),2)||'-8'||substr(lower(hex(randomblob(2))),2)||'-'||lower(hex(randomblob(6)))`
 let bundled
 async function script() {
-  bundled ??= (await build({ stdin: { contents: `
+  bundled ??= await buildWorker({
+    sourcefile: 'native-bounded-entry.ts',
+    contents: `
     import app from './src/native/index';
     import { emailHandler } from './src/native/ingest';
     import { runMaintenance } from './src/native/pipeline';
@@ -89,27 +84,25 @@ async function script() {
         return Response.json({ ...stats, status: response.status, body: await response.json() })
       }
       return app.fetch(request, env, ctx)
-    }};`, resolveDir: root, sourcefile: 'native-bounded-entry.ts', loader: 'ts' },
-  bundle: true, format: 'esm', platform: 'neutral', conditions: ['browser'], external: ['cloudflare:workers'], write: false })).outputFiles[0].text
+    }};`,
+  })
   return bundled
 }
 async function runtime(t, bindings = {}) {
-  const temp = await mkdtemp(join(tmpdir(), 'mail-hero-bounded-'))
-  const mf = new Miniflare(convertV4MiniflareOptions({ name: 'mail-hero-bounded-test', modules: true, script: await script(),
-    compatibilityDate: '2026-09-07', host: '127.0.0.1', port: 0,
-    d1Databases: { DB: 'bounded-test' }, d1Persist: join(temp, 'd1'), r2Buckets: ['MAIL_STORE'], r2Persist: join(temp, 'r2'),
-    durableObjects: { COORDINATOR: { className: 'ProbeCoordinator', useSQLite: true } }, durableObjectsPersist: join(temp, 'do'),
+  const { mf, db, close } = await startRuntime({
+    prefix: 'mail-hero-bounded-',
+    name: 'mail-hero-bounded-test',
+    script: await script(),
+    d1Databases: { DB: 'bounded-test' },
+    r2Buckets: ['MAIL_STORE'],
+    durableObjects: { COORDINATOR: { className: 'ProbeCoordinator', useSQLite: true } },
     bindings: { RECEIVE_ADDRESS: 'inbox@mail.example.org', DEV_AUTH_BYPASS: 'true', ACCESS_ISSUER: 'https://synthetic.cloudflareaccess.com',
       ACCESS_AUDIENCE: 'synthetic', ACCESS_OWNER: 'owner@example.org', CREDENTIAL_KEY: 'a'.repeat(64), WEBHOOK_ALLOWED_HOSTS: 'consumer.example.org',
       FORCE_SEND_PAUSED: 'true', MAINTENANCE_MODE: 'false', ...bindings },
     serviceBindings: { ASSETS: () => new Response('synthetic') },
-    outboundService: () => { throw new Error('no outbound request is expected') } }))
-  t.after(async () => { await mf.dispose(); await rm(temp, { recursive: true, force: true }) })
-  await mf.ready
-  const db = await mf.getD1Database('DB')
-  for (const name of (await readdir(join(root, 'migrations'))).filter(name => name.endsWith('.sql')).sort()) {
-    await db.batch(migrationStatements(await readFile(join(root, 'migrations', name), 'utf8')).map(sql => db.prepare(sql)))
-  }
+    outboundService: () => { throw new Error('no outbound request is expected') },
+  })
+  t.after(close)
   const call = async (path, input, headers = {}) => {
     const response = await mf.dispatchFetch('http://localhost' + path, { method: input === undefined ? 'GET' : 'POST',
       headers: { 'Content-Type': 'application/json', ...headers }, body: input === undefined ? undefined : JSON.stringify(input) })

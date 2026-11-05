@@ -1,12 +1,25 @@
 """Test offline projection contracts with synthetic Notion content."""
 
+import asyncio
 import base64
 import copy
+import dataclasses
+import hashlib
 import json
+import logging
 
 import pytest
 
+import newsletter.contracts as contracts
+import newsletter.diagnostics as diagnostics
+import newsletter.editor as editor
+import newsletter.files as files
 import newsletter.notion_content as newsletter_notion_content
+import newsletter.notion_intake as notion_intake
+import newsletter.notion_journal as notion_journal
+import newsletter.settings as newsletter_settings
+import newsletter.store as store
+import newsletter.worker as worker
 import tests.support.notion_content as notion_content
 
 
@@ -556,3 +569,430 @@ def test_best_read_scope_keeps_dataset_boundaries(
     # The other source is full_text, but concerns a different work.
     result = notion_content.project_material(lead, evidence=[research])
     assert result.properties["access_scope"] == {"select": {"name": expected}}
+
+
+MATERIALS = "12345678-1234-1234-1234-123456789abc"
+EDITIONS = "22345678-1234-1234-1234-123456789abc"
+
+
+@pytest.fixture
+def live(tmp_path):
+    return newsletter_settings.Settings(
+        data_dir=tmp_path / "data",
+        mode="live",
+        editor_backend="codex",
+        workflow_backend="dag",
+        editor_token="e" * 32,
+        send_token="s" * 32,
+        model_router_url="https://models.example.test",
+        model_router_token="synthetic-token",
+        notion_backend="notion",
+        notion_token="synthetic-provider-key",
+    )
+
+
+def test_dual_destinations_need_no_legacy_id(live):
+    settings = dataclasses.replace(
+        live,
+        notion_materials_data_source_id=MATERIALS,
+        notion_editions_data_source_id=EDITIONS,
+    )
+    settings.validate()
+    assert settings.notion_v2
+    assert not settings.notion_archive_private
+    assert "synthetic-provider-key" not in repr(settings)
+
+
+def test_single_database_destination_was_removed(live, monkeypatch):
+    # The old single-database variable is ignored, never a fallback.
+    monkeypatch.setenv("NOTION_DATA_SOURCE_ID", MATERIALS)
+    assert not hasattr(
+        newsletter_settings.Settings.from_env(), "notion_data_source_id"
+    )
+    with pytest.raises(ValueError, match="NOTION_MATERIALS_DATA_SOURCE_ID"):
+        live.validate()
+
+
+def test_removed_legacy_workflow_backend_fails_visibly(live):
+    settings = dataclasses.replace(
+        live,
+        workflow_backend="legacy",
+        notion_materials_data_source_id=MATERIALS,
+        notion_editions_data_source_id=EDITIONS,
+    )
+    with pytest.raises(ValueError, match="legacy backend was removed"):
+        settings.validate()
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["notion_materials_data_source_id", "notion_editions_data_source_id"],
+)
+def test_half_configured_dual_mode_does_not_silently_fall_back(live, field):
+    settings = dataclasses.replace(live, **{field: EDITIONS})
+    with pytest.raises(
+        ValueError, match="Set both NOTION_MATERIALS_DATA_SOURCE_ID"
+    ):
+        settings.validate()
+
+
+@pytest.mark.parametrize(
+    "editions", [MATERIALS, MATERIALS.replace("-", "").upper()]
+)
+def test_same_destination_is_rejected_in_all_uuid_formats(live, editions):
+    settings = dataclasses.replace(
+        live,
+        notion_materials_data_source_id=MATERIALS,
+        notion_editions_data_source_id=editions,
+    )
+    with pytest.raises(ValueError, match="different data sources"):
+        settings.validate()
+
+
+def test_invalid_uuid_does_not_echo_configured_value(live):
+    settings = dataclasses.replace(
+        live,
+        notion_materials_data_source_id="misplaced-private-key",
+        notion_editions_data_source_id=EDITIONS,
+    )
+    with pytest.raises(ValueError, match="valid data source IDs") as error:
+        settings.validate()
+    assert "misplaced-private-key" not in str(error.value)
+    assert error.value.__suppress_context__
+
+
+def test_missing_notion_token_remains_invalid(live):
+    settings = dataclasses.replace(
+        live,
+        notion_token="",
+        notion_materials_data_source_id=MATERIALS,
+        notion_editions_data_source_id=EDITIONS,
+    )
+    with pytest.raises(ValueError, match="NOTION_TOKEN"):
+        settings.validate()
+
+
+def test_programmatic_privacy_configuration_rejects_truthy_strings(live):
+    settings = dataclasses.replace(
+        live,
+        notion_materials_data_source_id=MATERIALS,
+        notion_editions_data_source_id=EDITIONS,
+        notion_archive_private="false",
+    )
+    with pytest.raises(ValueError, match="must be a boolean"):
+        settings.validate()
+
+
+def test_mock_mode_cannot_enable_live_dual_database(live):
+    settings = dataclasses.replace(
+        live,
+        mode="mock",
+        editor_backend="mock",
+        notion_materials_data_source_id=MATERIALS,
+        notion_editions_data_source_id=EDITIONS,
+    )
+    with pytest.raises(ValueError, match="Mock mode forbids"):
+        settings.validate()
+
+
+def test_dual_settings_read_exact_environment_names(monkeypatch):
+    monkeypatch.setenv("NOTION_MATERIALS_DATA_SOURCE_ID", MATERIALS)
+    monkeypatch.setenv("NOTION_EDITIONS_DATA_SOURCE_ID", EDITIONS)
+    monkeypatch.setenv("NEWSLETTER_NOTION_ARCHIVE_PRIVATE", "true")
+    settings = newsletter_settings.Settings.from_env()
+    assert settings.notion_v2
+    assert settings.notion_materials_data_source_id == MATERIALS
+    assert settings.notion_editions_data_source_id == EDITIONS
+    assert settings.notion_archive_private is True
+
+
+@pytest.mark.parametrize(
+    "value,expected", [(None, False), ("false", False), ("TRUE", True)]
+)
+def test_private_archive_requires_explicit_boolean(
+    monkeypatch, value, expected
+):
+    monkeypatch.delenv("NEWSLETTER_NOTION_ARCHIVE_PRIVATE", raising=False)
+    if value is not None:
+        monkeypatch.setenv("NEWSLETTER_NOTION_ARCHIVE_PRIVATE", value)
+    assert (
+        newsletter_settings.Settings.from_env().notion_archive_private
+        is expected
+    )
+
+
+def test_private_archive_invalid_boolean_is_safe_configuration_error(
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "NEWSLETTER_NOTION_ARCHIVE_PRIVATE", "misplaced-private-key"
+    )
+    with pytest.raises(
+        ValueError, match="NEWSLETTER_NOTION_ARCHIVE_PRIVATE"
+    ) as error:
+        newsletter_settings.Settings.from_env()
+    assert "misplaced-private-key" not in str(error.value)
+
+
+@pytest.mark.parametrize("body", ["null", "[]", "42", '"private marker"', "{"])
+def test_bad_edition_shape_does_not_block_later_import(tmp_path, body, caplog):
+    database = store.Store(tmp_path / "newsletter.sqlite3", "live")
+    try:
+        journal = notion_journal.NotionJournal(database, {"target": "offline"})
+        intake = notion_intake.NotionIntake(journal, include_personal=False)
+        valid = notion_content.edition(
+            created_at="2026-09-07T13:00:00+00:00",
+            updated_at="2026-09-07T13:00:00+00:00",
+        )
+        for identifier, encoded in (
+            ("broken-edition", body),
+            (valid["id"], contracts.canonical_json(valid)),
+        ):
+            journal.execute(
+                "INSERT INTO editions VALUES(?,?,?,?,?,?)",
+                (
+                    identifier,
+                    identifier,
+                    "unused",
+                    "ready",
+                    encoded,
+                    contracts.canonical_json([notion_content.packet()]),
+                ),
+            )
+        before = journal.rows("SELECT * FROM editions ORDER BY id")
+        assert intake.scan() == 2
+        assert journal.rows("SELECT * FROM editions ORDER BY id") == before
+        assert journal.entity("edition:" + valid["id"])["kind"] == "edition"
+        errors = journal.rows(
+            "SELECT * FROM notion_imports WHERE source_id='broken-edition'"
+        )
+        assert errors[0]["error"] == "notion_edition_import_failed"
+        assert errors[0]["digest"] == "invalid"
+        assert intake.scan() == 0
+        assert "private marker" not in caplog.text
+        assert "phase=notion_edition_import" in caplog.text
+    finally:
+        database.close()
+
+
+@pytest.mark.parametrize(
+    "failure", [asyncio.CancelledError, KeyboardInterrupt, SystemExit]
+)
+async def test_projection_termination_is_durable_and_propagates(
+    tmp_path, failure
+):
+    class InterruptedNotion:
+        calls = 0
+
+        async def project(self, packet):
+            self.calls += 1
+            raise failure("private provider message")
+
+    path = tmp_path / "newsletter.sqlite3"
+    database = store.Store(path, "live")
+    notion = InterruptedNotion()
+    try:
+        packet = notion_content.packet()
+        database.db.execute(
+            "INSERT INTO packets(id,principal,request_key,digest,body) "
+            "VALUES(?,'test','test','test',?)",
+            (packet["id"], contracts.canonical_json(packet)),
+        )
+        consumer = worker.Worker(
+            database, editor.MockEditor(), notion, tmp_path / "jobs", 30
+        )
+        with pytest.raises(failure):
+            await consumer.step()
+        assert (
+            database.db.execute("SELECT projection FROM packets").fetchone()[0]
+            == "unknown"
+        )
+    finally:
+        database.close()
+    reopened = store.Store(path, "live")
+    try:
+        reopened.recover()
+        consumer = worker.Worker(
+            reopened, editor.MockEditor(), notion, tmp_path / "jobs", 30
+        )
+        assert not await consumer.step()
+        assert notion.calls == 1
+    finally:
+        reopened.close()
+
+
+def test_diagnostics_only_include_phase_type_and_hashed_reference(caplog):
+    reference = "private record identifier\nInjected log entry"
+    diagnostics.record_failure(
+        logging.getLogger(__name__),
+        phase="editor_validation",
+        error=TypeError("private body /home/private token"),
+        reference=reference,
+    )
+    assert "phase=editor_validation type=TypeError" in caplog.text
+    assert hashlib.sha256(reference.encode()).hexdigest()[:12] in caplog.text
+    assert "private" not in caplog.text
+    assert "Traceback" not in caplog.text
+
+
+@pytest.mark.parametrize("payload", [b'{"a":1,"a":2}', b'{"a":{"b":1,"b":2}}'])
+def test_shared_json_decoder_rejects_duplicate_fields(payload):
+    with pytest.raises(ValueError, match="Duplicate JSON key"):
+        files.decode_json(payload)
+
+
+def test_shared_atomic_write_keeps_previous_file_before_replace(
+    tmp_path, monkeypatch
+):
+    destination = tmp_path / "bundle.json"
+    destination.write_text('{"previous":true}')
+
+    def fail_replace(source, target):
+        raise OSError("synthetic write interruption")
+
+    monkeypatch.setattr(files.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="synthetic write interruption"):
+        files.atomic_write_text(destination, '{"new":true}')
+    assert json.loads(destination.read_text()) == {"previous": True}
+    assert list(tmp_path.iterdir()) == [destination]
+
+
+@pytest.mark.parametrize("encoded", ["null", "[]", "42", '"private marker"'])
+def test_corrupt_frozen_inputs_never_select_packaged_template(
+    tmp_path, encoded
+):
+    database = store.Store(tmp_path / "newsletter.sqlite3", "live")
+    try:
+        consumer = worker.Worker(
+            database, editor.MockEditor(), object(), tmp_path / "jobs", 30
+        )
+        binding = {"run_id": "run-frozen"}
+        assert consumer.frozen_template(binding) is None
+        database.db.execute(
+            "CREATE TABLE workflow_runs(id TEXT PRIMARY KEY, inputs TEXT)"
+        )
+        assert consumer.frozen_template(binding) is None
+        database.db.execute(
+            "INSERT INTO workflow_runs VALUES(?,?)", ("run-frozen", encoded)
+        )
+        with pytest.raises((ValueError, RuntimeError)):
+            consumer.frozen_template(binding)
+    finally:
+        database.close()
+
+
+def test_material_aliases_and_notion_journal_methods(store):
+    # 1. material_aliases edge cases
+    landing = notion_content.candidate(
+        url="https://example.org/news",
+        doi="",
+        event_key="thread-abcdef012345",
+        published_at="2026-09-07",
+    )
+    aliases = notion_journal.material_aliases(landing)
+    assert aliases == ["url:https://example.org/news#event:2026-09-07"]
+    with pytest.raises(ValueError, match="notion_material_identity_missing"):
+        notion_journal.material_aliases(
+            {
+                "title": "Valid long title without URL or event",
+                "url": "",
+                "doi": "",
+                "event_key": "",
+            }
+        )
+
+    # 2. NotionJournal lifecycle & methods
+    dest = {"materials": "m-1", "editions": "e-1", "private": False}
+    journal = notion_journal.NotionJournal(store, dest, clock=lambda: 123.5)
+    with pytest.raises(ValueError, match="destination/privacy changed"):
+        notion_journal.NotionJournal(store, {"materials": "m-2"})
+
+    assert journal.exists("notion_entities") is True
+    assert journal.exists("nonexistent_table") is False
+    boot = journal.bootstrap_time()
+    assert boot and journal.bootstrap_time() == boot
+    assert journal.pending_candidates() == []
+    assert journal.pending_research() == []
+    assert journal.is_daily_run("r1", "2026-09-07") is False
+
+    # Candidate & identity methods
+    cand = notion_content.candidate()
+    key, cand_aliases = journal.identity(cand)
+    assert key.startswith("material:v1:")
+    proj = notion_content.project_material(cand)
+    proj = newsletter_notion_content.Projection(
+        key, proj.properties, proj.blocks, proj.digest, proj.chart_png
+    )
+    journal.enqueue("material", proj, cand_aliases)
+    assert journal.identity(cand)[0] == key
+
+    # Conflict on different DOI for existing URL alias
+    conflicting = notion_content.candidate(doi="10.9999/other")
+    with pytest.raises(ValueError, match="notion_material_identity_conflict"):
+        journal.identity(conflicting)
+
+    # Conflict on kind mismatch
+    with pytest.raises(ValueError, match="notion_entity_kind_conflict"):
+        journal.enqueue("edition", proj)
+
+    journal.remember_candidate("run-1", cand["id"], key, "{}", "2026-09-07")
+    assert journal.candidate("run-1", cand["id"]) is not None
+    assert len(journal.candidates("run-1")) == 1
+    assert journal.first_seen(key, "2026-09-08") == "2026-09-07"
+    assert journal.first_seen("unknown-key", "2026-09-08") == "2026-09-08"
+
+    # Create / append / upload / conflict / retry / summary transitions
+    assert len(journal.due_entities(200.0)) == 1
+    journal.begin_create(key)
+    assert journal.entity(key)["create_state"] == "creating"
+    journal.fail_create(key, ambiguous=True)
+    assert journal.entity(key)["create_state"] == "unknown"
+    journal.fail_create(key, ambiguous=False)
+    assert journal.entity(key)["create_state"] == "new"
+    journal.quarantine(key)
+    assert journal.entity(key)["create_state"] == "conflict"
+    journal.resolve_conflict(key)
+    assert journal.entity(key)["create_state"] == "ready"
+    journal.confirm_page(key, "page-mat-1", "hash-1")
+    assert journal.entity(key)["page_id"] == "page-mat-1"
+
+    seq = journal.versions(key)[0]["seq"]
+    journal.record_upload(seq, "upload-1", 100.0)
+    journal.begin_append(seq, [{"type": "paragraph"}])
+    journal.fail_append(seq, ambiguous=True)
+    assert journal.versions(key)[0]["state"] == "unknown"
+    journal.fail_append(seq, ambiguous=False)
+    assert journal.versions(key)[0]["state"] == "pending"
+    journal.acknowledge_append(seq, 1, complete=False)
+    assert journal.versions(key)[0]["offset"] == 1
+    journal.finish_version(seq)
+    assert journal.versions(key)[0]["state"] == "done"
+    journal.acknowledge_properties(key, "hash-2")
+    assert journal.entity(key)["applied_hash"] == "hash-2"
+
+    # Imports, links, desired, retry, clear_error, summary
+    journal.mark_import("candidates", "src-1", "dig-1", "err-1")
+    assert journal.imported("candidates", "src-1", "dig-1") is True
+    journal.retry(key, "NOTION_TIMEOUT")
+    assert journal.entity(key)["error"] == "NOTION_TIMEOUT"
+    summary = journal.summary()
+    assert summary["errors"] and summary["import_errors"]
+    journal.clear_error(key)
+    assert journal.entity(key)["error"] == ""
+    assert journal.entity(key)["progress_at"] == 123.5
+
+    ed_proj = newsletter_notion_content.edition_projection(
+        notion_content.edition(), packets=[notion_content.packet()]
+    )
+    journal.enqueue("edition", ed_proj)
+    journal.confirm_page(ed_proj.key, "page-ed-1")
+    journal.link(ed_proj.key, key)
+    desired_mat = journal.desired(journal.entity(key))
+    assert desired_mat["edition_ids"] == {"relation": [{"id": "page-ed-1"}]}
+    assert desired_mat["progress"] == {"select": {"name": "已刊出"}}
+    desired_ed = journal.desired(journal.entity(ed_proj.key))
+    assert desired_ed["material_ids"] == {"relation": [{"id": "page-mat-1"}]}
+    assert journal.editions_for_links() == []
+    assert journal.pending_editions() == []
+    assert journal.is_verification("edition-fixture") is False
+

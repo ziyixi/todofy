@@ -1,27 +1,7 @@
-import {
-  expect,
-  test,
-  type APIRequestContext,
-  type Page,
-} from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+import { seedTask as createTask } from "./seed";
 
 test.use({ serviceWorkers: "block", timezoneId: "UTC" });
-
-async function createTask(
-  request: APIRequestContext,
-  fields: Record<string, unknown>,
-) {
-  const { token } = await (await request.get("/api/tasks/csrf")).json();
-  const response = await request.post(
-    `/api/tasks/v1/tasks?request_id=${crypto.randomUUID()}`,
-    {
-      headers: { "x-csrf-token": token, origin: "http://127.0.0.1:8798" },
-      data: fields,
-    },
-  );
-  expect(response.status(), await response.text()).toBe(200);
-  return response.json() as Promise<{ id: string; title: string }>;
-}
 async function openDateMenu(
   page: Page,
   title: string,

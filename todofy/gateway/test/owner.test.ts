@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import type { DescMessage } from '@ziyixi/proto/protobuf';
+import { TodofyUiService } from '@ziyixi/proto/todofy/ui/v1/todofy_ui_service_pb';
+import { fromWire, toWire } from '@ziyixi/proto/wire-json';
+import { isPaged } from '../src/ui.ts';
 import { errorCode, fakes, logged, OWNER, owner, statusReason, uiOk, uiRefusal, type CoreCall, type CoreReply, type StatusBody } from './helpers.ts';
+import * as fixtures from './runtime/fixtures.ts';
 
 const ORIGIN = 'http://todofy.localhost:8787';
 const EVENT = '0b8f5a4e-3c1d-4c52-9f0e-2d7c8b6a5f41';
@@ -391,3 +396,66 @@ describe('maintenance', () => {
     expect(calls).toHaveLength(1);
   });
 });
+
+describe('coreRefusal fallback on corrupt detail or missing reason', () => {
+  it('falls back to 500 INTERNAL when core returns corrupt JSON detail or missing reason', async () => {
+    for (const answer of [
+      { error: 'ETAG_MISMATCH', detail: '{corrupt-json', retry_after: null },
+      { error: 'ETAG_MISMATCH', detail: JSON.stringify({ name: 123 }), retry_after: null },
+      { error: '', detail: null, retry_after: null },
+    ]) {
+      const { env } = fakes({}, () => answer);
+      const response = await reconcile(env);
+      expect(response.status).toBe(500);
+      expect(await statusReason(response)).toBe('INTERNAL');
+    }
+  });
+});
+
+const reports = fixtures.latestReports() as { summary: unknown; recommendations: unknown[] };
+
+/** One answer of each rpc the gateway passes through. */
+const ANSWERS: Readonly<Record<string, Record<string, unknown>>> = {
+  GetServiceStatus: fixtures.serviceStatus(),
+  GetMailEvent: fixtures.eventDetail(),
+  ReconcileMailEvent: fixtures.eventDetail(),
+  GetLatestReports: fixtures.latestReports(),
+  RecomputeReport: { recommendation: reports.recommendations.at(-1) },
+  GetLegacyText: fixtures.legacyText(),
+  GetModelSettings: {
+    settings: { name: 'modelSettings', email_model: 'gemini-3.5-flash-lite', report_model: 'gemini-3.8-flash', etag: '0' },
+    models: [{ id: 'gpt-6.1-sol', provider: 'openai', kind: 'text', configured: true }],
+  },
+  UpdateModelSettings: { name: 'modelSettings', email_model: 'gpt-6.1-sol', report_model: 'gemini-3.8-flash', etag: '1' },
+};
+
+function difference(schema: DescMessage, text: string): string | null {
+  const read = fromWire(schema, JSON.parse(text));
+  if (read.unrecognized.length > 0) return `unrecognized: ${read.unrecognized.join(', ')}`;
+  const written = JSON.stringify(toWire(schema, read.message));
+  if (written === text) return null;
+  let at = 0;
+  while (written[at] === text[at]) at++;
+  const around = (bytes: string) => JSON.stringify(bytes.slice(Math.max(0, at - 40), at + 40));
+  return `from offset ${String(at)}: ${around(text)} is written ${around(written)}`;
+}
+
+describe('the answers the gateway passes through', () => {
+  it('are every rpc TodofyCore answers but the lists', () => {
+    const passed = TodofyUiService.methods.filter((method) => method.name !== 'GetIntegration' && !isPaged(method));
+    expect(passed.map((method) => method.name).sort()).toEqual(Object.keys(ANSWERS).sort());
+  });
+
+  it('are exactly what toWire writes for the rpc output', () => {
+    for (const method of TodofyUiService.methods) {
+      const answer = ANSWERS[method.name];
+      if (answer === undefined) continue;
+      expect(difference(method.output, JSON.stringify(answer)), method.name).toBeNull();
+    }
+  });
+
+  it('include a summary recompute, written the same way', () => {
+    expect(difference(TodofyUiService.method.recomputeReport.output, JSON.stringify({ summary: reports.summary }))).toBeNull();
+  });
+});
+

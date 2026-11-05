@@ -558,6 +558,31 @@ proto_vitest_test(
     ],
 )
 
+proto_vitest_test(
+    name = "src__pages__SetupPage_test",
+    config = "//mail-hero/web:test_config",
+    data = COMMON_TEST_DATA_2,
+    project = "mail-hero/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":pages/SetupPage.test.tsx"],
+    deps = [
+        ":src__api__client",
+        ":src__api__queries",
+        ":src__components__UI",
+        ":src__pages__SetupPage",
+        "//mail-hero/web:node_modules/@tanstack/react-query",
+        "//mail-hero/web:node_modules/@testing-library/react",
+        "//mail-hero/web:node_modules/react",
+        "//mail-hero/web:node_modules/react-router",
+        "//mail-hero/web:node_modules/vitest",
+        "//proto/mailhero/ui/v2:ts",
+        "//proto/ts:http-transcoder",
+        "//proto/ts:protobuf",
+        "//proto/ts:rpc-status",
+    ],
+)
+
 source_audit_files(
     exclude = SOURCE_AUDIT_EXCLUDES,
     patterns = ["**"],

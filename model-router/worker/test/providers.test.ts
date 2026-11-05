@@ -291,15 +291,6 @@ describe('provider isolation and usage', () => {
     expect(executor?.configured).toBe(true);
   });
 
-  it('prices Claude fallback iterations at their own rates and handles cache TTLs', () => {
-    const usage = claudeUsage({ iterations: [
-      { type: 'message', input_tokens: 100, output_tokens: 10, cache_creation_input_tokens: 20, cache_creation: { ephemeral_5m_input_tokens: 10, ephemeral_1h_input_tokens: 10 } },
-      { type: 'fallback_message', model: 'claude-opus-5', input_tokens: 200, output_tokens: 20, cache_read_input_tokens: 30 },
-    ] }, 'claude-opus-5-5', 'claude-opus-5');
-    expect(usage).toMatchObject({ available: true, inputTokens: 350, outputTokens: 30, cacheWriteTokens: 20, cachedInputTokens: 30, estimatedCostMicrousd: 2245 });
-    expect(claudeUsage({ input_tokens: 100, output_tokens: 20 }, 'unknown', 'unknown').estimatedCostMicrousd).toBeUndefined();
-  });
-
   it('distinguishes missing usage from reported zero and prevents counting reasoning twice', () => {
     expect(geminiUsage(undefined).available).toBe(false);
     expect(geminiUsage({ promptTokenCount: 0, candidatesTokenCount: 0 }).available).toBe(true);

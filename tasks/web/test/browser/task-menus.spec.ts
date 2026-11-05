@@ -1,24 +1,7 @@
-import { expect, test, type APIRequestContext } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import { createResource } from "./seed";
 
 test.use({ serviceWorkers: "block", timezoneId: "UTC" });
-
-async function createResource(
-  request: APIRequestContext,
-  kind: string,
-  fields: Record<string, unknown>,
-) {
-  const csrf = await request.get("/api/tasks/csrf");
-  const { token } = await csrf.json();
-  const response = await request.post(
-    `/api/tasks/v1/${kind}?request_id=${crypto.randomUUID()}`,
-    {
-      headers: { "x-csrf-token": token, origin: "http://127.0.0.1:8798" },
-      data: fields,
-    },
-  );
-  expect(response.status()).toBe(200);
-  return response.json();
-}
 
 test("right click and More share actions and contextual dates stay at the clicked row position", async ({
   page,

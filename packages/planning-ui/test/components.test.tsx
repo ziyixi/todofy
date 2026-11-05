@@ -7,19 +7,11 @@ import {
   within,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, beforeAll, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { App } from "../src/App";
 import { PlanView } from "../src/PlanView";
 import { createPrototype } from "./fixture";
 import type { FocusRange, PlusData } from "../src/model";
-beforeAll(() => {
-  HTMLDialogElement.prototype.showModal = function () {
-    this.setAttribute("open", "");
-  };
-  HTMLDialogElement.prototype.close = function () {
-    this.removeAttribute("open");
-  };
-});
 afterEach(cleanup);
 it("commits a candidate in one action and moves it into the committed group", async () => {
   const actions = createPrototype();

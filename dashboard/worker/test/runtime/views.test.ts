@@ -4,19 +4,14 @@
  * body checked against the IDL byte for byte by the harness), Worker discovery from the GraphQL answer with 0, 5 and
  * 20 scripts, the website probe, the canary on the mail flow and the mutations. All data is synthetic.
  */
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { BREAKDOWN_UNCLASSIFIED } from '../../src/api-types.ts';
 import { VIEW_BODY_BUDGET, VIEW_ROWS_READ, type AttentionItem, type CloudflareView, type FlowsView, type HomeView, type OpsView, type Registry, type ViewId } from '../../src/api-types.ts';
 import { REGISTRY, entryProbe, outboundPerTick } from '../../src/registry.ts';
 import { REALISTIC_USAGE, SYNTHETIC_D1, SYNTHETIC_NS, usageWithScripts } from '../graphql-fixture.ts';
-import { accessClaims, testIssuer, type TestIssuer } from '../jwt.ts';
-import { GRAPHQL, NOW, PATHS, PROBES, SYNTHETIC_BINDINGS, WEBSITE_PROBE, answerProbes, startFlows, status, type FlowHarness } from './flows.ts';
+import { GRAPHQL, NOW, PATHS, PROBES, WEBSITE_PROBE, answerProbes, startFlows, status, type FlowHarness } from './flows.ts';
 
 let h: FlowHarness | undefined;
-let issuer: TestIssuer;
-beforeAll(async () => {
-  issuer = await testIssuer();
-});
 afterEach(async () => {
   await h?.dispose();
   h = undefined;
@@ -57,48 +52,6 @@ async function refreshedView<T>(harness: FlowHarness, name: 'home' | 'cloudflare
   if (answer.body === null) throw new Error(`no body for ${name}`);
   return answer.body;
 }
-
-describe('Access and CSRF on /api/v1', () => {
-  it('verifies Access JWTs on every path of the API and requires same-origin JSON mutation headers', async () => {
-    const ISSUER = SYNTHETIC_BINDINGS.ACCESS_ISSUER ?? '';
-    const AUDIENCE = SYNTHETIC_BINDINGS.ACCESS_AUDIENCE ?? '';
-    h = await startFlows({ bindings: { DEV_AUTH_BYPASS: 'false', CANARY_UTC_HOUR: '23' } });
-    h.routes.set(`${ISSUER}/cdn-cgi/access/certs`, () => Response.json(issuer.jwks));
-    const jwt = await issuer.sign(accessClaims(ISSUER, AUDIENCE, 'owner@example.com'));
-    const stranger = await issuer.sign(accessClaims(ISSUER, AUDIENCE, 'someone@example.com'));
-    for (const path of [PATHS.registry, PATHS.home, PATHS.flows, PATHS.cloudflare, PATHS.ops, PATHS.csrf]) {
-      expect((await h.fetch(path)).status).toBe(401);
-      const refused = await h.fetch(path, { headers: { 'cf-access-jwt-assertion': stranger } });
-      expect(refused.status).toBe(401);
-      await refused.arrayBuffer();
-      const owner = await h.fetch(path, { headers: { 'cf-access-jwt-assertion': jwt } });
-      expect(owner.status).toBe(200);
-      await owner.arrayBuffer();
-    }
-    // The mutations need the CSRF token too, the refreshes included (they call the apps).
-    for (const path of [PATHS.refreshHome, PATHS.refreshCloudflare, PATHS.canary]) {
-      const refused = await h.fetch(path, { method: 'POST', headers: { 'cf-access-jwt-assertion': jwt, origin: 'https://home.example.com' }, body: '{}' });
-      expect(refused.status, path).toBe(403);
-      await refused.arrayBuffer();
-    }
-    const csrf = await h.fetch(PATHS.csrf, { headers: { 'cf-access-jwt-assertion': jwt } });
-    const { token } = (await csrf.json()) as { token: string };
-    expect(token).toBe('1');
-    expect(csrf.headers.get('set-cookie')).toBeNull();
-    const guard = (origin: string, csrfToken = token) =>
-      h?.fetch(PATHS.guard, {
-        method: 'POST',
-        headers: { 'cf-access-jwt-assertion': jwt, origin, 'x-csrf-token': csrfToken, 'content-type': 'application/json' },
-        body: '{"level":"normal","app":"mail-hero"}',
-      });
-    expect((await guard('https://evil.example.com'))?.status).toBe(403);
-    expect((await guard('https://home.example.com', ''))?.status).toBe(403);
-    await h.tick(NOW); // Load the service capability before a guard mutation.
-    const accepted = await guard('https://home.example.com');
-    expect(accepted?.status).toBe(200);
-    await accepted?.arrayBuffer();
-  });
-});
 
 describe('GetRegistry', () => {
   it('is served by the Worker per build, 304 on its ETag, and carries no probe URL or binding', async () => {

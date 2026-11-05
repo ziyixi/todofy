@@ -1,20 +1,18 @@
 /** Native Watch transitions become reports in linked work; no browsing content or real services are used. */
-import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { EVENT_NAMES, WORK_EVENT_NAME } from '../src/server.ts';
 import { WorkWatchSource, WATCH_POLL_INTERVAL_MS, WATCH_SOURCE_NAME } from '../src/watch-events.ts';
-import { WorkStore, type WorkAttention, type WorkStorage } from '../src/work-store.ts';
+import { WorkStore, type WorkAttention } from '../src/work-store.ts';
 import type { WorkCreateInput } from '../src/work-model.ts';
 import type { WatchToolEnv } from '../src/watch.ts';
+import { createTestWorkStorage, uuid } from './harness.ts';
 
 const AT = '2026-10-22T12:00:00Z';
 const WATCH = 'watches/synthetic';
-const databases: DatabaseSync[] = [];
 
 beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(AT); });
-afterEach(() => { vi.useRealTimers(); for (const database of databases.splice(0)) database.close(); });
+afterEach(() => { vi.useRealTimers(); });
 
-function uuid(value: number) { return `00000000-0000-4000-8000-${String(value).padStart(12, '0')}`; }
 function advance() { vi.setSystemTime(Date.now() + WATCH_POLL_INTERVAL_MS); }
 function event(sequence: number, kind = 'evidence_changed', watch = WATCH) {
   return { sequence: String(sequence), kind, watch,
@@ -28,21 +26,7 @@ function expired() {
 }
 
 function fixture(read: (query: URLSearchParams) => Record<string, unknown> | Response) {
-  const database = new DatabaseSync(':memory:');
-  databases.push(database);
-  const sql = { exec(query: string, ...bindings: SqlStorageValue[]) {
-    if (query.trimStart().startsWith('CREATE')) { database.exec(query); return { toArray: () => [] }; }
-    const values = bindings.map(value => value instanceof ArrayBuffer ? new Uint8Array(value) : value) satisfies SQLInputValue[];
-    const rows = database.prepare(query).all(...values);
-    return { toArray: () => rows };
-  } } as unknown as SqlStorage;
-  let transaction = 0;
-  const storage: WorkStorage = { sql, transactionSync<T>(action: () => T): T {
-    const savepoint = `watch_test_${String(++transaction)}`;
-    database.exec(`SAVEPOINT ${savepoint}`);
-    try { const result = action(); database.exec(`RELEASE ${savepoint}`); return result; }
-    catch (error) { database.exec(`ROLLBACK TO ${savepoint}`); database.exec(`RELEASE ${savepoint}`); throw error; }
-  } };
+  const storage = createTestWorkStorage();
   storage.sql.exec('CREATE TABLE event_sources (name TEXT PRIMARY KEY,state TEXT NOT NULL,checked_at INTEGER NOT NULL,error_code TEXT)');
   const attention: WorkAttention[] = [];
   const store = new WorkStore(storage, notification => attention.push(notification));

@@ -347,8 +347,301 @@ class TestMessages:
         assert from_wire(mail_event_pb.MailEvent, json.loads(ui.answer(message)), strict=True).message == message
 
     def test_an_answer_is_the_compact_wire_profile(self):
-        # The gateway passes these bytes to the browser unread (gateway/test/pre-encoded.test.ts checks them against
+        # The gateway passes these bytes to the browser unread (gateway/test/owner.test.ts checks them against
         # toWire), so the separators and the unescaped UTF-8 are part of the contract.
         text = ui.answer(ui.mail_event(detail_row()))
         assert text == json.dumps(json.loads(text), ensure_ascii=False, separators=(",", ":"))
         assert "季度预缴税" in text and "\\u" not in text
+
+
+# ---- runtime/owner_ui.py & runtime/api.py (host SQLite + stubbed Pyodide) ------------------
+
+
+OWNER = "owner@example.com"
+GET_EVENT = f'{{"name": "mailEvents/{EVENT}"}}'
+
+
+class Stubs:
+    def __init__(self, owner_ui: object, api: object, js_exception: type[Exception]) -> None:
+        self.owner_ui = owner_ui
+        self.api = api
+        self.JsException = js_exception
+
+
+@pytest.fixture
+def runtime(monkeypatch: pytest.MonkeyPatch):
+    import sys
+
+    from tests.unit.host_support import stubbed_pyodide
+
+    with stubbed_pyodide(monkeypatch):
+        from todofy.runtime import api, owner_ui
+
+        js_exc = sys.modules["pyodide.ffi"].JsException
+        yield Stubs(owner_ui=owner_ui, api=api, js_exception=js_exc)
+
+
+class Coordinator:
+    """TodofyCore's RPC hooks for owner_ui and api tests."""
+
+    def __init__(self, error: Exception | None = None, detail: object = None, sql: object = None) -> None:
+        self.error = error
+        self.detail = detail
+        self.sql = sql
+        self.reconcile_refused = None
+        self.recompute_result = (200, {})
+
+    async def event_detail(self, _event_id: str) -> object:
+        if self.error is not None:
+            raise self.error
+        return self.detail
+
+    async def apply_reconcile(self, *_args: object) -> object:
+        return self.reconcile_refused
+
+    async def recompute_outcome(self, *_args: object) -> tuple[int, object]:
+        if self.error is not None:
+            raise self.error
+        return self.recompute_result
+
+    async def budgets(self) -> dict[str, object]:
+        return {
+            "next_alarm_at": AT,
+            "gemini": {
+                "day": "2026-09-28",
+                "token_budget": 100_000,
+                "reserved_tokens": 0,
+                "used_tokens": 500,
+                "calls": 2,
+                "models": ["gemini-3.8-flash"],
+            },
+        }
+
+
+def handle(
+    runtime: Stubs,
+    coordinator: Coordinator,
+    method: str = "GetMailEvent",
+    request: str = GET_EVENT,
+    env: object = None,
+    owner: str = OWNER,
+    cursor: str | None = None,
+) -> dict[str, object]:
+    import asyncio
+    import types
+
+    env_obj = env or types.SimpleNamespace()
+    return asyncio.run(runtime.owner_ui.handle(env_obj, coordinator, owner, method, request, cursor))
+
+
+def refusal(reason: str, detail: str | None = None, retry_after: int | None = None) -> dict[str, object]:
+    return {"error": reason, "detail": detail, "retry_after": retry_after}
+
+
+def test_an_expected_refusal_is_its_reason(runtime: Stubs) -> None:
+    assert handle(runtime, Coordinator(detail=None)) == refusal("NOT_FOUND")
+    assert handle(runtime, Coordinator(), request='{"name": 7}') == refusal("BAD_REQUEST")
+    assert handle(runtime, Coordinator(), method="DeleteEverything") == refusal("NOT_FOUND")
+    assert handle(runtime, Coordinator(), owner="not-an-email") == refusal("UNAUTHORIZED")
+
+
+def test_a_failed_d1_call_is_unavailable(runtime: Stubs) -> None:
+    assert handle(runtime, Coordinator(error=runtime.JsException("D1_ERROR"))) == refusal("UNAVAILABLE")
+
+
+def test_a_bug_is_internal_and_logs_only_the_exception_type(runtime: Stubs, capsys: pytest.CaptureFixture[str]) -> None:
+    assert handle(runtime, Coordinator(error=KeyError("subject: synthetic secret"))) == refusal("INTERNAL")
+    assert capsys.readouterr().out.strip() == '{"owner_ui": "internal", "rpc": "GetMailEvent", "error": "KeyError"}'
+
+
+def test_an_answer_the_codec_refuses_to_write_is_internal(runtime: Stubs, monkeypatch: pytest.MonkeyPatch) -> None:
+    def refuses(_message: object) -> str:
+        raise ui.WireJsonError("a value the wire profile refuses")
+
+    monkeypatch.setattr(runtime.owner_ui.ui, "answer", refuses)
+    monkeypatch.setattr(runtime.owner_ui.ui, "mail_event", lambda _row, full=True: object())
+    assert handle(runtime, Coordinator(detail={"event_id": EVENT})) == refusal("INTERNAL")
+
+
+def test_an_unknown_rpc_name_is_never_logged(runtime: Stubs, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    def broken(*_args: object) -> object:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(runtime.owner_ui, "_answer", broken)
+    assert handle(runtime, Coordinator(), method="owner@example.com") == refusal("INTERNAL")
+    assert '"rpc": null' in capsys.readouterr().out
+
+
+def test_write_refusals_and_model_router_error_mapping(runtime: Stubs, monkeypatch: pytest.MonkeyPatch) -> None:
+    import types
+
+    from model_router_client import ModelRouterError
+
+    from tests.unit.host_support import ObjectSql
+    from todofy.runtime import backup
+
+    recompute_req = json.dumps({"name": "latestReports", "kind": "SUMMARY", "request_id": EVENT})
+    env_maint = types.SimpleNamespace(MAINTENANCE_MODE="true")
+    assert handle(runtime, Coordinator(), method="RecomputeReport", request=recompute_req, env=env_maint) == refusal(
+        "MAINTENANCE"
+    )
+
+    store = ObjectSql()
+    for stmt in backup.DO_SCHEMA:
+        store.exec(stmt)
+    monkeypatch.setattr(runtime.owner_ui.backup, "holds_ledger", lambda *_a: True)
+    assert handle(
+        runtime, Coordinator(sql=store), method="RecomputeReport", request=recompute_req
+    ) == refusal("UNAVAILABLE")
+
+    monkeypatch.setattr(runtime.owner_ui.backup, "holds_ledger", lambda *_a: False)
+    for code in ("UNAUTHENTICATED", "PERMISSION_DENIED", "FAILED_PRECONDITION"):
+        assert handle(
+            runtime,
+            Coordinator(error=ModelRouterError(code)),
+            method="RecomputeReport",
+            request=recompute_req,
+        ) == refusal("NOT_CONFIGURED")
+    assert handle(
+        runtime,
+        Coordinator(error=ModelRouterError("RESOURCE_EXHAUSTED")),
+        method="RecomputeReport",
+        request=recompute_req,
+    ) == refusal("UNAVAILABLE")
+
+
+def test_get_latest_reports_degrades_on_unreadable_report(runtime: Stubs, capsys: pytest.CaptureFixture[str]) -> None:
+    import types
+
+    from tests.unit.host_support import D1
+
+    db = D1()
+    db.insert(
+        "daily_reports",
+        kind="summary",
+        top_n=0,
+        day="2026-09-28",
+        status="ok",
+        payload_json=json.dumps({"summary": 123}),
+        task_count=1,
+        window_start=0,
+        window_end=0,
+        computed_at=100,
+    )
+    env = types.SimpleNamespace(DB=db)
+    ans = handle(runtime, Coordinator(), method="GetLatestReports", request='{"name": "latestReports"}', env=env)
+    assert json.loads(ans["ok"]) == {"name": "latestReports"}
+    assert '{"owner_ui": "report_unreadable"}' in capsys.readouterr().out
+
+
+def test_runtime_api_and_owner_ui_readers(runtime: Stubs) -> None:
+    import asyncio
+    import types
+
+    from tests.unit.host_support import D1, ObjectSql
+    from todofy.runtime import backup
+
+    db = D1()
+    store = ObjectSql()
+    for stmt in backup.DO_SCHEMA:
+        store.exec(stmt)
+    now = 1_759_071_600
+    db.insert(
+        "mail_events",
+        source_id="mail-hero-personal",
+        event_id=EVENT,
+        payload_hash="0" * 64,
+        payload="{}",
+        state="pending",
+        version=1,
+        created_at=now - 7200,
+        updated_at=now - 60,
+        next_attempt_at=now - 30,
+    )
+    db.insert(
+        "legacy_mail_text",
+        event_id=EVENT,
+        created_at=now - 3600,
+        expires_at=now + 3600,
+        text="legacy body",
+    )
+    db.insert(
+        "legacy_mail_text",
+        event_id="legacy:expired",
+        created_at=now - 7200,
+        expires_at=1,
+        text="gone",
+    )
+    env = types.SimpleNamespace(DB=db, MODEL_ROUTER=object(), BUILD_SHA="sha-1")
+    coord = Coordinator(detail=detail_row(), sql=store)
+
+    assert runtime.api.setup(env) == {
+        "mail_source_id": "mail-hero-personal",
+        "configured": {"model_router": True},
+    }
+
+    overview = asyncio.run(runtime.api.overview_data(env, coord))
+    assert overview["build"] == "sha-1" and overview["counts"]["pending"] == 1
+
+    items, following = asyncio.run(
+        runtime.api.event_page(env, attention=False, state="pending", after=None, limit=1)
+    )
+    assert len(items) == 1 and items[0]["event_id"] == EVENT and following is None
+
+    att_items, _ = asyncio.run(runtime.api.event_page(env, attention=True, state=None, after=None, limit=10))
+    assert len(att_items) == 1 and att_items[0]["attention"] is True
+
+    text_data = asyncio.run(runtime.api.legacy_text_data(env, EVENT))
+    assert text_data is not None and text_data["text"] == "legacy body"
+    assert asyncio.run(runtime.api.legacy_text_data(env, "legacy:expired")) is None
+    assert asyncio.run(runtime.api.legacy_text_data(env, "nonexistent")) is None
+
+    # Exercise owner_ui handlers over the same D1 & coordinator
+    status_res = handle(runtime, coord, method="GetServiceStatus", request='{"name": "serviceStatus"}', env=env)
+    assert json.loads(status_res["ok"])["name"] == "serviceStatus"
+
+    list_res = handle(runtime, coord, method="ListMailEvents", request='{"page_size": 10}', env=env)
+    assert len(json.loads(list_res["ok"])["mail_events"]) == 1
+
+    legacy_res = handle(
+        runtime, coord, method="GetLegacyText", request=f'{{"name": "legacyTexts/{EVENT}"}}', env=env
+    )
+    assert json.loads(legacy_res["ok"])["text"] == "legacy body"
+
+    metrics_res = handle(runtime, coord, method="ListMetricDays", request='{"page_size": 5}', env=env)
+    assert "metric_days" in json.loads(metrics_res["ok"])
+
+    # Exercise legacy /api/v1 routes in runtime/api.py
+    req = runtime.api.OwnerRequest
+    assert asyncio.run(runtime.api.handle(req("GET", "/api/v1/overview", "", None, None), env, coord, OWNER)).status == 200
+    assert (
+        asyncio.run(
+            runtime.api.handle(req("GET", "/api/v1/events", "view=recent&limit=10", None, None), env, coord, OWNER)
+        ).status
+        == 200
+    )
+    assert (
+        asyncio.run(
+            runtime.api.handle(req("GET", "/api/v1/events", "view=attention&state=pending", None, None), env, coord, OWNER)
+        ).status
+        == 400
+    )
+    assert (
+        asyncio.run(
+            runtime.api.handle(req("GET", "/api/v1/metrics/daily", "days=7", None, None), env, coord, OWNER)
+        ).status
+        == 200
+    )
+    assert (
+        asyncio.run(
+            runtime.api.handle(req("GET", f"/api/v1/legacy_text/{EVENT}", "", None, None), env, coord, OWNER)
+        ).status
+        == 200
+    )
+    assert (
+        asyncio.run(
+            runtime.api.handle(req("GET", "/api/v1/legacy_text/not-a-key!", "", None, None), env, coord, OWNER)
+        ).status
+        == 404
+    )
+

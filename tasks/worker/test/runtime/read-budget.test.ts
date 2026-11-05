@@ -1,26 +1,36 @@
 import { randomUUID } from 'node:crypto';
 import { stdout } from 'node:process';
-import { afterAll, beforeAll, expect, test } from 'vitest';
+import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 import { create } from '@ziyixi/proto/protobuf';
+import { FocusEntrySchema } from '@ziyixi/proto/tasks/ui/v1/focus_pb';
 import { ProjectSchema, SectionSchema } from '@ziyixi/proto/tasks/ui/v1/task_pb';
 import {
+  CommandFocusTimerRequest_Action as Action,
+  CommandFocusTimerRequestSchema,
+  CompleteTaskRequestSchema,
   GetFocusTimerRequestSchema,
   GetPlanRequestSchema,
   ListFocusDaysRequestSchema,
   ListTasksRequestSchema,
+  MoveFocusStepRequestSchema,
+  UpdateFocusEntryRequestSchema,
   UpdateProjectRequestSchema,
   UpdateSectionRequestSchema,
 } from '@ziyixi/proto/tasks/ui/v1/tasks_ui_service_pb';
-import { saveCatalog } from '../../src/catalog.ts';
-import { listFocusDays } from '../../src/focus.ts';
-import { getFocusTimer } from '../../src/focus-timer.ts';
+import { addDays, localDate } from '@ziyixi/task-dates';
+import { getCatalog, saveCatalog } from '../../src/catalog.ts';
+import { listFocusDays, moveFocusStep } from '../../src/focus.ts';
+import { updateFocusEntry } from '../../src/focus-entries.ts';
+import { commandFocusTimer, getFocusTimer } from '../../src/focus-timer.ts';
 import { getPlan } from '../../src/plan.ts';
 import { getTask, listTasks } from '../../src/task-read.ts';
+import { completeTask } from '../../src/task-write.ts';
 import { seedWorstWeek, WEEK_ENTRIES, WEEK_STEPS } from './focus-week.ts';
 import { measuredReads, startHarness, type Harness } from './harness.ts';
 
 const ZONE = 'America/Los_Angeles';
 const NOW = Date.parse('2030-04-15T18:00:00Z');
+const MINUTE = 60_000;
 let harness: Harness;
 beforeAll(async () => {
   harness = await startHarness();
@@ -297,3 +307,204 @@ test("a task's five dependencies and the plan read a bounded number of rows; nex
   expect(detail).not.toMatch(/TEMP B-TREE/);
   expect(plan.rowsRead).toBeLessThanOrEqual(10);
 });
+
+async function resetBudgetDb(db: D1Database) {
+  await db.batch([
+    db.prepare('DELETE FROM task_dependencies'),
+    db.prepare('DELETE FROM day_steps'),
+    db.prepare('DELETE FROM focus_entries'),
+    db.prepare('DELETE FROM task_labels'),
+    db.prepare('DELETE FROM completions'),
+    db.prepare('DELETE FROM tasks'),
+    db.prepare('DELETE FROM sections'),
+    db.prepare('DELETE FROM projects'),
+    db.prepare('DELETE FROM labels'),
+    db.prepare('DELETE FROM filters'),
+    db.prepare('DELETE FROM requests'),
+    db.prepare('DELETE FROM changes'),
+    db.prepare(
+      "UPDATE focus_timer SET state='idle',task_id=NULL,day=NULL,area=NULL,target_seconds=NULL,started_at=NULL,segment_start=NULL,paused_at=NULL,saved_seconds=0,finished_task_id=NULL,finished_seconds=NULL,revision=1 WHERE id='timer'",
+    ),
+  ]);
+}
+
+describe('catalog read budget', () => {
+  beforeAll(async () => {
+    await resetBudgetDb(harness.db);
+  });
+
+  async function addCatalogTasks(prefix: string, count: number, completed: boolean) {
+    const data = Array.from({ length: count }, (_, index) => ({
+      id: `${prefix}-${String(index)}`,
+      order: index,
+    }));
+    await harness.db
+      .prepare(
+        `INSERT INTO tasks(id,title,project_id,completed,due_date,sort_order,created_at,updated_at)
+      SELECT value->>'id','Synthetic catalog budget task','budget-project',?,CASE WHEN ?=0 THEN '2030-04-15' ELSE '' END,value->>'order',1,1 FROM json_each(?)`,
+      )
+      .bind(Number(completed), Number(completed), JSON.stringify(data))
+      .run();
+  }
+
+  test('catalog row-read budget with a personal active list and completed history', async () => {
+    await harness.db
+      .prepare(
+        "INSERT INTO projects(id,title,created_at,updated_at) VALUES('budget-project','Synthetic budget project',1,1),('empty-project','Synthetic empty project',1,1)",
+      )
+      .run();
+    await addCatalogTasks('active', 40, false);
+    await addCatalogTasks('history-before', 2000, true);
+    const measured = measuredReads(harness.db);
+    const catalog = await getCatalog(measured.db, ZONE, NOW);
+    expect(catalog.taskCounts.find((count) => count.view === 'project' && count.id === 'budget-project')?.count).toBe(
+      40,
+    );
+    expect(catalog.taskCounts.find((count) => count.view === 'project' && count.id === 'empty-project')?.count).toBe(0);
+    expect(measured.metrics.rowsWritten).toBe(0);
+    stdout.write(
+      JSON.stringify({
+        event: 'tasks_catalog_read_budget',
+        active: 40,
+        completed: 2000,
+        ...measured.metrics,
+      }) + '\n',
+    );
+  });
+
+  test('metadata-only catalog reads never scan tasks and retain the full organization', async () => {
+    const full = measuredReads(harness.db);
+    const organization = await getCatalog(full.db, ZONE, NOW);
+    const basic = measuredReads(harness.db);
+    const metadata = await getCatalog(basic.db, ZONE, NOW, false);
+    expect(metadata).toEqual({ ...organization, taskCounts: [] });
+    expect(basic.metrics.statements).toBe(4);
+    expect(basic.metrics.rowsWritten).toBe(0);
+    expect(basic.metrics.rowsRead).toBeLessThan(20);
+    stdout.write(
+      JSON.stringify({
+        event: 'tasks_catalog_metadata_budget',
+        active: 40,
+        completed: 2000,
+        ...basic.metrics,
+      }) + '\n',
+    );
+  });
+
+  test('catalog badge reads do not grow with completed label history', async () => {
+    await harness.db
+      .prepare("INSERT INTO labels(id,title,created_at,updated_at) VALUES('budget-label','Synthetic budget label',1,1)")
+      .run();
+    await harness.db.prepare("UPDATE tasks SET label_ids='[\"budget-label\"]'").run();
+    const before = measuredReads(harness.db);
+    const first = await getCatalog(before.db, ZONE, NOW);
+    expect(first.taskCounts.find((count) => count.view === 'label' && count.id === 'budget-label')?.count).toBe(40);
+    await addCatalogTasks('history-after', 2000, true);
+    await harness.db
+      .prepare("UPDATE tasks SET label_ids='[\"budget-label\"]' WHERE id LIKE 'history-after-%'")
+      .run();
+    const after = measuredReads(harness.db);
+    const second = await getCatalog(after.db, ZONE, NOW);
+    expect(second.taskCounts).toEqual(first.taskCounts);
+    stdout.write(
+      JSON.stringify({
+        event: 'tasks_catalog_history_growth',
+        active: 40,
+        beforeCompleted: 2000,
+        afterCompleted: 4000,
+        before: before.metrics,
+        after: after.metrics,
+      }) + '\n',
+    );
+    expect(after.metrics.rowsWritten).toBe(0);
+    expect(after.metrics.rowsRead).toBeLessThanOrEqual(before.metrics.rowsRead + 20);
+  });
+});
+
+describe('focus day write budget', () => {
+  beforeAll(async () => {
+    await resetBudgetDb(harness.db);
+  });
+
+  test('a busy Focus day writes fewer than 300 D1 rows', async () => {
+    // A fixed morning, so the simulated day never crosses midnight.
+    const start = Date.parse('2030-04-15T16:00:00Z');
+    const today = localDate(start, ZONE);
+    const steps = Array.from({ length: 10 }, (_, index) => `day-step-${String(index)}`);
+    await harness.db
+      .prepare(
+        "INSERT INTO tasks(id,title,sort_order,created_at,updated_at) VALUES('day-outcome','Synthetic outcome',1,1,1)",
+      )
+      .run();
+    await harness.db
+      .prepare(
+        `INSERT INTO tasks(id,title,parent_id,kind,duration_minutes,sort_order,created_at,updated_at)
+        SELECT value,'Synthetic step '||value,'day-outcome','step',30,1,1,1 FROM json_each(?)`,
+      )
+      .bind(JSON.stringify(steps))
+      .run();
+    const { db, metrics } = measuredReads(harness.db);
+    const move = (taskId: string, fields: { sourceDay?: string; destinationDay?: string; beforeTaskId?: string }) =>
+      moveFocusStep(db, create(MoveFocusStepRequestSchema, { requestId: randomUUID(), taskId, ...fields }), start);
+    for (const step of steps) await move(step, { destinationDay: today });
+    const added = { ...metrics };
+    const tomorrow = addDays(today, 1);
+    await move('day-step-9', { sourceDay: today, destinationDay: today, beforeTaskId: 'day-step-0' });
+    await move('day-step-8', { sourceDay: today, destinationDay: today, beforeTaskId: 'day-step-1' });
+    await move('day-step-7', { sourceDay: today, destinationDay: today, beforeTaskId: 'day-step-2' });
+    await move('day-step-6', { sourceDay: today, destinationDay: tomorrow });
+    await move('day-step-5', { sourceDay: today, destinationDay: tomorrow });
+    const moved = { ...metrics };
+    let etag = '1';
+    let now = start;
+    const command = async (action: Action, taskId = '') => {
+      const answer = await commandFocusTimer(
+        db,
+        create(CommandFocusTimerRequestSchema, { name: 'focusTimer', requestId: randomUUID(), etag, action, taskId }),
+        now,
+        ZONE,
+      );
+      etag = answer.timer?.etag ?? '';
+    };
+    // Six of the steps still queued today.
+    for (const step of ['day-step-0', 'day-step-1', 'day-step-2', 'day-step-3', 'day-step-4', 'day-step-7']) {
+      await command(Action.START, step);
+      now += 20 * MINUTE;
+      await command(Action.PAUSE);
+      now += 5 * MINUTE;
+      await command(Action.RESUME);
+      now += 10 * MINUTE;
+      await completeTask(
+        db,
+        create(CompleteTaskRequestSchema, { name: `tasks/${step}`, etag: '1', requestId: randomUUID() }),
+        now,
+        ZONE,
+      );
+      // The completion settled the session, so the timer's etag moved on.
+      etag = String(Number(etag) + 1);
+    }
+    const timed = { ...metrics };
+    const read = await listFocusDays(
+      harness.db,
+      create(ListFocusDaysRequestSchema, { startDay: today, endDay: today }),
+      ZONE,
+      now,
+    );
+    expect(read.entries).toHaveLength(6);
+    expect(read.days[0]?.doneTaskIds).toHaveLength(6);
+    for (const entry of read.entries.slice(0, 3))
+      await updateFocusEntry(
+        db,
+        create(UpdateFocusEntryRequestSchema, {
+          requestId: randomUUID(),
+          etag: entry.etag,
+          focusEntry: create(FocusEntrySchema, { name: entry.name, seconds: 40 * 60 }),
+          updateMask: { paths: ['seconds'] },
+        }),
+        now,
+      );
+    stdout.write(JSON.stringify({ event: 'tasks_focus_day_writes', added, moved, timed, total: metrics }) + '\n');
+    expect(metrics.rowsWritten).toBeLessThan(300);
+  });
+});
+

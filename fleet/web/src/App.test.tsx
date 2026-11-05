@@ -194,4 +194,27 @@ describe('Fleet owner page', () => {
     expect(screen.getByRole('link', { name: '资源' })).toHaveAttribute('aria-current', 'page');
     expect(screen.queryByRole('heading', { name: 'Newsletter' })).toBeNull();
   });
+  it('renders recent state change entries when view.changes is non-empty', async () => {
+    show({
+      ...BASE,
+      freshness: 'fresh',
+      report: fixture,
+      receive_time: '2026-10-03T00:00:00Z',
+      changes: [
+        { observation_time: '2026-10-03T00:00:00Z', code: 'resolved_daemon_ssh_failed' },
+        { observation_time: '2026-10-02T23:55:00Z', code: 'daemon_ssh_failed' },
+        { observation_time: '2026-10-02T23:50:00Z', code: 'first_receipt' },
+      ],
+    });
+    const heading = await screen.findByRole('heading', { name: '最近状态变化' });
+    const section = heading.closest('section') as HTMLElement;
+    const items = within(section).getAllByRole('listitem');
+    expect(items).toHaveLength(3);
+    expect(items[0]).toHaveTextContent('resolved_daemon_ssh_failed');
+    expect(items[0]?.querySelector('time')).toHaveAttribute('datetime', '2026-10-03T00:00:00Z');
+    expect(items[1]).toHaveTextContent('daemon_ssh_failed');
+    expect(items[2]).toHaveTextContent('first_receipt');
+    expect(within(section).queryByText('暂无记录')).toBeNull();
+  });
 });
+

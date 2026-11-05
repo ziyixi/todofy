@@ -7,7 +7,7 @@ import type { Dropbox, Space } from '../src/dropbox.ts';
 import { handlers, type OwnerContext } from '../src/owner.ts';
 import type { Store } from '../src/store.ts';
 import { DAY_MS, outcomeOf, Usage } from '../src/usage.ts';
-import { sqliteStore } from './sqlite.ts';
+import { seedNamespaceAndKey, setupConnected, sqliteStore } from './sqlite.ts';
 
 const NOW = Date.parse('2026-11-03T12:00:00Z');
 const WRITER = '00000000-0000-4000-8000-000000000001';
@@ -20,9 +20,9 @@ const refused = (reason: string, httpStatus: number, headers: Record<string, str
 function fixture() {
   const { store, database } = sqliteStore();
   // A connection from before this client's records, so successes are kept.
-  store.set('connection', { appKey: 'syntheticappkey', refreshToken: 'synthetic-private-refresh', generation: 'synthetic', connectTime: NOW - 200 * DAY_MS });
+  setupConnected(store, { connectTime: NOW - 200 * DAY_MS });
   for (const [id, namespace, access] of [[WRITER, 'synthetic', 2], [READER, 'synthetic', 1], [OTHER, 'other', 2]] as const) {
-    store.addClient({ id, label: 'Synthetic ' + id.slice(-1), namespace, access, token_sha256: id.replaceAll('-', '').padEnd(64, 'a'), create_time: NOW - DAY_MS, revoked: 0, last_use_time: 0 });
+    seedNamespaceAndKey({ id, label: 'Synthetic ' + id.slice(-1), namespace, access, create_time: NOW - DAY_MS }, store);
   }
   const rows = (query: string) => database.prepare(query).all() as Record<string, unknown>[];
   return { store, rows, usage: new Usage() };
@@ -99,7 +99,7 @@ describe('in-memory counters', () => {
 
   it('keeps successes counted before a reconnect or after a disconnect off the current connection', () => {
     const { store, usage } = fixture();
-    store.set('connection', { appKey: 'syntheticappkey', refreshToken: 'synthetic-private-refresh', generation: 'synthetic-new', connectTime: NOW + 10 });
+    setupConnected(store, { generation: 'synthetic-new', connectTime: NOW + 10 });
     usage.succeeded(WRITER, 'put', { objects: 1, uploadBytes: 3 }, NOW);
     usage.flush(store, transaction, NOW + 20);
     expect([store.get('last_success'), store.get('last_write_success')]).toEqual([null, null]);
@@ -158,7 +158,7 @@ describe('overview', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(NOW);
     const { store, usage } = fixture();
-    store.set('connection', { appKey: 'syntheticappkey', refreshToken: 'synthetic-private-refresh', generation: 'synthetic', connectTime: NOW - 2 * DAY_MS });
+    setupConnected(store, { connectTime: NOW - 2 * DAY_MS });
     store.set('app_key', 'syntheticappkey');
     store.set('provider_error', { reason: 'UNAVAILABLE', time: NOW - DAY_MS });
     usage.succeeded(WRITER, 'put', { objects: 1, uploadBytes: 3 }, NOW - 14 * DAY_MS);
@@ -220,7 +220,7 @@ describe('overview', () => {
     expect(bounded.usage_truncated).toBeUndefined();
     const more = ['00000000-0000-4000-8000-000000000004', '00000000-0000-4000-8000-000000000005'];
     for (const [index, id] of more.entries()) {
-      store.addClient({ id, label: 'Synthetic more', namespace: 'more', access: 2, token_sha256: String(index).repeat(64), create_time: NOW, revoked: 0, last_use_time: 0 });
+      seedNamespaceAndKey({ id, label: 'Synthetic more', namespace: 'more', token_sha256: String(index).repeat(64), create_time: NOW }, store);
     }
     fill(more);
     const truncated = await overview(store);

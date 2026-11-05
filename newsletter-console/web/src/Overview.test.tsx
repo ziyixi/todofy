@@ -1,15 +1,8 @@
 import { cleanup, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { RUNNING_REFETCH_MS } from './api.ts';
 import { dayMark } from './Overview.tsx';
 import { fixture, LATEST_RUN, serve, show, world } from './test/world.tsx';
-
-afterEach(() => {
-  cleanup();
-  vi.useRealTimers();
-  vi.unstubAllGlobals();
-  window.location.hash = '';
-});
 
 const section = async (name: string) => within(await screen.findByRole('region', { name }));
 

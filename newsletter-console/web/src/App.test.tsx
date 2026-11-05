@@ -1,19 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cleanup, fireEvent, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { RpcStatusError } from '@ziyixi/proto/http-client';
 import { parseStatus } from '@ziyixi/proto/rpc-status';
 import { linkOf } from './App.tsx';
 import { routeOf } from './route.ts';
 import { BLOCKED_RUN, EDITION, fixture, serve, show, world } from './test/world.tsx';
-
-afterEach(() => {
-  cleanup();
-  vi.unstubAllGlobals();
-  vi.restoreAllMocks();
-  window.location.hash = '';
-});
 
 /** A Status answer with this ErrorInfo reason, as the Worker writes it. */
 function status(httpStatus: number, reason: string): () => Response {

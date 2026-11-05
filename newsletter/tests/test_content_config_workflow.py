@@ -852,3 +852,29 @@ def test_image_job_listing_is_paginated_and_requires_exact_job(release):
 
     api.request.side_effect = request
     assert release.compatible_engine(api, NEW) == NEW
+
+
+def test_direct_config_only_difference_and_already_published_helpers(release):
+    api = api_fixture()
+    assert release.config_only_difference(api, NEW, NEW) is True
+    assert release.config_only_difference(api, OLD, NEW) is True
+
+    def raise_oversize(*args, **kwargs):
+        raise release.ResponseTooLargeError("too large")
+
+    api.request.side_effect = raise_oversize
+    assert release.config_only_difference(api, OLD, NEW) is False
+
+    pub_api = publisher(published=encoded(PREVIOUS))
+    assert (
+        release.already_published(pub_api, PARENT, json.dumps(BUNDLE).encode())
+        is True
+    )
+    assert (
+        release.already_published(
+            pub_api,
+            PARENT,
+            json.dumps({**BUNDLE, "synthetic": "changed"}).encode(),
+        )
+        is False
+    )

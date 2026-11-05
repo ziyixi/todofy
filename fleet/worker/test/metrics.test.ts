@@ -1,9 +1,39 @@
+import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import type { NodeMetrics } from '@ziyixi/proto/fleet/telemetry/v1/host_report_wire';
 import legacy from '../../../contracts/fleet-report-v1/fixtures/healthy.json';
 import fixture from '../../../contracts/fleet-report-v1/fixtures/node_metrics.json';
-import { derive, MAX_RATE_GAP_SECONDS, METRICS, orderKeys, RANGES, TIERS, validMetrics } from '../src/metrics.ts';
+import { derive, MAX_NODES, MAX_RATE_GAP_SECONDS, METRICS, MetricStore, orderKeys, RANGES, TIERS, validMetrics } from '../src/metrics.ts';
 import { parseReport, reportCodes } from '../src/report.ts';
+
+function memorySql(db = new DatabaseSync(':memory:')): { db: DatabaseSync; sql: SqlStorage } {
+  const sql = {
+    exec<T extends Record<string, SqlStorageValue>>(query: string, ...bindings: unknown[]) {
+      const trimmed = query.trim();
+      const stmt = db.prepare(trimmed);
+      const params = bindings as (string | number | bigint | Uint8Array | null)[];
+      if (/^(SELECT|PRAGMA|WITH)\b/i.test(trimmed)) {
+        const rows = stmt.all(...params) as unknown as T[];
+        return {
+          toArray: () => rows,
+          one: () => {
+            if (rows.length !== 1) throw new Error(`Expected 1 row, got ${rows.length}`);
+            return rows[0]!;
+          },
+          [Symbol.iterator]: () => rows[Symbol.iterator](),
+        };
+      }
+      stmt.run(...params);
+      const empty: T[] = [];
+      return {
+        toArray: () => empty,
+        one: () => { throw new Error('Expected 1 row'); },
+        [Symbol.iterator]: () => empty[Symbol.iterator](),
+      };
+    },
+  } as unknown as SqlStorage;
+  return { db, sql };
+}
 
 const AT = Date.parse(fixture.observation_time);
 function must<T>(value: T | undefined): T {
@@ -129,6 +159,8 @@ describe('samples derived from counters', () => {
 });
 
 describe('retention and range budgets', () => {
+  const DAY = 24 * 60 * 60_000;
+
   it('reads at most 730 rows and answers at most 300 points per series for every range', () => {
     for (const range of Object.values(RANGES)) {
       const tier = TIERS.find((item) => item.seconds === range.tier);
@@ -139,4 +171,43 @@ describe('retention and range budgets', () => {
       expect(range.step % range.tier).toBe(0);
     }
   });
+
+  it('retains 730 days in SQLite and summarizes two_years and half_year within point budgets', () => {
+    const { db, sql } = memorySql();
+    const store = new MetricStore(sql);
+    const now = Date.parse('2026-10-03T00:00:00Z');
+    for (let day = 729; day >= 0; day -= 1) {
+      store.ingest('vps', base, now - day * DAY, now - day * DAY);
+    }
+    const rows = db.prepare('SELECT resolution, COUNT(*) AS n FROM metric_points GROUP BY resolution').all() as { resolution: number; n: number }[];
+    expect(rows.find((row) => row.resolution === 86_400)?.n).toBeGreaterThanOrEqual(730);
+
+    const twoYears = store.summarize('vps', 'two_years', now + DAY, []);
+    expect(twoYears).not.toBeNull();
+    for (const series of twoYears!.series) {
+      expect(series.points.length).toBeLessThanOrEqual(244);
+    }
+    expect(twoYears!.series.length).toBe(3 + 4 + 2 * 3 + 2 * 3);
+
+    const halfYear = store.summarize('vps', 'half_year', now + DAY, ['memory_used_bytes']);
+    expect(halfYear?.series[0]?.points).toHaveLength(180);
+  });
+
+  it('caps tracked nodes at MAX_NODES and prunes nodes silent beyond the 730-day retention tier', () => {
+    const { sql } = memorySql();
+    const store = new MetricStore(sql);
+    const now = Date.parse('2026-10-03T00:00:00Z');
+    for (let index = 0; index < MAX_NODES + 2; index += 1) {
+      store.ingest(`node-${String(index).padStart(2, '0')}`, base, now, now);
+    }
+    expect(store.nodes()).toHaveLength(MAX_NODES);
+    expect(store.node(`node-${String(MAX_NODES + 1).padStart(2, '0')}`)).toBeNull();
+    expect(store.summarize('unknown-node', 'day', now, [])).toBeNull();
+
+    // Advance beyond 730 days so the silent nodes are pruned when a fresh node reports.
+    const future = now + 731 * DAY;
+    store.ingest('node-00', base, future, future);
+    expect(store.nodes().map((item) => item.name)).toEqual(['nodes/node-00']);
+  });
 });
+

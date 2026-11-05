@@ -16,10 +16,10 @@ import type {
   PlusData,
   TimerSnapshot,
 } from "../src/model";
+import { stubPictureInPicture } from "./setup";
 
-// Document Picture-in-Picture is stubbed: jsdom has none. Each window is a fake whose document is another
-// realm's (an iframe's, as a PiP window's is), whose timers are its own, and whose first close() fires
-// pagehide as Chrome's does.
+// Document Picture-in-Picture is stubbed in setup.ts: each window's document is an iframe's,
+// whose timers are its own, and whose first close() fires pagehide as Chrome's does.
 type Timer = NonNullable<FocusState["timer"]>;
 const NOW = Date.parse("2026-10-17T12:00:00Z");
 
@@ -30,51 +30,6 @@ afterEach(() => {
     .documentPictureInPicture;
   document.querySelectorAll("iframe").forEach((frame) => frame.remove());
 });
-
-function fakeWindow() {
-  const frame = document.createElement("iframe");
-  document.body.append(frame);
-  const events = new EventTarget();
-  const timers = new Map<number, () => void>();
-  let next = 0;
-  const pip = {
-    closed: false,
-    document: frame.contentDocument!,
-    addEventListener: events.addEventListener.bind(events),
-    removeEventListener: events.removeEventListener.bind(events),
-    setTimeout: vi.fn((callback: () => void) => {
-      timers.set(++next, callback);
-      return next;
-    }),
-    clearTimeout: vi.fn((id: number) => timers.delete(id)),
-    close() {
-      if (pip.closed) return;
-      pip.closed = true;
-      events.dispatchEvent(new Event("pagehide"));
-    },
-    /** Runs the timers it holds now, as its own clock would. */
-    tick() {
-      const due = [...timers.values()];
-      timers.clear();
-      due.forEach((callback) => callback());
-    },
-  };
-  return pip;
-}
-type Fake = ReturnType<typeof fakeWindow>;
-/** Chrome's API: each request opens a new window. */
-function stubPictureInPicture() {
-  const windows: Fake[] = [];
-  const requestWindow = vi.fn(async () => {
-    windows.push(fakeWindow());
-    return windows.at(-1)!;
-  });
-  Object.defineProperty(window, "documentPictureInPicture", {
-    value: { requestWindow },
-    configurable: true,
-  });
-  return { windows, requestWindow };
-}
 
 const timer = (value: Partial<Timer> = {}): Timer => ({
   taskId: "step",

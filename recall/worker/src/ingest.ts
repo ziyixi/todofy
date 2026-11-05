@@ -74,7 +74,7 @@ interface Envelope {
   readonly diagnostic: CaptureDiagnostic | undefined;
 }
 
-interface VisitPlan {
+export interface VisitPlan {
   readonly kind: 'visit';
   /** Whether its page keeps its text, is recorded without it or by its site alone. */
   readonly level: Exclude<DenyLevel, 'never'>;
@@ -94,7 +94,7 @@ interface VisitPlan {
   readonly serverStartMs: number;
 }
 
-interface DocumentPlan {
+export interface DocumentPlan {
   readonly kind: 'document';
   readonly id: string;
   readonly visitId: string;
@@ -114,12 +114,12 @@ interface DocumentPlan {
   readonly screenshot: { readonly bytes: Uint8Array; readonly sha256: string; readonly path: string; readonly width: number; readonly height: number; readonly mediaType: 'image/webp' | 'image/jpeg' } | null;
 }
 
-type Plan = VisitPlan | DocumentPlan;
+export type Plan = VisitPlan | DocumentPlan;
 /**
  * What an item comes to before the transaction. A skip that `captured` is a capture of a page that keeps its text,
  * skipped because recall has that text already (the page's latest, or its capture of that day): the day still had one.
  */
-type Outcome =
+export type Outcome =
   | { readonly kind: 'skip'; readonly captured?: boolean }
   | { readonly kind: 'reject'; readonly reason: RejectReason }
   | { readonly kind: 'plan'; readonly plan: Plan };
@@ -295,7 +295,7 @@ function renders(change: () => Change): boolean {
 }
 
 /** What reading an item needs: the batch, the owner's patterns, recall's own hosts, and the device's clock skew. */
-interface Planning {
+export interface Planning {
   readonly envelope: Envelope;
   readonly patterns: OwnerPatterns;
   readonly ownHosts: readonly string[];
@@ -303,7 +303,7 @@ interface Planning {
   readonly skewMs: number;
 }
 
-async function planVisit(item: VisitItem, { envelope, patterns, ownHosts, skewMs }: Planning): Promise<Outcome> {
+export async function planVisit(item: VisitItem, { envelope, patterns, ownHosts, skewMs }: Planning): Promise<Outcome> {
   const latest = envelope.sentMs + ITEM_CLOCK_LEEWAY_MS;
   const spans: [number, number][] = [];
   for (const span of item.focusSpans) {
@@ -348,7 +348,7 @@ async function planVisit(item: VisitItem, { envelope, patterns, ownHosts, skewMs
   return renders(() => visitChange({ ...row, page_id: plan.pageId, host_key: hostKey(plan.site) })) ? { kind: 'plan', plan } : INVALID;
 }
 
-async function planDocument(item: DocumentItem, { envelope, patterns, ownHosts, skewMs }: Planning): Promise<Outcome> {
+export async function planDocument(item: DocumentItem, { envelope, patterns, ownHosts, skewMs }: Planning): Promise<Outcome> {
   if (item.captureTime === undefined) return INVALID;
   const captureMs = timestampMs(item.captureTime);
   const parsed = parseUrl(item.url);
@@ -392,7 +392,7 @@ async function planDocument(item: DocumentItem, { envelope, patterns, ownHosts, 
  * extension's item (an optional field, phase 2's `star`), which waits in the extension's outbox for a Worker that
  * reads it instead of being lost.
  */
-function fromNewerBuild(raw: unknown): boolean {
+export function fromNewerBuild(raw: unknown): boolean {
   try {
     return fromWire(IngestItemSchema, raw).unrecognized.length > 0;
   } catch {
@@ -547,7 +547,7 @@ function applyVisit(store: Store, totals: CounterDeltas, plan: VisitPlan, nextSe
 }
 
 /** Stable IDs are immutable; only consecutive identical snapshots of the same visit are redundant. */
-function documentSkip(store: Store, plan: DocumentPlan, compareLatest = true): Applied | null {
+export function documentSkip(store: Store, plan: DocumentPlan, compareLatest = true): Applied | null {
   const existing = store.one<{ page_rowid: number; visit: string; text_sha256: string; screenshot_sha256: string }>(
     `SELECT page_rowid, visit, text_sha256, screenshot_sha256 FROM documents WHERE id = ?`, plan.id,
   );
@@ -612,7 +612,7 @@ function overBudget(ctx: IngestContext, day: string): MachineAnswer {
 }
 
 /** Check immutable IDs before any R2 put, including duplicate IDs inside the same batch. */
-function skipKnownTexts(store: Store, entries: readonly { outcome: Outcome }[]): void {
+export function skipKnownTexts(store: Store, entries: readonly { outcome: Outcome }[]): void {
   const seen = new Map<string, DocumentPlan>();
   for (const entry of entries) {
     if (entry.outcome.kind !== 'plan' || entry.outcome.plan.kind !== 'document') continue;

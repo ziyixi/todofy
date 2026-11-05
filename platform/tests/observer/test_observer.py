@@ -133,6 +133,49 @@ class ObserverTests(unittest.TestCase):
                 {"FLEET_REPORT_URL": "http://example.com/api/internal/fleet/v1/receipt"}
             )
 
+    def test_expired_pending_receipt_discards_stale_observation_and_sequence_exhausts(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "state.json"
+            stale_time = (
+                dt.datetime.now(dt.UTC) - dt.timedelta(seconds=541)
+            ).isoformat()
+            stale_pending = json.dumps(
+                {
+                    "sequence": 4,
+                    "receipt_id": "stale",
+                    "observation_time": stale_time,
+                }
+            )
+            path.write_text(json.dumps({"sequence": 4, "pending": stale_pending}))
+            with (
+                patch.object(
+                    state,
+                    "observe",
+                    side_effect=lambda _env, sequence: self.report(sequence),
+                ) as observe,
+                patch.object(
+                    state,
+                    "_request",
+                    return_value=(
+                        200,
+                        {
+                            "version": "fleet-receipt-v1",
+                            "accepted": True,
+                            "sequence": 5,
+                        },
+                    ),
+                ),
+            ):
+                state.run(self.environment(directory))
+                observe.assert_called_once_with(self.environment(directory), 5)
+            self.assertEqual(json.loads(path.read_text()), {"sequence": 5})
+
+            path.write_text(json.dumps({"sequence": 2147483647}))
+            with self.assertRaisesRegex(ObserverError, "sequence_exhausted"):
+                state.run(self.environment(directory))
+
     def test_monitor_reads_only_its_bounded_response_contract(self):
         valid = {
             "version": 1,

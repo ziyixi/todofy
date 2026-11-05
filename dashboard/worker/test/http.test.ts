@@ -5,14 +5,16 @@
  * against the real HomeState.
  */
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { OverrideGuardResponseSchema, RunCanaryResponseSchema } from '@ziyixi/proto/dashboard/ui/v1/dashboard_ui_service_pb';
+import { OverrideGuardResponseSchema, RequestWebsiteSyncResponseSchema, RunCanaryResponseSchema } from '@ziyixi/proto/dashboard/ui/v1/dashboard_ui_service_pb';
+import { AttentionItemSchema } from '@ziyixi/proto/dashboard/ui/v1/attention_pb';
 import { parseStatus } from '@ziyixi/proto/rpc-status';
-import type { CanaryRun, CsrfResponse, GuardView, HealthResponse, LegacyApiError, Registry } from '../src/api-types.ts';
+import type { AttentionItem, CanaryRun, CsrfResponse, GuardView, HealthResponse, LegacyApiError, Registry } from '../src/api-types.ts';
 import { runView, newRun } from '../src/canary.ts';
 import type { Env } from '../src/env.ts';
 import worker from '../src/index.ts';
-import { REASONS } from '../src/api.ts';
+import { handlers, REASONS } from '../src/api.ts';
 import { API_DOMAIN, LEGACY_CODES, LEGACY_RELOAD_CODE, legacyCode, RELOAD_MESSAGE } from '../src/http.ts';
+import { callWebsiteRequest, callWebsiteSyncStatus, unconfirmedWebsiteRequest } from '../src/website-sync.ts';
 import { accessClaims, testIssuer, type TestIssuer } from './jwt.ts';
 import { expectWire, VIEW_SCHEMAS } from './wire-conformance.ts';
 
@@ -34,8 +36,22 @@ const PATHS = {
   ops: '/api/v1/opsView',
   guard: '/api/v1/guard:override',
   canary: '/api/v1/canaries/mail-todofy:run',
+  websiteSync: '/api/v1/websiteSync:request',
+  dismissAttention: '/api/v1/attentionItems/item-1:dismiss',
+  restoreAttention: '/api/v1/attentionItems/item-1:restore',
   csrf: '/api/csrf',
 } as const;
+
+const ATTENTION_ITEM: AttentionItem = {
+  name: 'attentionItems/item-1',
+  etag: 'a1-00000000-0000-4000-8000-000000000001',
+  source: 'newsletter',
+  code: 'delivery_failed',
+  severity: 'warning',
+  since: '2026-09-29T15:00:00Z',
+  metrics: {},
+  target: { view: 'ops', entry: 'newsletter' },
+};
 
 /** Worker handlers receive requests with incoming cf properties; tests have none. */
 const incoming = (...args: ConstructorParameters<typeof Request>): Request<unknown, IncomingRequestCfProperties> =>
@@ -80,7 +96,17 @@ interface HomeCalls {
   at: (number | null)[];
 }
 
-function makeEnv(overrides: Partial<Env> = {}, answers: { startCanary?: unknown; guard?: unknown; view?: () => unknown } = {}) {
+function makeEnv(
+  overrides: Partial<Env> = {},
+  answers: {
+    startCanary?: unknown;
+    guard?: unknown;
+    websiteSync?: unknown | (() => unknown);
+    dismissAttention?: unknown | (() => unknown);
+    restoreAttention?: unknown | (() => unknown);
+    view?: () => unknown;
+  } = {},
+) {
   const calls: HomeCalls = { views: [], startCanary: [], guard: [], at: [] };
   const stub = {
     startCanary(at: number | null, requestId: string | null) {
@@ -93,6 +119,26 @@ function makeEnv(overrides: Partial<Env> = {}, answers: { startCanary?: unknown;
       calls.at.push(at);
       return Promise.resolve(answers.guard ?? { ok: true, guard: guardOf(level) });
     },
+    requestWebsiteSync: vi.fn((requestId: string, at: number | null) => {
+      calls.at.push(at);
+      if (typeof answers.websiteSync === 'function') return Promise.resolve(answers.websiteSync());
+      return Promise.resolve(
+        answers.websiteSync ?? {
+          ok: true,
+          request: { request_id: requestId, state: 'accepted', run_id: '123', run_url: 'https://github.com/ziyixi/website/actions/runs/123' },
+        },
+      );
+    }),
+    dismissAttention: vi.fn((_name: string, _etag: string, _requestId: string, at: number | null) => {
+      calls.at.push(at);
+      if (typeof answers.dismissAttention === 'function') return Promise.resolve(answers.dismissAttention());
+      return Promise.resolve(answers.dismissAttention ?? { ok: true, item: { ...ATTENTION_ITEM, dismissed_at: '2026-09-29T16:00:00Z' } });
+    }),
+    restoreAttention: vi.fn((_name: string, _etag: string, _requestId: string, at: number | null) => {
+      calls.at.push(at);
+      if (typeof answers.restoreAttention === 'function') return Promise.resolve(answers.restoreAttention());
+      return Promise.resolve(answers.restoreAttention ?? { ok: true, item: ATTENTION_ITEM });
+    }),
     tick: vi.fn(() => Promise.resolve({ ran: true })),
     view: vi.fn((view: string, refresh: boolean, ifNoneMatch: string | null, at: number | null) => {
       calls.views.push(`${view}:${String(refresh)}`);
@@ -680,6 +726,129 @@ describe('DashboardUiService', () => {
     const refreshed = await mutate(env, PATHS.refreshHome, {}, { headers: { 'if-none-match': '"7"' } });
     expect(refreshed.status).toBe(200);
   });
+
+  it('routes requestWebsiteSync, dismissAttention, and restoreAttention and maps their error outcomes', async () => {
+    const { env, stub } = makeEnv();
+    await expect(
+      handlers.requestWebsiteSync({ name: 'other', requestId: REQUEST_ID } as never, {
+        request: incoming(`https://${HOST}${PATHS.websiteSync}`),
+        env,
+        at: null,
+      }),
+    ).rejects.toMatchObject({ reason: 'NOT_FOUND' });
+
+    const syncOk = await mutate(env, PATHS.websiteSync, { request_id: REQUEST_ID });
+    expect(syncOk.status).toBe(200);
+    expectWire(RequestWebsiteSyncResponseSchema, await syncOk.text());
+    expect(stub.requestWebsiteSync).toHaveBeenCalledWith(REQUEST_ID, null);
+
+    const syncReused = makeEnv({}, { websiteSync: { ok: false, code: 'request_id_reused' } });
+    expect(await reasonOf(await mutate(syncReused.env, PATHS.websiteSync, { request_id: REQUEST_ID }))).toBe('BAD_REQUEST');
+
+    const syncDown = makeEnv({}, { websiteSync: () => { throw new Error('do down'); } });
+    expect(await reasonOf(await mutate(syncDown.env, PATHS.websiteSync, { request_id: REQUEST_ID }))).toBe('UNAVAILABLE');
+
+    const body = { etag: ATTENTION_ITEM.etag, request_id: REQUEST_ID };
+    const dismissed = await mutate(env, PATHS.dismissAttention, body);
+    expect(dismissed.status).toBe(200);
+    expectWire(AttentionItemSchema, await dismissed.text());
+    const restored = await mutate(env, PATHS.restoreAttention, body);
+    expect(restored.status).toBe(200);
+    expectWire(AttentionItemSchema, await restored.text());
+
+    for (const path of [PATHS.dismissAttention, PATHS.restoreAttention] as const) {
+      const reused = makeEnv({}, {
+        dismissAttention: { ok: false, code: 'request_id_reused' },
+        restoreAttention: { ok: false, code: 'request_id_reused' },
+      });
+      const r1 = await mutate(reused.env, path, body);
+      expect(r1.status).toBe(400);
+      expect(await reasonOf(r1)).toBe('BAD_REQUEST');
+
+      const changed = makeEnv({}, {
+        dismissAttention: { ok: false, code: 'attention_changed' },
+        restoreAttention: { ok: false, code: 'attention_changed' },
+      });
+      const r2 = await mutate(changed.env, path, body);
+      expect(r2.status).toBe(409);
+      expect(await reasonOf(r2)).toBe('ATTENTION_CHANGED');
+
+      const down = makeEnv({}, {
+        dismissAttention: () => { throw new Error('do down'); },
+        restoreAttention: () => { throw new Error('do down'); },
+      });
+      const r3 = await mutate(down.env, path, body);
+      expect(r3.status).toBe(503);
+      expect(await reasonOf(r3)).toBe('UNAVAILABLE');
+    }
+  });
+});
+
+describe('website-sync client', () => {
+  it('validates callWebsiteRequest, callWebsiteSyncStatus, and unconfirmedWebsiteRequest', async () => {
+    const emptyEnv = {} as unknown as Env;
+    expect(await callWebsiteRequest(emptyEnv, REQUEST_ID, false)).toEqual({ ok: false, code: 'unavailable' });
+    expect(await callWebsiteSyncStatus(emptyEnv)).toEqual({ ok: false, code: 'unavailable' });
+    expect(unconfirmedWebsiteRequest(REQUEST_ID)).toEqual({
+      request_id: REQUEST_ID,
+      state: 'unconfirmed',
+      error_code: 'dispatch_unconfirmed',
+    });
+    expect(unconfirmedWebsiteRequest(REQUEST_ID, 'timeout')).toEqual({
+      request_id: REQUEST_ID,
+      state: 'unconfirmed',
+      error_code: 'timeout',
+    });
+
+    const requestSync = vi.fn();
+    const getSyncRequest = vi.fn();
+    const getSyncStatus = vi.fn();
+    const syncEnv = { WEBSITE_SYNC: { requestSync, getSyncRequest, getSyncStatus } } as unknown as Env;
+
+    // Accepted with both run_id and run_url succeeds via requestSync (lookup=false).
+    const accepted = {
+      request_id: REQUEST_ID,
+      state: 'accepted' as const,
+      run_id: '42',
+      run_url: 'https://github.com/ziyixi/website/actions/runs/42',
+    };
+    requestSync.mockResolvedValueOnce(accepted);
+    expect(await callWebsiteRequest(syncEnv, REQUEST_ID, false)).toEqual({ ok: true, value: accepted });
+    expect(requestSync).toHaveBeenCalledTimes(1);
+    expect(getSyncRequest).not.toHaveBeenCalled();
+
+    // Lookup=true calls getSyncRequest; rejected state does not require run_id/run_url.
+    const rejected = { request_id: REQUEST_ID, state: 'rejected' as const, error_code: 'cooldown' };
+    getSyncRequest.mockResolvedValueOnce(rejected);
+    expect(await callWebsiteRequest(syncEnv, REQUEST_ID, true)).toEqual({ ok: true, value: rejected });
+    expect(getSyncRequest).toHaveBeenCalledTimes(1);
+
+    // Accepted without run_id or run_url returns null from conform callback -> invalid_response.
+    for (const invalidAccepted of [
+      { request_id: REQUEST_ID, state: 'accepted' },
+      { request_id: REQUEST_ID, state: 'accepted', run_id: '42' },
+      { request_id: REQUEST_ID, state: 'accepted', run_url: 'https://github.com/ziyixi/website/actions/runs/42' },
+      { request_id: '11111111-2222-4333-8444-555555555555', state: 'accepted', run_id: '42', run_url: 'https://github.com/ziyixi/website/actions/runs/42' },
+    ]) {
+      requestSync.mockResolvedValueOnce(invalidAccepted);
+      expect(await callWebsiteRequest(syncEnv, REQUEST_ID, false)).toEqual({ ok: false, code: 'invalid_response' });
+    }
+
+    const status = {
+      checked_at: '2026-09-29T16:00:00Z',
+      last_run: {
+        run_id: '42',
+        run_url: 'https://github.com/ziyixi/website/actions/runs/42',
+        status: 'completed',
+        conclusion: 'success',
+        event: 'workflow_dispatch',
+        created_at: '2026-09-29T15:55:00Z',
+        updated_at: '2026-09-29T15:58:00Z',
+      },
+    };
+    getSyncStatus.mockResolvedValueOnce(status);
+    expect(await callWebsiteSyncStatus(syncEnv)).toEqual({ ok: true, value: status });
+  });
 });
 
 describe('the cron handler', () => {
@@ -689,3 +858,4 @@ describe('the cron handler', () => {
     expect(stub.tick).toHaveBeenCalledWith(1_790_000_000_000);
   });
 });
+

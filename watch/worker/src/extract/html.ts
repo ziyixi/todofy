@@ -69,7 +69,7 @@ export const HEAD_CONTENT = new Set(['base', 'link', 'meta', 'noscript', 'script
 const UNSTABLE_NAME = /\d{3,}|(?=[a-z0-9]*\d)(?=[a-z0-9]*[a-z])[a-z0-9]{8,}|^[a-z]{1,4}-(?=[a-z0-9]*\d)[a-z0-9]{4,}$|__|--/i;
 const SELECTOR_MAX_CHARS = 200;
 
-interface Frame {
+export interface Frame {
   readonly tag: string;
   readonly id: string;
   readonly parent: Frame | null;

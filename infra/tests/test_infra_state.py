@@ -211,7 +211,49 @@ def fake_fetch(path):
     raise infra_state.Refused("Cloudflare API HTTP 401 for a GET")
 
 
-class Inputs(unittest.TestCase):
+class InfraTestCase(unittest.TestCase):
+    """Shared base fixture for infra_state and bootstrap_state test classes."""
+
+    def summary(self, document):
+        return infra_state.summarize(document)[0]
+
+    def assert_clean(self, text):
+        cleaned = "\n".join(line for line in text.splitlines() if not line.startswith("::add-mask::"))
+        for secret in SECRETS + ("raw output",):
+            self.assertNotIn(secret, cleaned)
+
+    @staticmethod
+    def bucket_s3(bucket: dict, requests: list):
+        def s3(method, base, path, credentials, payload=b"", extra=None, query=None):
+            key = path.split("/", 1)[1]
+            requests.append((method, key, dict(extra or {})))
+            if method == "PUT":
+                if (extra or {}).get("If-None-Match") == "*" and key in bucket:
+                    return 412, b""
+                bucket[key] = payload
+                return 200, b""
+            return (200, bucket[key]) if key in bucket else (404, b"")
+
+        return s3
+
+    @contextlib.contextmanager
+    def fake_tofu_workspace(self, base_env=None):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fake = FakeTofu(root)
+            parent = existing_parent(root)
+            env = dict(
+                fake.env,
+                CLOUDFLARE_API_TOKEN=TOKEN,
+                INFRA_STATE_PASSPHRASE=PASSPHRASE,
+                INFRA_TFVARS=json.dumps(VALUES),
+            )
+            if base_env:
+                env.update(base_env)
+            yield root, fake, parent, env
+
+
+class Inputs(InfraTestCase):
     def test_passphrase_is_required_and_there_is_no_fallback(self):
         for env in ({}, {"INFRA_STATE_PASSPHRASE": ""}, {"TF_VAR_state_passphrase": ""}):
             with self.subTest(env=sorted(env)):
@@ -274,7 +316,7 @@ class Inputs(unittest.TestCase):
             infra_state.new_work_dir(infra_state.REPO / "infra", {})
 
 
-class WorkDirectory(unittest.TestCase):
+class WorkDirectory(InfraTestCase):
     """--work-dir is only ever a parent: the run creates, and may remove, only its own new directory."""
 
     def test_a_new_private_directory_inside_an_existing_parent(self):
@@ -316,7 +358,7 @@ class WorkDirectory(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(loose.stat().st_mode), 0o755, "never chmodded")
 
 
-class Credentials(unittest.TestCase):
+class Credentials(InfraTestCase):
     def test_derived_from_the_token(self):
         key_id, secret = infra_state.s3_credentials({"CLOUDFLARE_API_TOKEN": TOKEN}, ACCOUNT, fake_fetch)
         self.assertEqual(key_id, TOKEN_ID)
@@ -382,7 +424,7 @@ class Credentials(unittest.TestCase):
         self.assertFalse(infra_state.encrypted_state(b"not json"))
 
 
-class ChildEnvironment(unittest.TestCase):
+class ChildEnvironment(InfraTestCase):
     def test_strips_everything_that_could_print_or_redirect(self):
         base = {
             "PATH": "/bin", "HOME": "/home/x", "TF_PLUGIN_CACHE_DIR": "/cache",
@@ -419,10 +461,7 @@ class ChildEnvironment(unittest.TestCase):
             self.assertNotIn(secret, "\n".join(lines))
 
 
-class Verdicts(unittest.TestCase):
-    def summary(self, document):
-        return infra_state.summarize(document)[0]
-
+class Verdicts(InfraTestCase):
     def test_drift_exit_codes(self):
         self.assertEqual(infra_state.drift_exit(self.summary(plan((["no-op"], False)) )), 0)
         self.assertEqual(infra_state.drift_exit(self.summary(plan((["update"], False)))), 2)
@@ -469,17 +508,13 @@ class Verdicts(unittest.TestCase):
             bootstrap_state.final_check(0, self.summary(plan((["no-op"], False), (["update"], False), (["no-op"], False))), 3)
 
 
-class PlanCommand(unittest.TestCase):
+class PlanCommand(InfraTestCase):
     """infra_state.py plan as CI runs it: only the summary reaches stdout, and the exit code is the verdict."""
 
     def run_plan(self, document, plan_exit=0, extra_env=None):
-        with tempfile.TemporaryDirectory() as directory:
-            fake = FakeTofu(Path(directory))
-            env = dict(fake.env, CLOUDFLARE_API_TOKEN=TOKEN, INFRA_STATE_PASSPHRASE=PASSPHRASE,
-                       INFRA_TFVARS=json.dumps(VALUES), FAKE_PLAN=fake.fixture("plan", document),
-                       FAKE_PLAN_EXIT=str(plan_exit), TF_LOG="TRACE", TF_ENCRYPTION="x")
+        with self.fake_tofu_workspace({"TF_LOG": "TRACE", "TF_ENCRYPTION": "x"}) as (_, fake, parent, env):
+            env.update(FAKE_PLAN=fake.fixture("plan", document), FAKE_PLAN_EXIT=str(plan_exit))
             env.update(extra_env or {})
-            parent = existing_parent(Path(directory))
             out, err = io.StringIO(), io.StringIO()
             with mock.patch.dict(os.environ, env, clear=True), synthetic_configs(), \
                     mock.patch.object(infra_state, "cloudflare_get", lambda token, path: fake_fetch(path)), \
@@ -488,10 +523,6 @@ class PlanCommand(unittest.TestCase):
             # The run's own directory (values, plan, log) is removed; the given parent and its file are not.
             assert_parent_untouched(self, parent)
             return code, out.getvalue(), err.getvalue(), fake.calls()
-
-    def assert_clean(self, text):
-        for secret in SECRETS + ("raw output",):
-            self.assertNotIn(secret, text)
 
     def test_no_changes(self):
         code, out, err, calls = self.run_plan(plan(*[(["no-op"], False)] * 3))
@@ -546,11 +577,8 @@ class PlanCommand(unittest.TestCase):
         self.assert_clean(out + err)
 
     def test_keep_work_dir_keeps_the_log_but_never_the_values_or_the_plan(self):
-        with tempfile.TemporaryDirectory() as directory:
-            fake = FakeTofu(Path(directory))
-            env = dict(fake.env, CLOUDFLARE_API_TOKEN=TOKEN, INFRA_STATE_PASSPHRASE=PASSPHRASE,
-                       INFRA_TFVARS=json.dumps(VALUES), FAKE_PLAN=fake.fixture("plan", plan((["no-op"], False))))
-            parent = existing_parent(Path(directory))
+        with self.fake_tofu_workspace() as (_, fake, parent, env):
+            env["FAKE_PLAN"] = fake.fixture("plan", plan((["no-op"], False)))
             with mock.patch.dict(os.environ, env, clear=True), synthetic_configs(), \
                     mock.patch.object(infra_state, "cloudflare_get", lambda token, path: fake_fetch(path)), \
                     contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
@@ -597,7 +625,7 @@ class PlanCommand(unittest.TestCase):
         self.assert_clean(rest + err)
 
 
-class Outputs(unittest.TestCase):
+class Outputs(InfraTestCase):
     """The planned outputs against the apps' wrangler.toml files: field names and paths only, never a value."""
 
     def test_matching_outputs_have_no_problem(self):
@@ -694,10 +722,7 @@ def expect_for(document):
     return infra_state.format_expect(infra_state.plan_counts(summary), infra_state.plan_fingerprint(summary))
 
 
-class ApplyGates(unittest.TestCase):
-    def summary(self, document):
-        return infra_state.summarize(document)[0]
-
+class ApplyGates(InfraTestCase):
     def test_expect_is_parsed_strictly_and_round_trips(self):
         fp = "0123456789ab"
         self.assertEqual(infra_state.parse_expect(f"import=5,outputs=3@{fp}"), ({"import": 5, "outputs": 3}, fp))
@@ -837,47 +862,29 @@ ENCRYPTED_STATE = json.dumps({"serial": 7, "lineage": "l", "meta": {"key_provide
                               "encrypted_data": "x", "encryption_version": "v0"}).encode()
 
 
-class ApplyCommand(unittest.TestCase):
+class ApplyCommand(InfraTestCase):
     """infra_state.py apply as "Infra apply" runs it, with a fake tofu and an in-memory state bucket."""
 
     def run_apply(self, first, verify=None, expect=None, extra_env=None, bucket=None, first_exit=2, context=None):
         bucket = {"production/terraform.tfstate": ENCRYPTED_STATE} if bucket is None else bucket
-        with tempfile.TemporaryDirectory() as directory:
-            fake = FakeTofu(Path(directory))
-            env = dict(fake.env, **(APPLY_CONTEXT if context is None else context), CLOUDFLARE_API_TOKEN=TOKEN,
-                       INFRA_STATE_PASSPHRASE=PASSPHRASE, INFRA_TFVARS=json.dumps(VALUES),
-                       INFRA_APPLY_EXPECT=expect_for(first) if expect is None else expect,
-                       FAKE_PLAN_APPLY=fake.fixture("apply", first),
-                       FAKE_PLAN_VERIFY=fake.fixture("verify", verify or plan(*[(["no-op"], False)] * 2)),
-                       FAKE_PLAN_EXIT_APPLY=str(first_exit), FAKE_PLAN_EXIT_VERIFY="0")
+        requests = []
+        with self.fake_tofu_workspace(APPLY_CONTEXT if context is None else context) as (_, fake, parent, env):
+            env.update(
+                INFRA_APPLY_EXPECT=expect_for(first) if expect is None else expect,
+                FAKE_PLAN_APPLY=fake.fixture("apply", first),
+                FAKE_PLAN_VERIFY=fake.fixture("verify", verify or plan(*[(["no-op"], False)] * 2)),
+                FAKE_PLAN_EXIT_APPLY=str(first_exit),
+                FAKE_PLAN_EXIT_VERIFY="0",
+            )
             env.update(extra_env or {})
-            requests = []
-
-            def s3(method, base, path, credentials, payload=b"", extra=None, query=None):
-                key = path.split("/", 1)[1]
-                requests.append((method, key, dict(extra or {})))
-                if method == "PUT":
-                    if (extra or {}).get("If-None-Match") == "*" and key in bucket:
-                        return 412, b""
-                    bucket[key] = payload
-                    return 200, b""
-                return (200, bucket[key]) if key in bucket else (404, b"")
-
-            parent = existing_parent(Path(directory))
             out, err = io.StringIO(), io.StringIO()
             with mock.patch.dict(os.environ, env, clear=True), synthetic_configs(), \
                     mock.patch.object(infra_state, "cloudflare_get", lambda token, path: fake_fetch(path)), \
-                    mock.patch.object(infra_state, "s3_request", s3), \
+                    mock.patch.object(infra_state, "s3_request", self.bucket_s3(bucket, requests)), \
                     contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                 code = infra_state.main(["apply", "--work-dir", str(parent)])
             assert_parent_untouched(self, parent)
             return code, out.getvalue(), err.getvalue(), fake.calls(), bucket, requests
-
-    def assert_clean(self, text):
-        """Nothing but the runner's own mask commands may hold a value."""
-        text = "\n".join(line for line in text.splitlines() if not line.startswith("::add-mask::"))
-        for secret in SECRETS + ("raw output",):
-            self.assertNotIn(secret, text)
 
     def imports(self):
         return plan(*[(["no-op"], True)] * 2, outputs={"x": {"actions": ["create"]}})
@@ -984,6 +991,34 @@ class ApplyCommand(unittest.TestCase):
         self.assertIn("nothing to apply", out)
         self.assertFalse([c for c in calls if c["args"][:1] == ["apply"]])
 
+    def test_export_platform_credentials_handoff_and_error_branch(self):
+        session = mock.Mock()
+        infra_state.export_platform_credentials(session, {})
+        import platform_export
+
+        calls = []
+        with mock.patch.object(
+            platform_export,
+            "encrypted_export",
+            side_effect=lambda sess, env, fetch, infra_dir, output_name="platform_bootstrap": calls.append(output_name),
+        ):
+            infra_state.export_platform_credentials(
+                session,
+                {"VPS_BOOTSTRAP_CERT": "cert-pem", "CLOUDFLARE_API_TOKEN": TOKEN},
+            )
+        self.assertEqual(calls, ["platform_bootstrap", "codex_gateway_bootstrap"])
+
+        for err_exc in (platform_export.ExportFailed("bad"), OSError("io")):
+            with (
+                self.subTest(exc=type(err_exc).__name__),
+                mock.patch.object(platform_export, "encrypted_export", side_effect=err_exc),
+                self.assertRaisesRegex(infra_state.Refused, "platform credential export failed"),
+            ):
+                infra_state.export_platform_credentials(
+                    session,
+                    {"VPS_BOOTSTRAP_CERT": "cert-pem", "CLOUDFLARE_API_TOKEN": TOKEN},
+                )
+
     def test_an_unclassified_tofu_change_is_never_applied(self):
         code, _, err, calls, _, _ = self.run_apply(plan(*[(["no-op"], False)] * 2), expect="none", first_exit=2)
         self.assertEqual(code, 1)
@@ -1023,34 +1058,79 @@ class ApplyCommand(unittest.TestCase):
         code, out, err, _, _, _ = self.run_apply(self.imports())
         self.assertEqual(code, 0, err)
         self.assertTrue(out.startswith("::add-mask::"))
-        rest = "\n".join(line for line in out.splitlines() if not line.startswith("::add-mask::"))
-        self.assert_clean(rest + err)
+        self.assert_clean(out + err)
 
 
-class ReconcileCommand(unittest.TestCase):
+class ReconcileCommand(InfraTestCase):
     """infra_state.py reconcile as "Personal cloud reconcile" runs it: a plan it does not repair ends with the
     "Infra apply" inputs that apply exactly that plan, and nothing is saved or written."""
 
-    def run_reconcile(self, document, plan_exit=2):
-        with tempfile.TemporaryDirectory() as directory:
-            fake = FakeTofu(Path(directory))
-            summary_file, output_file = Path(directory) / "summary.md", Path(directory) / "output.txt"
-            env = dict(fake.env, GITHUB_ACTIONS="true", GITHUB_RUN_ID="1", RUNNER_TEMP=directory,
-                       GITHUB_WORKFLOW="Personal cloud reconcile", GITHUB_REF="refs/heads/main",
-                       GITHUB_EVENT_NAME="workflow_dispatch", GITHUB_STEP_SUMMARY=str(summary_file),
-                       CLOUDFLARE_API_TOKEN=TOKEN, INFRA_STATE_PASSPHRASE=PASSPHRASE, INFRA_TFVARS=json.dumps(VALUES),
-                       FAKE_PLAN=fake.fixture("plan", document), FAKE_PLAN_EXIT=str(plan_exit))
-            requests = []
+    def run_reconcile(self, document, plan_exit=2, *, check_only=True, verify=None, verify_exit=0):
+        bucket = {"production/terraform.tfstate": ENCRYPTED_STATE}
+        requests = []
+        with self.fake_tofu_workspace() as (root, fake, _, env):
+            summary_file, output_file = root / "summary.md", root / "output.txt"
+            env.update(
+                GITHUB_ACTIONS="true",
+                GITHUB_RUN_ID="1",
+                RUNNER_TEMP=str(root),
+                GITHUB_WORKFLOW="Personal cloud reconcile",
+                GITHUB_REF="refs/heads/main",
+                GITHUB_EVENT_NAME="workflow_dispatch",
+                GITHUB_STEP_SUMMARY=str(summary_file),
+                FAKE_PLAN=fake.fixture("reconcile", document),
+                FAKE_PLAN_EXIT=str(plan_exit),
+                FAKE_PLAN_VERIFY=fake.fixture("verify", verify or plan(*[(["no-op"], False)] * 2)),
+                FAKE_PLAN_EXIT_VERIFY=str(verify_exit),
+            )
+            argv = ["reconcile", "--github-output", str(output_file)]
+            if check_only:
+                argv.insert(1, "--check-only")
             out, err = io.StringIO(), io.StringIO()
             with mock.patch.dict(os.environ, env, clear=True), synthetic_configs(), \
                     mock.patch.object(infra_state, "cloudflare_get", lambda token, path: fake_fetch(path)), \
-                    mock.patch.object(infra_state, "s3_request", lambda *args, **kwargs: requests.append(args)), \
+                    mock.patch.object(infra_state, "s3_request", self.bucket_s3(bucket, requests)), \
                     contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                code = infra_state.main(["reconcile", "--check-only", "--github-output", str(output_file)])
-            self.assertEqual(requests, [])  # no saved plan, no state backup
-            self.assertNotIn("apply", [call["args"][0] for call in fake.calls()])
+                code = infra_state.main(argv)
+            if check_only:
+                self.assertEqual(requests, [])  # no saved plan, no state backup
+                self.assertNotIn("apply", [call["args"][0] for call in fake.calls()])
             output = output_file.read_text() if output_file.exists() else ""
-            return code, out.getvalue(), err.getvalue(), summary_file.read_text(), output
+            return code, out.getvalue(), err.getvalue(), summary_file.read_text(), output, fake.calls(), requests
+
+    @staticmethod
+    def repairable_dns_plan() -> dict:
+        tunnel_id = "11111111-1111-1111-1111-111111111111"
+        before = {
+            "id": "dns-runtime",
+            "zone_id": "zone-1",
+            "name": "runtime.example.invalid",
+            "type": "CNAME",
+            "proxied": False,
+            "content": f"{tunnel_id}.cfargotunnel.com",
+            "ttl": 1,
+        }
+        after = dict(before, proxied=True)
+        return {
+            "format_version": "1.2",
+            "variables": {"state_passphrase": {"value": PASSPHRASE}, "account_id": {"value": ACCOUNT}},
+            "resource_changes": [{
+                "address": 'cloudflare_dns_record.platform["runtime"]',
+                "mode": "managed",
+                "type": "cloudflare_dns_record",
+                "change": {"actions": ["update"], "before": before, "after": after},
+            }],
+            "output_changes": {},
+            "planned_values": {
+                "outputs": OUTPUTS,
+                "root_module": {
+                    "resources": [{
+                        "address": "cloudflare_zero_trust_tunnel_cloudflared.platform",
+                        "values": {"id": tunnel_id},
+                    }],
+                },
+            },
+        }
 
     def expect_line(self, text):
         [line] = [line for line in text.splitlines() if '"Infra apply" expect for this plan: ' in line]
@@ -1058,7 +1138,7 @@ class ReconcileCommand(unittest.TestCase):
 
     def test_a_manual_plan_prints_the_expect_that_infra_apply_accepts(self):
         document = plan((["update"], False), (["no-op"], False))
-        code, out, err, summary, output = self.run_reconcile(document)
+        code, out, err, summary, output, _, _ = self.run_reconcile(document)
         self.assertEqual(code, 2, err)
         self.assertEqual(output, "state=needs_manual\n")
         self.assertIn("`cloudflare_zero_trust_access_policy.owner`", summary)
@@ -1070,13 +1150,11 @@ class ReconcileCommand(unittest.TestCase):
                                False, [])
         self.assertNotIn("confirm_destructive", summary)
         self.assertNotIn("plan_key", out + summary + output)
-        for secret in SECRETS + ("raw output",):
-            self.assertNotIn(secret, "\n".join(line for line in out.splitlines() if not line.startswith("::add-mask::"))
-                             + err + summary)
+        self.assert_clean(out + err + summary)
 
     def test_a_destructive_plan_names_the_confirmation_too(self):
         document = plan((["delete"], False), (["no-op"], False))
-        code, _, _, summary, output = self.run_reconcile(document)
+        code, _, _, summary, output, _, _ = self.run_reconcile(document)
         self.assertEqual(code, 2)
         self.assertEqual(output, "state=needs_manual\n")
         expect = self.expect_line(summary)
@@ -1087,17 +1165,47 @@ class ReconcileCommand(unittest.TestCase):
 
     def test_a_plan_infra_apply_would_refuse_says_so_instead_of_an_expect(self):
         changed = dict(OUTPUTS, access_aud={"value": {"app": "c" * 64}})
-        code, _, _, summary, output = self.run_reconcile(plan((["update"], False), planned_outputs=changed))
+        code, _, _, summary, output, _, _ = self.run_reconcile(plan((["update"], False), planned_outputs=changed))
         self.assertEqual(code, 2)
         self.assertEqual(output, "state=needs_manual\n")
         self.assertIn('"Infra apply" would refuse this plan', summary)
         self.assertNotIn("expect for this plan", summary)
 
     def test_no_changes_print_no_expect(self):
-        code, out, _, summary, output = self.run_reconcile(plan(*[(["no-op"], False)] * 2), plan_exit=0)
+        code, out, _, summary, output, _, _ = self.run_reconcile(plan(*[(["no-op"], False)] * 2), plan_exit=0)
         self.assertEqual(code, 0)
         self.assertEqual(output, "state=in_sync\n")
         self.assertNotIn("Infra apply", out + summary)
+
+    def test_auto_repair_backs_up_state_applies_and_verifies_or_refuses_drift(self):
+        repairable = self.repairable_dns_plan()
+        code, out, err, summary, output, calls, requests = self.run_reconcile(
+            repairable, plan_exit=2, check_only=False
+        )
+        self.assertEqual(code, 0, err)
+        self.assertEqual(output, "state=repaired\n")
+        self.assertIn('{"event":"infra_reconcile","status":"repaired"}', out)
+        self.assertEqual([c["args"][0] for c in calls], ["init", "plan", "show", "apply", "plan", "show"])
+        self.assertEqual([r[0] for r in requests], ["GET", "HEAD", "PUT", "GET"])
+        self.assert_clean(out + err + summary)
+
+        code, _, err, _, _, _, _ = self.run_reconcile(
+            repairable,
+            plan_exit=2,
+            check_only=False,
+            verify=plan((["update"], False)),
+            verify_exit=2,
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("RECONCILE_VERIFY_FAILED", err)
+
+        code, _, err, _, _, _, _ = self.run_reconcile(
+            plan(*[(["no-op"], False)] * 2),
+            plan_exit=2,
+            check_only=False,
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("RECONCILE_UNCLASSIFIED_CHANGE", err)
 
 
 # A ListObjectsV2 answer: two backups and one key that is not a backup name (counted, never printed).
@@ -1108,7 +1216,7 @@ LISTING = (b'<?xml version="1.0" encoding="UTF-8"?><ListBucketResult><Name>infra
            b"<IsTruncated>false</IsTruncated></ListBucketResult>")
 
 
-class Backups(unittest.TestCase):
+class Backups(InfraTestCase):
     """list-backups: keys only, every page, a key that is not a backup name never printed."""
 
     def run_list(self, pages):
@@ -1118,10 +1226,7 @@ class Backups(unittest.TestCase):
             requests.append((method, path, dict(query or {})))
             return pages[len(requests) - 1]
 
-        with tempfile.TemporaryDirectory() as directory:
-            fake = FakeTofu(Path(directory))
-            env = dict(fake.env, CLOUDFLARE_API_TOKEN=TOKEN, INFRA_STATE_PASSPHRASE=PASSPHRASE,
-                       INFRA_TFVARS=json.dumps(VALUES))
+        with self.fake_tofu_workspace() as (_, fake, _, env):
             out, err = io.StringIO(), io.StringIO()
             with mock.patch.dict(os.environ, env, clear=True), \
                     mock.patch.object(infra_state, "cloudflare_get", lambda token, path: fake_fetch(path)), \
@@ -1145,8 +1250,7 @@ class Backups(unittest.TestCase):
         ])
         self.assertEqual([r[2].get("continuation-token") for r in requests], [None, "page-2"])
         self.assertEqual({(r[0], r[1]) for r in requests}, {("GET", "infra-state")})
-        for secret in SECRETS:
-            self.assertNotIn(secret, out + err)
+        self.assert_clean(out + err)
 
     def test_a_failed_listing_is_an_error(self):
         code, out, err, _ = self.run_list([(403, b"<Error/>")])
@@ -1161,7 +1265,7 @@ class Backups(unittest.TestCase):
         self.assertNotEqual(headers["authorization"], other["authorization"])
 
 
-class Rotation(unittest.TestCase):
+class Rotation(InfraTestCase):
     def test_helpers(self):
         self.assertEqual(infra_state.committed_key_provider(), "state")
         with tempfile.TemporaryDirectory() as directory:
@@ -1181,16 +1285,13 @@ class Rotation(unittest.TestCase):
 
     def run_rotate(self, written_with, after):
         listed = []
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            fake = FakeTofu(root)
+        with self.fake_tofu_workspace() as (root, fake, parent, env):
             old = root / "old"
             old.write_text("old-passphrase-0123456789\n")
             old.chmod(0o600)
             values = root / "values.json"
             values.write_text(json.dumps(VALUES))
-            env = dict(fake.env, CLOUDFLARE_API_TOKEN=TOKEN, INFRA_STATE_PASSPHRASE=PASSPHRASE,
-                       FAKE_PLAN=fake.fixture("plan", plan(*[(["no-op"], False)] * 3)))
+            env["FAKE_PLAN"] = fake.fixture("plan", plan(*[(["no-op"], False)] * 3))
 
             def s3(method, base, path, credentials, payload=b"", extra=None, query=None):
                 if query:  # the backup listing after the rotation
@@ -1200,7 +1301,6 @@ class Rotation(unittest.TestCase):
                 name = after if refreshed else written_with
                 return 200, json.dumps({"meta": {f"key_provider.pbkdf2.{name}": "s"}, "encrypted_data": "x"}).encode()
 
-            parent = existing_parent(root)
             out, err = io.StringIO(), io.StringIO()
             with mock.patch.dict(os.environ, env, clear=True), \
                     mock.patch.object(infra_state, "cloudflare_get", lambda token, path: fake_fetch(path)), \
@@ -1229,8 +1329,7 @@ class Rotation(unittest.TestCase):
         for call in final:
             self.assertNotIn("TF_ENCRYPTION", call["env"])
         self.assertNotIn("old-passphrase", out + err)
-        for secret in SECRETS:
-            self.assertNotIn(secret, out + err)
+        self.assert_clean(out + err)
 
     def test_rotation_refusals(self):
         code, _, err, calls = self.run_rotate("state_2", "state_2")
@@ -1242,22 +1341,21 @@ class Rotation(unittest.TestCase):
         self.assertIn("not re-encrypted", err)
 
 
-class Bootstrap(unittest.TestCase):
+class Bootstrap(InfraTestCase):
     """bootstrap_state.py with a fake tofu, a fake admin helper and an in-memory bucket."""
 
     def run_bootstrap(self, first, final=None, env_extra=None, bucket=None):
         bucket = {} if bucket is None else bucket
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            fake = FakeTofu(root)
-            env = dict(fake.env, INFRA_STATE_PASSPHRASE=PASSPHRASE,
-                       FAKE_PLAN_IMPORT=fake.fixture("import", first),
-                       FAKE_PLAN_FINAL=fake.fixture("final", final or plan(*[(["no-op"], False)] * 3)),
-                       FAKE_PLAN_EXIT_IMPORT="2", FAKE_PLAN_EXIT_FINAL="0")
+        with self.fake_tofu_workspace() as (root, fake, parent, env):
+            env.update(
+                FAKE_PLAN_IMPORT=fake.fixture("import", first),
+                FAKE_PLAN_FINAL=fake.fixture("final", final or plan(*[(["no-op"], False)] * 3)),
+                FAKE_PLAN_EXIT_IMPORT="2",
+                FAKE_PLAN_EXIT_FINAL="0",
+            )
             env.update(env_extra or {})
             values = root / "values.json"
             values.write_text(json.dumps(VALUES))
-            parent = existing_parent(root)
             created = []
 
             def s3(method, base, path, credentials, payload=b"", extra=None, query=None):
@@ -1309,10 +1407,6 @@ class Bootstrap(unittest.TestCase):
                 self.assertEqual(stat.S_IMODE(run.stat().st_mode), 0o700)
             leftovers = sorted(p.name for run in runs for p in run.glob("*"))
             return code, out.getvalue(), err.getvalue(), fake.calls(), created, leftovers
-
-    def assert_clean(self, text):
-        for secret in SECRETS + ("raw output",):
-            self.assertNotIn(secret, text)
 
     def test_import_only_plan_is_applied_then_no_changes(self):
         code, out, err, calls, created, leftovers = self.run_bootstrap(plan(*[(["no-op"], True)] * 3))

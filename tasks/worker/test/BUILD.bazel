@@ -8,6 +8,7 @@ package(default_visibility = ["//tasks:__subpackages__"])
 COMMON_TEST_DATA = [
     "//tasks/worker:package_json",
     "//tasks/worker:test_config",
+    ":cloudflare-workers.ts",
     ":task-dates_link",
 ]
 
@@ -54,6 +55,17 @@ copied_source_files(
 )
 
 proto_vitest_test(
+    name = "colors_test",
+    config = "//tasks/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "tasks/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":colors.test.ts"],
+    deps = ["//tasks/shared:colors"],
+)
+
+proto_vitest_test(
     name = "filters_test",
     config = "//tasks/worker:test_config",
     data = COMMON_TEST_DATA,
@@ -80,6 +92,31 @@ proto_vitest_test(
 )
 
 proto_vitest_test(
+    name = "goal-validation_test",
+    config = "//tasks/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "tasks/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":goal-validation.test.ts"],
+    deps = [
+        "//tasks/worker/src:goal-model",
+        "//tasks/worker/src:goal-validation",
+    ],
+)
+
+proto_vitest_test(
+    name = "inbox-routes_test",
+    config = "//tasks/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "tasks/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":inbox-routes.test.ts"],
+    deps = ["//tasks/worker/src:inbox-routes"],
+)
+
+proto_vitest_test(
     name = "mail_test",
     config = "//tasks/worker:test_config",
     data = COMMON_TEST_DATA,
@@ -91,6 +128,34 @@ proto_vitest_test(
         "//proto/todofy/mail/v1:ts",
         "//proto/ts:protobuf",
         "//tasks/worker/src:mail",
+    ],
+)
+
+proto_vitest_test(
+    name = "model_test",
+    config = "//tasks/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "tasks/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":model.test.ts"],
+    deps = ["//tasks/worker/src:model"],
+)
+
+proto_vitest_test(
+    name = "ops_test",
+    config = "//tasks/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "tasks/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":ops.test.ts"],
+    deps = [
+        "//proto/ops/v1:ts",
+        "//tasks/worker/src:env",
+        "//tasks/worker/src:gtd",
+        "//tasks/worker/src:jobs",
+        "//tasks/worker/src:ops",
     ],
 )
 
@@ -135,6 +200,22 @@ proto_vitest_test(
 )
 
 proto_vitest_test(
+    name = "schedule_test",
+    config = "//tasks/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "tasks/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":schedule.test.ts"],
+    deps = [
+        "//tasks/worker/src:env",
+        "//tasks/worker/src:gtd",
+        "//tasks/worker/src:review",
+        "//tasks/worker/src:schedule",
+    ],
+)
+
+proto_vitest_test(
     name = "startup_test",
     config = "//tasks/worker:test_config",
     data = COMMON_TEST_DATA,
@@ -143,6 +224,22 @@ proto_vitest_test(
     tags = ["unit"],
     tests = [":startup.test.ts"],
     deps = ["//tasks/worker/src:startup"],
+)
+
+proto_vitest_test(
+    name = "task-validation_test",
+    config = "//tasks/worker:test_config",
+    data = COMMON_TEST_DATA,
+    project = "tasks/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":task-validation.test.ts"],
+    deps = [
+        "//proto/tasks/ui/v1:ts",
+        "//proto/ts:protobuf",
+        "//tasks/worker/src:model",
+        "//tasks/worker/src:task-validation",
+    ],
 )
 
 workspace_link(

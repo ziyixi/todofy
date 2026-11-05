@@ -33,13 +33,6 @@ import newsletter.worker as worker
 import tests.support.editor as editor_support
 
 
-@pytest.fixture
-def store(tmp_path):
-    database = storage.Store(tmp_path / "newsletter.sqlite3", "mock")
-    yield database
-    database.close()
-
-
 def queued(database, key="edition"):
     request = json.loads(
         resources.files("newsletter")

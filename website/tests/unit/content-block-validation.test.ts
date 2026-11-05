@@ -3,33 +3,18 @@ import { describe, expect, it } from "vitest";
 import { sha256 } from "../../src/lib/content/hash";
 import type { ContentBlock, ContentSnapshot } from "../../src/lib/content/schema";
 import { validateContentSnapshot } from "../../src/lib/content/validate";
+import { makePost, makeSnapshot } from "../support/deployment-contract";
 
 const mediaHash = "a".repeat(64);
 const mediaPath = `/media/${mediaHash}.pdf`;
 
 function snapshot(blocks: ContentBlock[]): ContentSnapshot {
-  const sourceKey = sha256("new-content-block-validation");
-  return {
-    schemaVersion: 1,
-    sourceMode: "fixture",
-    posts: [
-      {
-        sourceKey,
-        feedGuid: `urn:ziyixi:post:${sourceKey}`,
-        slug: "new-content-blocks",
-        title: "New content blocks",
-        summary: "A synthetic test of nested Notion content blocks.",
-        language: "en",
-        publishedAt: "2026-01-01T00:00:00.000Z",
-        tags: [],
-        blocks,
-        toc: [],
-        media: [],
-      },
-    ],
-    media: [],
-    redirects: [],
-  };
+  return makeSnapshot([
+    makePost("new-content-blocks", {
+      sourceKey: sha256("new-content-block-validation"),
+      blocks,
+    }),
+  ]);
 }
 
 describe("expanded Notion block validation", () => {

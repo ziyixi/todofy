@@ -1,18 +1,10 @@
 import { expect, test, type APIRequestContext } from "@playwright/test";
+import { createResource, seedTask } from "./seed";
 
 test.use({ serviceWorkers: "block" });
 
 async function createTask(request: APIRequestContext, title: string) {
-  const csrf = await request.get("/api/tasks/csrf");
-  const { token } = await csrf.json();
-  const response = await request.post(
-    `/api/tasks/v1/tasks?request_id=${crypto.randomUUID()}`,
-    {
-      headers: { "x-csrf-token": token, origin: "http://127.0.0.1:8798" },
-      data: { title },
-    },
-  );
-  expect(response.status()).toBe(200);
+  await seedTask(request, { title });
 }
 
 test("search keeps its previous result while the next real result is pending", async ({
@@ -77,21 +69,10 @@ test("empty search stays quiet and category counts update after a task completes
   page,
   request,
 }) => {
-  const csrf = await request.get("/api/tasks/csrf");
-  const { token } = await csrf.json();
-  const headers = { "x-csrf-token": token, origin: "http://127.0.0.1:8798" };
   const title = `Synthetic count project ${crypto.randomUUID()}`;
-  const response = await request.post(
-    `/api/tasks/v1/projects?request_id=${crypto.randomUUID()}`,
-    { headers, data: { title } },
-  );
-  const project = await response.json();
+  const project = await createResource(request, "projects", { title });
   const taskTitle = `Synthetic count task ${crypto.randomUUID()}`;
-  const taskResponse = await request.post(
-    `/api/tasks/v1/tasks?request_id=${crypto.randomUUID()}`,
-    { headers, data: { title: taskTitle, project_id: project.id } },
-  );
-  expect(taskResponse.status()).toBe(200);
+  await seedTask(request, { title: taskTitle, project_id: project.id });
   const searchRequests: string[] = [];
   page.on("request", (pending) => {
     const url = new URL(pending.url());

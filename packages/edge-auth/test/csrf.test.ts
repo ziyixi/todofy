@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { CSRF_HEADER, CSRF_MAX_TOKEN_CHARS, verifyCsrf } from '../src/index.ts';
+import { CSRF_HEADER, CSRF_MAX_TOKEN_CHARS, CSRF_TOKEN, verifyCsrf } from '../src/index.ts';
 const origin = 'https://owner.example.test';
 const policy = { allowedOrigins: [origin] };
 function request(headers: Record<string, string> = {}) {
-  return new Request(origin + '/api/settings', { method: 'POST', headers: { Origin: origin, [CSRF_HEADER]: '1', 'Content-Type': 'application/json', ...headers }, body: '{}' });
+  return new Request(origin + '/api/settings', { method: 'POST', headers: { Origin: origin, [CSRF_HEADER]: CSRF_TOKEN, 'Content-Type': 'application/json', ...headers }, body: '{}' });
 }
 describe('same-origin JSON mutation checks', () => {
   it('accepts the static header without a cookie or signing key', async () => {
+    expect(CSRF_TOKEN).toBe('1');
     expect(await verifyCsrf(request(), policy)).toEqual({ ok: true });
-    expect(await verifyCsrf(request({ 'Content-Type': 'Application/JSON; charset=utf-8' }), policy)).toEqual({ ok: true });
+    expect(await verifyCsrf(request({ [CSRF_HEADER]: `  ${CSRF_TOKEN}  `, 'Content-Type': '  Application/JSON ; charset=utf-8 ; boundary=x' }), policy)).toEqual({ ok: true });
   });
   it('accepts a bounded old header while ignoring old cookies', async () => {
     expect(await verifyCsrf(request({ [CSRF_HEADER]: 'old.signed.header', Cookie: 'obsolete_csrf=unrelated' }), policy)).toEqual({ ok: true });

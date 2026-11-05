@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { main as runReleaseCli } from "../../scripts/release/cli";
 import type { HostnameGuard, WorkerState, Wrangler } from "../../scripts/release/cloudflare";
 import type { DeploymentRow } from "../../scripts/release/github";
 import {
@@ -727,5 +728,37 @@ describe("release record payload", () => {
     expect(() =>
       buildPayload({ ...base, registry: { ...emptyContentRegistry(), articleCount: 1 }, manifest }),
     ).toThrow();
+  });
+});
+
+describe("release CLI dispatch and environment guards", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("rejects missing, unknown, or multi-argument release CLI commands", async () => {
+    await expect(runReleaseCli([])).rejects.toThrow(/Usage: pnpm release </);
+    await expect(runReleaseCli(["unknown-step"])).rejects.toThrow(/Usage: pnpm release </);
+    await expect(runReleaseCli(["gate", "extra"])).rejects.toThrow(/Usage: pnpm release </);
+  });
+
+  it("enforces required environment variables, SITE_URL, and NOTION_API_VERSION", async () => {
+    vi.stubEnv("SITE_URL", "");
+    await expect(runReleaseCli(["prepare"])).rejects.toThrow(
+      /Required environment variable is unset: SITE_URL/,
+    );
+
+    vi.stubEnv("SITE_URL", "https://example.test");
+    await expect(runReleaseCli(["prepare"])).rejects.toThrow(
+      /SITE_URL does not exactly match content\/site\.config\.ts canonicalOrigin/,
+    );
+
+    vi.stubEnv("SITE_URL", SITE);
+    vi.stubEnv("NOTION_TOKEN", "synthetic-token");
+    vi.stubEnv("NOTION_DATA_SOURCE_ID", "synthetic-source-id");
+    vi.stubEnv("NOTION_API_VERSION", "1999-01-01");
+    await expect(runReleaseCli(["prepare"])).rejects.toThrow(
+      /NOTION_API_VERSION does not match the version pinned in site\.config\.ts/,
+    );
   });
 });

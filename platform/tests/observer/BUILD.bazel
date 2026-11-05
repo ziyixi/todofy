@@ -24,6 +24,7 @@ unittest_test(
     modules = ["tests.observer.test_cli"],
     deps = [
         ":package",
+        "//platform/src/personal_cloud:__main__",
         "//platform/src/personal_cloud/observer:cli",
         "//platform/src/personal_cloud/observer:package",
         "//platform/src/personal_cloud/observer:systemd_snapshot",

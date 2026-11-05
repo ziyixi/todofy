@@ -7,7 +7,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, beforeAll, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { createPrototype } from "./fixture";
 import { App } from "../src/App";
 import { BetNotSaved } from "../src/bets";
@@ -19,11 +19,6 @@ import type { Language, PlusActions } from "../src/model";
 const WORK = "Get the website refresh ready for review";
 const LAST_PERSONAL = "A quiet, unhurried weekend";
 
-beforeAll(() => {
-  HTMLDialogElement.prototype.showModal = function () {
-    this.setAttribute("open", "");
-  };
-});
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();

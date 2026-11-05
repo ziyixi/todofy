@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RelayEnv } from "../../relay/src/env";
+import worker, { Ops, WebsiteSync } from "../../relay/src/index";
 import { getSyncRequest, requestSync } from "../../relay/src/request";
 import { getSyncStatus, nextCheck, opsStatus } from "../../relay/src/status";
 
@@ -293,5 +294,64 @@ describe("manual sync dispatch", () => {
       "invalid_input",
     );
     expect(send).not.toHaveBeenCalled();
+  });
+});
+describe("relay Worker entrypoints and scheduled handler", () => {
+  it("serves Ops.status and WebsiteSync RPC methods and returns 404 on HTTP fetch", async () => {
+    observe();
+    const ctx = {} as ExecutionContext;
+    const ops = new Ops(ctx, env);
+    expect((await ops.status()).modes).toEqual({ maintenance: false });
+
+    const sync = new WebsiteSync(ctx, env);
+    expect((await sync.getSyncStatus()).latest_attempt?.state).toBe("unchanged");
+    expect((await sync.getSyncRequest({ request_id: requestId })).run_id).toBe("12");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () => Response.json({ workflow_run_id: 321 })),
+    );
+    expect(await sync.requestSync({ request_id: requestId })).toMatchObject({
+      state: "accepted",
+      run_id: "321",
+    });
+
+    const response = worker.fetch();
+    expect(response.status).toBe(404);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+  });
+
+  it("dispatches a daily cron sync in worker.scheduled and waits for completion", async () => {
+    const send = vi.fn<typeof fetch>(async () => Response.json({ workflow_run_id: 555 }));
+    vi.stubGlobal("fetch", send);
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const promises: Promise<unknown>[] = [];
+    const ctx = {
+      waitUntil: (promise: Promise<unknown>) => {
+        promises.push(promise);
+      },
+      passThroughOnException: () => undefined,
+    } as unknown as ExecutionContext;
+
+    try {
+      worker.scheduled({} as ScheduledController, env, ctx);
+      expect(promises).toHaveLength(1);
+      await Promise.all(promises);
+      const init = send.mock.calls[0]?.[1] as RequestInit | undefined;
+      expect(JSON.parse(String(init?.body)).inputs).toMatchObject({
+        operation: "release",
+        trigger: "cron",
+      });
+      expect(logSpy).toHaveBeenCalledWith(
+        JSON.stringify({
+          relay: "daily_sync",
+          state: "accepted",
+          run_id: "555",
+          error_code: null,
+        }),
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
   });
 });

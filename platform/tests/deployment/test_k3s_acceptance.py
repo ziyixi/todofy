@@ -10,8 +10,8 @@ from personal_cloud.deployment.kubernetes import Client, DependencyUnavailable
 from personal_cloud.deployment.reconcile import declared_view
 from personal_cloud.deployment.resources import Renderer
 
+from .fixtures import CONFIG, IDENTITY, TARGETS, asset
 from .test_codex_gateway import CONFIGURATION, TARGET
-from .test_release import CONFIG, IDENTITY, TARGETS, asset
 
 
 @unittest.skipUnless(os.environ.get("K3S_ACCEPTANCE_DIR"), "isolated k3s only")

@@ -1,5 +1,17 @@
 import { expect, test } from 'vitest';
-import { clampMonthEnd, daysBetween, nextOccurrence, previewDate, recurrenceRule, validDate } from '../src/index.ts';
+import {
+  TaskDateError,
+  addDays,
+  clampMonthEnd,
+  daysBetween,
+  localDate,
+  nextOccurrence,
+  previewDate,
+  recurrenceRule,
+  validDate,
+  validTimezone,
+  zonedInstant,
+} from '../src/index.ts';
 
 test('plain dates remain calendar dates and timed input resolves the account timezone', () => {
   expect(previewDate('tomorrow', '2026-10-17', 'America/Los_Angeles')).toEqual({
@@ -40,9 +52,71 @@ test('timed weekly recurrence retains local clock across daylight saving', () =>
   expect(next.dueDatetime).toBe('2026-11-03T17:00:00.000Z');
 });
 test('unsupported or unbounded recurrence is rejected rather than silently weakened', () => {
-  expect(() => recurrenceRule('every moon phase', '2026-10-17')).toThrow();
-  expect(() => recurrenceRule('RRULE:FREQ=SECONDLY', '2026-10-17')).toThrow();
-  expect(() => recurrenceRule('every 0 days', '2026-10-17')).toThrow();
+  expect(() => recurrenceRule('every moon phase', '2026-10-17')).toThrow(TaskDateError);
+  expect(() => recurrenceRule('RRULE:FREQ=SECONDLY', '2026-10-17')).toThrow(TaskDateError);
+  expect(() => recurrenceRule('every 0 days', '2026-10-17')).toThrow(TaskDateError);
+  expect(() => recurrenceRule('every 366 days', '2026-10-17')).toThrow('Recurrence interval out of range');
+  expect(() => recurrenceRule('every! Mon', '2026-10-17')).toThrow('Completion-based weekday rules are not supported');
+  expect(() => recurrenceRule('every! 30th', '2026-10-17')).toThrow('Completion-based calendar dates are not supported');
+  expect(() => recurrenceRule('every! 1st Jan', '2026-10-17')).toThrow(
+    'Completion-based calendar dates are not supported',
+  );
+  expect(() => recurrenceRule('every 31st Feb', '2026-10-17')).toThrow('Invalid annual calendar date');
+  expect(() => recurrenceRule('every 32nd', '2026-10-17')).toThrow('Invalid day of month');
+  for (const rrule of [
+    'RRULE:FREQ=DAILY;COUNT=5',
+    'RRULE:FREQ=DAILY;UNTIL=20270101T000000Z',
+    'RRULE:FREQ=DAILY;BYHOUR=9',
+    'RRULE:FREQ=DAILY;BYMINUTE=30',
+    'RRULE:FREQ=DAILY;BYSECOND=0',
+  ]) {
+    expect(() => recurrenceRule(rrule, '2026-10-17'), rrule).toThrow('Unsupported recurrence rule');
+  }
+  expect(recurrenceRule('RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,FR', '2026-10-17')).toEqual({
+    rrule: 'RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,FR',
+    fromCompletion: false,
+  });
+});
+
+test('every weekday and every workday schedule Monday through Friday', () => {
+  for (const phrase of ['every weekday', 'every workday']) {
+    expect(recurrenceRule(phrase, '2026-10-17')).toEqual({
+      rrule: 'RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=MO,TU,WE,TH,FR',
+      fromCompletion: false,
+    });
+    const saturdayPreview = previewDate(phrase, '2026-10-17', 'UTC');
+    expect(saturdayPreview.dueDate).toBe('2026-10-19');
+    expect(
+      nextOccurrence(
+        { dueDate: '2026-10-16', dueDatetime: '', dueTimezone: '', recurrence: phrase },
+        Date.parse('2026-10-16T12:00:00Z'),
+        'UTC',
+      ).dueDate,
+    ).toBe('2026-10-19');
+  }
+});
+
+test('validTimezone, localDate, addDays, and zonedInstant DST transition validation', () => {
+  expect(validTimezone('UTC')).toBe(true);
+  expect(validTimezone('America/New_York')).toBe(true);
+  expect(validTimezone('')).toBe(false);
+  expect(validTimezone('Not/A_Timezone')).toBe(false);
+
+  expect(localDate(Date.parse('2026-10-18T03:30:00Z'), 'America/Los_Angeles')).toBe('2026-10-17');
+  expect(() => localDate(Date.parse('2026-10-18T03:30:00Z'), 'Invalid/Zone')).toThrow('Unsupported timezone');
+
+  expect(addDays('2026-02-27', 3)).toBe('2026-03-02');
+  expect(addDays('2026-03-02', -3)).toBe('2026-02-27');
+  expect(() => addDays('2026-02-30', 1)).toThrow('Invalid date');
+
+  // Spring-forward nonexistent wall time in America/Los_Angeles (2026-03-08 02:30 does not exist)
+  expect(() => zonedInstant('2026-03-08T02:30:00', 'America/Los_Angeles')).toThrow(
+    'This local time does not exist in the selected timezone',
+  );
+  expect(() => zonedInstant('not-a-wall-time', 'UTC')).toThrow('Invalid local date-time');
+  expect(() => zonedInstant('2026-02-30T10:00:00', 'UTC')).toThrow('Invalid local date-time');
+  expect(() => zonedInstant('2026-10-17T10:00:00', 'Invalid/Zone')).toThrow('Unsupported timezone');
+  expect(zonedInstant('2026-03-08T03:30:00', 'America/Los_Angeles')).toBe('2026-03-08T10:30:00.000Z');
 });
 
 test('Todoist every week follows completion day while named weekdays remain fixed', () => {

@@ -3,9 +3,11 @@
  * client lays them out, the CSRF transport, the views' ETags, the google.rpc.Status errors and the wire JSON the
  * pages read.
  */
-import { ApiError, NETWORK_MESSAGE, api } from './client'
+import { HttpEncodeError } from '@ziyixi/proto/http-client'
+import { WireJsonError } from '@ziyixi/proto/wire-json'
+import { ApiError, NETWORK_MESSAGE, api, toApiError } from './client'
 import { apiError, installFetch, json, PATHS } from '../test/harness'
-import { healthy } from '../test/fixtures'
+import { GEMINI_ITEM, healthy } from '../test/fixtures'
 
 const REQUEST_ID = '0d8f7a9e-1c2b-4d3e-8f4a-5b6c7d8e9f0a'
 const scenario = healthy()
@@ -39,7 +41,7 @@ describe('api client', () => {
   })
 
   it('sends same-origin JSON mutations directly with the request_id', async () => {
-    const calls = installFetch((call) => (call.path === PATHS.csrf ? json({ token: 'tok' }) : json({ guard: scenario.ops.guard })))
+    const calls = installFetch(() => json({ guard: scenario.ops.guard }))
     expect(await api.setGuard('shed', 'mail-hero', REQUEST_ID)).toEqual({ guard: scenario.ops.guard })
     await api.setGuard('normal', 'mail-hero', REQUEST_ID)
     expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([`POST ${PATHS.guard}`, `POST ${PATHS.guard}`])
@@ -50,7 +52,7 @@ describe('api client', () => {
   })
 
   it('makes a request_id per action unless the caller passes one', async () => {
-    const calls = installFetch((call) => (call.path === PATHS.csrf ? json({ token: 'tok' }) : json({ guard: scenario.ops.guard })))
+    const calls = installFetch(() => json({ guard: scenario.ops.guard }))
     await api.setGuard('shed', 'mail-hero')
     await api.setGuard('shed', 'mail-hero')
     const ids = calls.filter((call) => call.method === 'POST').map((call) => (JSON.parse(call.body ?? '{}') as { request_id: string }).request_id)
@@ -75,7 +77,7 @@ describe('api client', () => {
   })
 
   it('reads the google.rpc.Status: its reason, localized message and request ID', async () => {
-    installFetch((call) => (call.path === PATHS.csrf ? json({ token: 'tok' }) : apiError(429, 'canary_limit', '今天的手动运行次数已用完', 'cccccccccccccccc')))
+    installFetch(() => apiError(429, 'canary_limit', '今天的手动运行次数已用完', 'cccccccccccccccc'))
     await expect(api.startCanary('mail-todofy')).rejects.toMatchObject({
       status: 429,
       code: 'canary_limit',
@@ -112,25 +114,63 @@ describe('api client', () => {
   it('revalidates views with If-None-Match, reuses the kept body on 304, and keeps a refresh’s answer', async () => {
     const body = JSON.stringify(scenario.home)
     const calls = installFetch((call) => {
-      if (call.path === PATHS.csrf) return json({ token: 'tok' })
+      if (call.path === PATHS.refreshCloudflare) return json(scenario.cloudflare)
       if (call.headers['if-none-match'] === '"4"') return new Response(null, { status: 304, headers: { ETag: '"4"' } })
       return new Response(body, { status: 200, headers: { ETag: '"4"', 'content-type': 'application/json' } })
     })
     expect(await api.home()).toEqual(scenario.home)
     expect(await api.home()).toEqual(scenario.home)
     expect(await api.refreshHome()).toEqual(scenario.home)
+    expect(await api.refreshCloudflare()).toEqual(scenario.cloudflare)
     expect(calls.map((call) => [call.method, call.path, call.headers['if-none-match'] ?? null])).toEqual([
       ['GET', PATHS.home, null],
       ['GET', PATHS.home, '"4"'],
       ['POST', PATHS.refreshHome, null],
+      ['POST', PATHS.refreshCloudflare, null],
     ])
   })
 
-  it('starts the canary by its resource name', async () => {
+  it('starts the canary, requests website sync, and mutates attention items by resource name', async () => {
     const run = scenario.ops.canary.recent[0]
-    const calls = installFetch((call) => (call.path === PATHS.csrf ? json({ token: 'tok' }) : json({ run })))
+    const syncReply = { request: { request_id: REQUEST_ID, state: 'accepted' as const, run_id: '99', run_url: 'https://github.com/ziyixi/website/actions/runs/99' } }
+    const attentionItem = { ...GEMINI_ITEM, name: 'attentionItems/item-1', etag: 'a1-00000000-0000-4000-8000-000000000001' }
+    const calls = installFetch((call) => {
+      if (call.path === PATHS.canary) return json({ run })
+      if (call.path === '/api/v1/websiteSync:request') return json(syncReply)
+      return json(attentionItem)
+    })
     await api.startCanary('mail-todofy', REQUEST_ID)
-    expect(calls[0]).toMatchObject({ method: 'POST', path: PATHS.canary, body: `{"request_id":"${REQUEST_ID}"}` })
-    expect(calls[0]?.headers['x-csrf-token']).toBe('1')
+    expect(await api.requestWebsiteSync(REQUEST_ID)).toEqual(syncReply)
+    expect(await api.dismissAttention(attentionItem.name, attentionItem.etag, REQUEST_ID)).toEqual(attentionItem)
+    expect(await api.restoreAttention(attentionItem.name, attentionItem.etag, REQUEST_ID)).toEqual(attentionItem)
+    expect(calls.map((call) => [call.method, call.path, call.headers['x-csrf-token'], call.body])).toEqual([
+      ['POST', PATHS.canary, '1', `{"request_id":"${REQUEST_ID}"}`],
+      ['POST', '/api/v1/websiteSync:request', '1', `{"request_id":"${REQUEST_ID}"}`],
+      ['POST', '/api/v1/attentionItems/item-1:dismiss', '1', `{"etag":"${attentionItem.etag}","request_id":"${REQUEST_ID}"}`],
+      ['POST', '/api/v1/attentionItems/item-1:restore', '1', `{"etag":"${attentionItem.etag}","request_id":"${REQUEST_ID}"}`],
+    ])
+  })
+
+  it('maps HttpEncodeError and WireJsonError to client-side ApiError instances without network calls', async () => {
+    const calls = installFetch(() => json({}))
+    // Empty canaryId produces an invalid resource path ('canaries/') rejected by HttpEncodeError before fetch.
+    await expect(api.startCanary('', REQUEST_ID)).rejects.toMatchObject({
+      status: 400,
+      code: 'bad_request',
+      message: '请求格式不正确',
+    })
+    expect(calls).toHaveLength(0)
+
+    expect(toApiError(new HttpEncodeError('bad path'))).toMatchObject({
+      status: 400,
+      code: 'bad_request',
+      message: '请求格式不正确',
+    })
+    expect(toApiError(new WireJsonError('unrecognized enum'))).toMatchObject({
+      status: 200,
+      code: 'bad_response',
+      message: '个人控制台已更新，请刷新页面',
+    })
   })
 })
+

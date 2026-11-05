@@ -373,3 +373,93 @@ def test_status_reads_d1_once_with_five_bounded_statements():
 
 def ops_runtime_statements(source: str) -> int:
     return int(source.split("STATUS_STATEMENTS = ", 1)[1].split("\n", 1)[0])
+
+
+# ---- runtime/ops.py (host SQLite + stubbed Pyodide) ----------------------------------------
+
+
+def test_runtime_ops_guard_jobs_canary_status_and_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+    import types
+
+    from tests.unit.host_support import D1, ObjectSql, stubbed_pyodide
+
+    with stubbed_pyodide(monkeypatch):
+        from todofy.runtime import backup, ops as runtime_ops
+
+        store = ObjectSql()
+        for stmt in (*runtime_ops.DO_SCHEMA, *backup.DO_SCHEMA):
+            store.exec(stmt)
+
+        # Initial guard is NORMAL
+        assert runtime_ops.guard(store) == ops.NORMAL
+
+        # Set a shed guard
+        shed_input = ops.guard_input(
+            {"level": "shed", "reason": "d1_reads_high", "until": stamp(NOW + 3600)}, NOW_MS
+        )
+        state, changed = runtime_ops.set_guard(store, shed_input, NOW_MS)
+        assert state["level"] == "shed" and changed is False
+        # Repeating the exact same shed guard reports unchanged
+        _, changed_repeat = runtime_ops.set_guard(store, shed_input, NOW_MS)
+        assert changed_repeat is False
+
+        # Job runs and defer_until
+        assert runtime_ops.last_run(store, ops.Job.RETENTION) is None
+        assert runtime_ops.defer_until(store, ops.Job.RETENTION, NOW) is None
+        runtime_ops.ran(store, ops.Job.RETENTION, NOW - 60)
+        assert runtime_ops.last_run(store, ops.Job.RETENTION) == NOW - 60
+        assert runtime_ops.defer_until(store, ops.Job.RETENTION, NOW) == NOW + 3600
+        assert runtime_ops.backup_defer_until(store, NOW) is None
+
+        # Clear guard back to normal
+        normal_input = ops.guard_input({"level": "normal", "reason": "quota_ok", "until": None}, NOW_MS)
+        normal_state, was_shed = runtime_ops.set_guard(store, normal_input, NOW_MS)
+        assert normal_state["level"] == "normal" and was_shed is True
+        assert runtime_ops.guard(store) == ops.NORMAL
+
+        # Canary and status over host D1
+        db = D1()
+        event_id = "f8c1e9a0-1a98-4fb8-8ca1-4c0a3e710016"
+        db.insert(
+            "mail_events",
+            source_id="mail-hero-personal",
+            event_id=event_id,
+            payload_hash="0" * 64,
+            payload="{}",
+            state="complete",
+            version=2,
+            created_at=NOW - 120,
+            updated_at=NOW,
+            canary_run_id="canary-1",
+        )
+        env = types.SimpleNamespace(
+            DB=db,
+            TODOFY_PUBLIC_HOST="todofy.example.com",
+            BACKUP_BUCKET=object(),
+        )
+        canary_res = asyncio.run(runtime_ops.canary(env, store, event_id, NOW))
+        assert canary_res == {"state": "ok", "completed_at": stamp(NOW)}
+
+        coord = types.SimpleNamespace(
+            sql=store,
+            usage_facts=lambda _now: {
+                "used_tokens": 100,
+                "reserved_tokens": 0,
+                "token_budget": 100_000,
+                "calls": 1,
+            },
+        )
+        status_res = asyncio.run(runtime_ops.status(env, coord, NOW))
+        assert errors("OpsStatus", status_res) == []
+
+        # unavailable() catches DO SQLite exceptions and falls back to ops.NORMAL
+        class BrokenStore:
+            def exec(self, *_args: object) -> object:
+                raise RuntimeError("sqlite storage corrupted")
+
+        unavail = runtime_ops.unavailable(env, BrokenStore(), NOW)
+        assert errors("OpsStatus", unavail) == []
+        assert unavail["health"] == "down"
+        assert unavail["guard"] == ops.guard_state(ops.NORMAL, NOW_MS)
+

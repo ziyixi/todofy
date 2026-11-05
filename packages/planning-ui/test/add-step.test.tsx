@@ -6,7 +6,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, beforeAll, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { createPrototype } from "./fixture";
 import { App } from "../src/App";
 import type { Language, PlusActions } from "../src/model";
@@ -14,14 +14,6 @@ import type { Language, PlusActions } from "../src/model";
 // The fixture's first commitment, selected in Week by default, has two steps.
 const RELEASE = "Ship the small website refresh";
 
-beforeAll(() => {
-  HTMLDialogElement.prototype.showModal = function () {
-    this.setAttribute("open", "");
-  };
-  HTMLDialogElement.prototype.close = function () {
-    this.removeAttribute("open");
-  };
-});
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();

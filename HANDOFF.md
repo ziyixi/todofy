@@ -1,9 +1,16 @@
 # Handoff
 
-Updated 2026-11-04 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
+Updated 2026-11-05 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
 Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
+
+Branch `test/suite-consolidation` consolidates test suites, moves pure SQLite and validation checks out of multi-Worker
+Miniflare/workerd harnesses into fast host unit tests, extracts shared test fixtures, and expands unit and UI test
+coverage across `todofy`, `tasks`, `newsletter`, `newsletter-console`, `dashboard`, `fleet`, `platform`,
+`codex-gateway`, `model-router`, `personal-mcp`, `mail-hero`, `mailsort`, `recall`, `watch`, `storage`, `links`,
+`website`, `packages`, `proto`, `contracts`, `tools` and `infra`, while pinning the matching private test suite commit
+(details in `private/HANDOFF.md`). Merge after `CI gate` is green on the branch SHA.
 
 Main `71f87df7` carries the Storage console work and pins the private application's improvement waves. Normal main
 publication ships them; record its verification here once observed, then move this to the dated archive.

@@ -74,6 +74,11 @@ js_library(
 )
 
 js_library(
+    name = "index_ts_source",
+    srcs = ["index.ts"],
+)
+
+js_library(
     name = "request_ts_source",
     srcs = ["request.ts"],
 )
