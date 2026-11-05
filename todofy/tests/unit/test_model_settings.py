@@ -151,9 +151,7 @@ def test_model_generate_fallbacks_and_error_classification(monkeypatch):
         env = types.SimpleNamespace()
 
         # Past deadline immediately returns SUMMARY_FAILED without calling client
-        expired = asyncio.run(
-            model.generate(env, system="sys", user="u", deadline_ms=now - 1, model=EMAIL)
-        )
+        expired = asyncio.run(model.generate(env, system="sys", user="u", deadline_ms=now - 1, model=EMAIL))
         assert not expired.verdict.ok and expired.verdict.code == Code.SUMMARY_FAILED and expired.attempts == 0
 
         # Fallback from RESOURCE_EXHAUSTED error to a working fallback model
@@ -164,7 +162,7 @@ def test_model_generate_fallbacks_and_error_classification(monkeypatch):
                 calls.append(req.model)
                 if req.model == EMAIL:
                     raise models.ModelRouterError("RESOURCE_EXHAUSTED")
-                return models.GenerateResponse(
+                return models.Generation(
                     model=req.model,
                     output="ok text",
                     usage=models.Usage(input_tokens=10, output_tokens=5, available=True),
@@ -212,17 +210,15 @@ def test_model_generate_fallbacks_and_error_classification(monkeypatch):
                 self.reason = reason
 
             async def generate(self, req):
-                return models.GenerateResponse(
+                return models.Generation(
                     model=req.model,
                     output="",
                     usage=models.Usage(input_tokens=4, output_tokens=0, available=True),
-                    error=models.GenerateError(reason=self.reason, message="err", retry_after_seconds=12.0),
+                    error=models.ModelError(reason=self.reason, message="err", retry_after_seconds=12.0),
                 )
 
         monkeypatch.setattr(model, "client", lambda *_a: AnswerErrorClient("MODEL_QUOTA"))
-        quota_res = asyncio.run(
-            model.generate(env, system="sys", user="u", deadline_ms=now + 60_000, model=EMAIL)
-        )
+        quota_res = asyncio.run(model.generate(env, system="sys", user="u", deadline_ms=now + 60_000, model=EMAIL))
         assert quota_res.verdict.code == Code.LLM_QUOTA and quota_res.verdict.retry_after == 12.0
 
         monkeypatch.setattr(model, "client", lambda *_a: AnswerErrorClient("MODEL_AUTH"))
@@ -232,4 +228,3 @@ def test_model_generate_fallbacks_and_error_classification(monkeypatch):
             )
         )
         assert auth_res.verdict.code == Code.LLM_REQUEST_REJECTED and auth_res.attempts == 1
-

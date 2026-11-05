@@ -420,7 +420,6 @@ class RuntimePreconditionTests(unittest.TestCase):
         with self.assertRaisesRegex(BootstrapError, "REPAIR_DAILY_NOT_SUSPENDED"):
             self.runtime.daily_jobs()
 
-
     def test_runtime_and_inputs_validate_bundle_resources_images_and_host_files(self):
         newsletter_img = "ghcr.io/ziyixi/todofy-newsletter@sha256:" + "1" * 64
         platform_img = "ghcr.io/ziyixi/todofy-platform@sha256:" + "2" * 64
@@ -492,9 +491,7 @@ class RuntimePreconditionTests(unittest.TestCase):
                 "profile": PROFILE,
                 "images": images,
             }
-            self.assertEqual(
-                repair_checks.runtime(new_dir, new_public)["kind"], "List"
-            )
+            self.assertEqual(repair_checks.runtime(new_dir, new_public)["kind"], "List")
 
             bad_images = {**new_public, "images": {**images, "newsletter": "bad"}}
             with self.assertRaisesRegex(BootstrapError, "REPAIR_IMAGES_INVALID"):
@@ -502,7 +499,10 @@ class RuntimePreconditionTests(unittest.TestCase):
 
             unsuspended = make_runtime_doc(SHA)
             for item in unsuspended["items"]:
-                if item["kind"] == "CronJob" and item["metadata"]["name"] == "newsletter-daily":
+                if (
+                    item["kind"] == "CronJob"
+                    and item["metadata"]["name"] == "newsletter-daily"
+                ):
                     item["spec"]["suspend"] = False
             (new_dir / "runtime.json").write_text(json.dumps(unsuspended))
             with self.assertRaisesRegex(BootstrapError, "REPAIR_RUNTIME_NOT_HELD"):
@@ -510,7 +510,10 @@ class RuntimePreconditionTests(unittest.TestCase):
 
             bad_cm = make_runtime_doc(SHA)
             for item in bad_cm["items"]:
-                if item["kind"] == "ConfigMap" and item["metadata"]["name"] == "newsletter-release":
+                if (
+                    item["kind"] == "ConfigMap"
+                    and item["metadata"]["name"] == "newsletter-release"
+                ):
                     item["data"]["phase"] = "ready"
             (new_dir / "runtime.json").write_text(json.dumps(bad_cm))
             with self.assertRaisesRegex(BootstrapError, "REPAIR_RELEASE_INVALID"):
@@ -526,9 +529,13 @@ class RuntimePreconditionTests(unittest.TestCase):
                 patch.object(
                     repair_checks,
                     "load_bundle",
-                    side_effect=lambda d: old_public if Path(d) == old_dir else new_public,
+                    side_effect=lambda d: (
+                        old_public if Path(d) == old_dir else new_public
+                    ),
                 ),
-                patch.object(repair_checks.host, "bootstrap_completed", return_value=True),
+                patch.object(
+                    repair_checks.host, "bootstrap_completed", return_value=True
+                ),
             ):
                 prev, pub, old_rt, new_rt = repair_checks.inputs(old_dir, new_dir)
                 self.assertEqual(prev["source_sha"], repair_checks.PREVIOUS_SHA)
@@ -543,7 +550,9 @@ class RuntimePreconditionTests(unittest.TestCase):
                     repair_checks.inputs(old_dir, new_dir)
 
                 (new_dir / "foundation.json").write_text(json.dumps({"items": [1]}))
-                with self.assertRaisesRegex(BootstrapError, "REPAIR_FOUNDATION_CHANGED"):
+                with self.assertRaisesRegex(
+                    BootstrapError, "REPAIR_FOUNDATION_CHANGED"
+                ):
                     repair_checks.inputs(old_dir, new_dir)
 
 

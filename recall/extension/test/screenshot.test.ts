@@ -12,7 +12,7 @@ function canvasWith(types: string[]) {
   }
   vi.stubGlobal('OffscreenCanvas', Canvas);
   vi.stubGlobal('createImageBitmap', () => Promise.resolve({ width: 390, height: 844, close: () => undefined }));
-  vi.stubGlobal('fetch', () => Promise.resolve(new Blob(['png']).stream() ? new Response(new Blob(['png'])) : new Response()));
+  vi.stubGlobal('fetch', () => Promise.resolve(new Response(new Blob(['png']))));
   return encodings;
 }
 

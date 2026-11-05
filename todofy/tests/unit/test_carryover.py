@@ -101,6 +101,7 @@ def test_the_candidates_are_older_pending_mail_and_the_picks_are_read_by_id():
 
 
 import json  # noqa: E402
+
 import jsonschema  # noqa: E402
 import pytest  # noqa: E402
 
@@ -130,7 +131,9 @@ def mail(probe: HostProbe) -> None:
     probe_summary(probe, "new-2", NOW - HOUR, "新邮件二")
     probe_summary(probe, "old-pending-2d", NOW - 2 * DAY - HOUR, "两天前仍待处理")
     probe_summary(probe, "old-pending-9d", NOW - 9 * DAY, "九天前仍待处理")
-    probe_summary(probe, "old-converted", NOW - 3 * DAY, "已转成任务的旧邮件", task_id="t-done", triaged_at=NOW - 2 * DAY)
+    probe_summary(
+        probe, "old-converted", NOW - 3 * DAY, "已转成任务的旧邮件", task_id="t-done", triaged_at=NOW - 2 * DAY
+    )
     probe_summary(probe, "old-imported", NOW - 4 * DAY, "导入的旧邮件", imported=1)
     probe_summary(probe, "too-old", NOW - 15 * DAY, "十五天前")
 
@@ -259,4 +262,3 @@ def test_the_summary_report_never_carries(probe: HostProbe, mail: None) -> None:
     [call] = probe.gemini.calls()
     assert call.system == prompts.SUMMARY_RANGE and "天前" not in call.user
     assert report["task_count"] == 2 and "carryover_count" not in report
-

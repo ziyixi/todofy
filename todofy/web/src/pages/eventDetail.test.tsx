@@ -71,8 +71,8 @@ describe('event detail', () => {
     let legacyCalls = 0
     const transitions = Array.from({ length: 100 }, () => ({
       transition_time: '2026-09-28T08:00:00Z',
-      state: 'pending',
-      actor: 'worker',
+      state: 'pending' as const,
+      actor: 'worker' as const,
     }))
     mockApi({
       [DETAIL]: eventDetail({ legacy_text: `legacyTexts/${EVENT_ID}`, imported: true, transitions }),

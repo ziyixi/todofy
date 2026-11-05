@@ -1,4 +1,4 @@
-"""core/metrics.py and runtime/metrics.py: data point shape, counters, percentiles, days, flush walk and the API series."""
+"""core/metrics.py and runtime/metrics.py: data points, counters, percentiles, days, flush walk, and API series."""
 
 import asyncio
 import json
@@ -225,7 +225,6 @@ def _seed_event(
     for from_state, to_state, at in transitions:
         d1.insert(
             "event_transitions",
-            source_id="mail-hero-personal",
             event_id=event_id,
             at=at,
             from_state=from_state,
@@ -257,7 +256,9 @@ def test_flush_baselines_then_walks_finished_days_and_resets_on_foreign_cursor(
     _seed_event(d1, "e1", day1, [(None, "pending", day1), ("summarizing", "complete", day1 + 25)])
     _seed_event(d1, "canary", day1, [(None, "pending", day1 + 5), ("summarizing", "complete", day1 + 10)], canary="c1")
     _seed_event(d1, "today-e", NOW, [(None, "pending", NOW)])
-    runtime_metrics.record(env, store, StepPoint(Step.SUMMARY, "ok", model="m1", tokens_in=10, tokens_out=5, attempts=1), day1)
+    runtime_metrics.record(
+        env, store, StepPoint(Step.SUMMARY, "ok", model="m1", tokens_in=10, tokens_out=5, attempts=1), day1
+    )
 
     next_at = asyncio.run(runtime_metrics.flush(env, store, NOW))
     assert next_at == metrics.day_start("2026-09-28") + DAY + runtime_metrics.FLUSH_OFFSET
@@ -272,7 +273,7 @@ def test_flush_baselines_then_walks_finished_days_and_resets_on_foreign_cursor(
     assert daily[1]["gemini_tokens"] == {"m1": 15}
 
     # Foreign/restored database: cursor no longer matches the row at that ID -> cursor_reset.
-    d1.sql("UPDATE event_transitions SET event_id = 'different' WHERE id = 4")
+    d1.sql("UPDATE event_transitions SET event_id = 'different' WHERE id = 6")
     asyncio.run(runtime_metrics.flush(env, store, NOW))
     assert _logged(capsys)[-1]["metrics"] == "cursor_reset"
 
@@ -288,7 +289,12 @@ def test_walk_stops_after_max_pages_and_day_page_bounds(runtime_metrics: Any, mo
     monkeypatch.setattr(runtime_metrics, "WALK_PAGE", 1)
     monkeypatch.setattr(runtime_metrics, "WALK_PAGES", 2)
     day1 = metrics.day_start("2026-09-26") + 100
-    _seed_event(d1, "e1", day1, [(None, "pending", day1), ("pending", "summarizing", day1 + 1), ("summarizing", "complete", day1 + 2)])
+    _seed_event(
+        d1,
+        "e1",
+        day1,
+        [(None, "pending", day1), ("pending", "summarizing", day1 + 1), ("summarizing", "complete", day1 + 2)],
+    )
     # 3 transitions with WALK_PAGE=1, WALK_PAGES=2 -> _walk returns False and flush schedules CONTINUE.
     assert asyncio.run(runtime_metrics.flush(env, store, NOW)) == NOW + runtime_metrics.CONTINUE
     # Next call finishes the walk and writes the 2 finished days (2026-09-26 and 2026-09-27).
@@ -302,4 +308,3 @@ def test_walk_stops_after_max_pages_and_day_page_bounds(runtime_metrics: Any, mo
     assert asyncio.run(runtime_metrics.day_page(d1, 10, oldest, NOW)) == ([], None)
     _, last_before = asyncio.run(runtime_metrics.day_page(d1, 5, metrics.shift(oldest, 2), NOW))
     assert last_before is None
-

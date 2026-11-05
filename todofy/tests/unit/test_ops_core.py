@@ -385,7 +385,8 @@ def test_runtime_ops_guard_jobs_canary_status_and_unavailable(monkeypatch: pytes
     from tests.unit.host_support import D1, ObjectSql, stubbed_pyodide
 
     with stubbed_pyodide(monkeypatch):
-        from todofy.runtime import backup, ops as runtime_ops
+        from todofy.runtime import backup
+        from todofy.runtime import ops as runtime_ops
 
         store = ObjectSql()
         for stmt in (*runtime_ops.DO_SCHEMA, *backup.DO_SCHEMA):
@@ -395,9 +396,7 @@ def test_runtime_ops_guard_jobs_canary_status_and_unavailable(monkeypatch: pytes
         assert runtime_ops.guard(store) == ops.NORMAL
 
         # Set a shed guard
-        shed_input = ops.guard_input(
-            {"level": "shed", "reason": "d1_reads_high", "until": stamp(NOW + 3600)}, NOW_MS
-        )
+        shed_input = ops.guard_input({"level": "shed", "reason": "d1_reads_high", "until": stamp(NOW + 3600)}, NOW_MS)
         state, changed = runtime_ops.set_guard(store, shed_input, NOW_MS)
         assert state["level"] == "shed" and changed is False
         # Repeating the exact same shed guard reports unchanged
@@ -426,7 +425,6 @@ def test_runtime_ops_guard_jobs_canary_status_and_unavailable(monkeypatch: pytes
             source_id="mail-hero-personal",
             event_id=event_id,
             payload_hash="0" * 64,
-            payload="{}",
             state="complete",
             version=2,
             created_at=NOW - 120,
@@ -462,4 +460,3 @@ def test_runtime_ops_guard_jobs_canary_status_and_unavailable(monkeypatch: pytes
         assert errors("OpsStatus", unavail) == []
         assert unavail["health"] == "down"
         assert unavail["guard"] == ops.guard_state(ops.NORMAL, NOW_MS)
-

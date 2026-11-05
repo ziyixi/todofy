@@ -286,12 +286,12 @@ function createTestStore(overrides: Partial<Env> = {}) {
   const storage = {
     sql,
     kv: {
-      get: <T>(key: string) => kvMap.get(key) as T | undefined,
+      get: (key: string) => kvMap.get(key),
       put: (key: string, value: unknown) => { kvMap.set(key, structuredClone(value)); },
       delete: (key: string) => kvMap.delete(key),
       list: () => new Map(kvMap),
     },
-    get: <T>(key: string) => Promise.resolve(kvMap.get(key) as T | undefined),
+    get: (key: string) => Promise.resolve(kvMap.get(key)),
     put: (key: string, value: unknown) => { kvMap.set(key, structuredClone(value)); return Promise.resolve(); },
     delete: (key: string) => Promise.resolve(kvMap.delete(key)),
     getAlarm: () => Promise.resolve(alarmAt),

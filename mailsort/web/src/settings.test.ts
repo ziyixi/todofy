@@ -11,7 +11,7 @@ import { classifierErrorMessage } from './format.ts'
 import { FakeServer, ledgerEntry, NOW, settle } from './test/fakeServer.ts'
 import { replayCard } from './views/replay.ts'
 
-async function open(server: FakeServer, path = '/settings', confirm = vi.fn(() => true)): Promise<HTMLElement> {
+async function open(server: FakeServer, path = '/settings', confirm: (message: string) => boolean = vi.fn(() => true)): Promise<HTMLElement> {
   server.install()
   window.history.replaceState(null, '', path)
   const root = document.createElement('div')

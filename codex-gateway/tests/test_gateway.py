@@ -227,7 +227,6 @@ class GatewayTests(unittest.IsolatedAsyncioTestCase):
     async def test_heartbeat_error_and_disconnect_wait_for_operation_cleanup(self):
         async def slow():
             await asyncio.sleep(0.005)
-            return None
 
         with patch("codex_gateway.model_api.HEARTBEAT_SECONDS", 0.001):
             frames = [frame async for frame in result_events(slow())]
@@ -375,9 +374,7 @@ class PrivateCliHome(unittest.TestCase):
 
             with (
                 patch.dict(os.environ, {"CODEX_HOME": str(shared)}, clear=True),
-                patch.object(
-                    server, "create_app", return_value=object()
-                ) as create_app,
+                patch.object(server, "create_app", return_value=object()) as create_app,
                 patch.object(server.uvicorn, "run", side_effect=run),
                 self.assertRaisesRegex(RuntimeError, "synthetic server failure"),
             ):

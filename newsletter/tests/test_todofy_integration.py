@@ -18,7 +18,6 @@ import newsletter.app as app
 import newsletter.contracts as contracts
 import newsletter.editor as newsletter_editor
 import newsletter.rendering as rendering
-import newsletter.settings as newsletter_settings
 import newsletter.todofy as newsletter_todofy
 
 TODAY = "2026-09-05"

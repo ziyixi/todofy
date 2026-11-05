@@ -1,7 +1,7 @@
 import { create } from '@ziyixi/proto/protobuf'
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt'
 import { SnapshotSchema, SnapshotImageSchema } from '@ziyixi/proto/watch/ui/v1/snapshot_pb'
-import { change, FakeServer, mount, NOW, until, watch } from './test/fakeServer.ts'
+import { change, FakeServer, mount, NOW, settle, until, watch } from './test/fakeServer.ts'
 
 const BEFORE = 'watches/news/snapshots/0000000000000001'
 const AFTER = 'watches/news/snapshots/0000000000000002'

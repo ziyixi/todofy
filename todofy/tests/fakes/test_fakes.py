@@ -197,4 +197,3 @@ def test_only_a_request_the_proxy_would_not_resend_after_a_pause_is_preceded_by_
         ("GET", "/health", HOOKS_HOST),
         ("POST", "/e", HOOKS_HOST),
     ]
-

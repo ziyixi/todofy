@@ -136,9 +136,7 @@ def test_ingest_due_recover_interrupted_and_action_claims(probe: HostProbe) -> N
     assert asyncio.run(ledger.next_wake_at(probe.db)) == NOW
 
     # transition to SUMMARIZING, then recover_interrupted (below and at crash limit)
-    summarizing = asyncio.run(
-        ledger.transition(probe.db, due, EventState.SUMMARIZING, actor=ledger.WORKER, now=NOW)
-    )
+    summarizing = asyncio.run(ledger.transition(probe.db, due, EventState.SUMMARIZING, actor=ledger.WORKER, now=NOW))
     assert summarizing is not None
     asyncio.run(ledger.recover_interrupted(probe.db, NOW + 10))
     recovered = asyncio.run(ledger.get(probe.db, SOURCE, EVENT))
@@ -181,7 +179,9 @@ def test_ingest_due_recover_interrupted_and_action_claims(probe: HostProbe) -> N
     # Action claim / replay / conflict / finish / take_over / release
     owner = "owner@example.com"
     assert asyncio.run(ledger.find_action(probe.db, owner, ACTION_ID, "h1")).claim == ledger.Claim.NEW
-    assert asyncio.run(ledger.claim_action(probe.db, owner, ACTION_ID, "recompute", "h1", NOW)).claim == ledger.Claim.NEW
+    assert (
+        asyncio.run(ledger.claim_action(probe.db, owner, ACTION_ID, "recompute", "h1", NOW)).claim == ledger.Claim.NEW
+    )
     assert (
         asyncio.run(ledger.claim_action(probe.db, owner, ACTION_ID, "recompute", "h1", NOW)).claim
         == ledger.Claim.REPLAY
@@ -194,7 +194,9 @@ def test_ingest_due_recover_interrupted_and_action_claims(probe: HostProbe) -> N
     assert asyncio.run(ledger.take_over_action(probe.db, owner, ACTION_ID, "h1", NOW + 100, NOW + 50))
     asyncio.run(ledger.release_action(probe.db, owner, ACTION_ID))
     assert asyncio.run(ledger.find_action(probe.db, owner, ACTION_ID, "h1")).claim == ledger.Claim.NEW
-    assert asyncio.run(ledger.claim_action(probe.db, owner, ACTION_ID, "recompute", "h1", NOW)).claim == ledger.Claim.NEW
+    assert (
+        asyncio.run(ledger.claim_action(probe.db, owner, ACTION_ID, "recompute", "h1", NOW)).claim == ledger.Claim.NEW
+    )
     asyncio.run(ledger.finish_action(probe.db, owner, ACTION_ID, "summary", 200))
     finished = asyncio.run(ledger.find_action(probe.db, owner, ACTION_ID, "h1"))
     assert (finished.claim, finished.result_ref, finished.http_status) == (ledger.Claim.REPLAY, "summary", 200)

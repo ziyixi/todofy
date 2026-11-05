@@ -136,7 +136,7 @@ def stubbed_pyodide(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, Any]]
 
 
 # 2026-09-28T15:00:00Z, after the 13:30 precompute time.
-NOW = 1_759_071_600
+NOW = 1_790_607_600
 
 
 def text_reply(text: str, *, tokens: int = 100, model: str = "gemini-probe") -> dict[str, Any]:
@@ -357,6 +357,3 @@ def host_probe(monkeypatch: pytest.MonkeyPatch) -> Iterator[HostProbe]:
         else:
             monkeypatch.setattr(model, "client", lambda *_args: probe.gemini)
         yield probe
-
-
-

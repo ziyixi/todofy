@@ -351,7 +351,13 @@ describe('首页', () => {
         level: 'critical' as const,
         items,
         info: [],
-        held: [GEMINI_ITEM],
+        held: [
+          {
+            entry: 'todofy',
+            code: 'gemini_budget_80',
+            target: { view: 'flows' as const, flow: 'mail-to-task', stage: 'consume', entry: 'todofy' },
+          },
+        ],
         control_unavailable_count: 2,
       },
     }
@@ -375,7 +381,7 @@ describe('首页', () => {
     expect(within(list).getAllByRole('listitem')).toHaveLength(3)
 
     const tags = within(strip).getByRole('list', { name: '已暂停与提示' })
-    expect(within(tags).getByText(/已暂停：邮件 → 任务 › Todofy 摘要（模型预算超过 80%）/)).toBeInTheDocument()
+    expect(within(tags).getByText(/已暂停：Todofy Todofy 摘要（模型预算超过 80%）/)).toBeInTheDocument()
   })
 })
 

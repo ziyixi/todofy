@@ -79,6 +79,7 @@ proto_vitest_test(
     config = "//fleet/worker:test_config",
     data = [
         ":cloudflare-workers.ts",
+        "//fleet/worker:edge_auth_types_link",
         "//fleet/worker:node_modules/vitest",
         "//fleet/worker:package_json",
     ],

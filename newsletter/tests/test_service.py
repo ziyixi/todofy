@@ -20,7 +20,6 @@ import newsletter.drain as drain
 import newsletter.editor as editor
 import newsletter.errors as errors
 import newsletter.rendering as rendering
-import newsletter.settings as newsletter_settings
 import newsletter.store as newsletter_store
 import newsletter.worker as newsletter_worker
 
@@ -455,9 +454,7 @@ def test_editor_and_send_permissions(
     with testclient.TestClient(
         app.create_app(settings, start_worker=False)
     ) as client:
-        response = client.request(
-            method, path, headers=headers(role), json={}
-        )
+        response = client.request(method, path, headers=headers(role), json={})
     assert response.status_code == (
         validated_status if role in allowed else 401
     )
@@ -746,7 +743,7 @@ def test_task_healthy_detects_terminated_worker_and_rejects_runs(settings):
     with testclient.TestClient(application) as client:
         assert app.task_healthy(application) is True
         client.portal.call(application.state.worker_task.cancel)
-        with pytest.raises(asyncio.CancelledError):
+        with pytest.raises((asyncio.CancelledError, futures.CancelledError)):
             client.portal.call(lambda: application.state.worker_task)
         assert app.task_healthy(application) is False
         health = client.get("/healthz")

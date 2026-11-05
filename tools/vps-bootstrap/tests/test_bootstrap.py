@@ -719,9 +719,7 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
             ) as services,
             contextlib.redirect_stdout(io.StringIO()),
         ):
-            self.patch_install_steps(
-                stack, skip={"services", "complete_bootstrap"}
-            )
+            self.patch_install_steps(stack, skip={"services", "complete_bootstrap"})
             with self.assertRaisesRegex(config.BootstrapError, "SYNTHETIC_FAILURE"):
                 install.install(bundle, private_path)
             complete.assert_not_called()
@@ -758,9 +756,7 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
             ) as command,
             contextlib.redirect_stdout(io.StringIO()),
         ):
-            self.patch_install_steps(
-                stack, skip={"services", "complete_bootstrap"}
-            )
+            self.patch_install_steps(stack, skip={"services", "complete_bootstrap"})
             with self.assertRaisesRegex(config.BootstrapError, "SYSTEM_COMMAND_FAILED"):
                 install.install(bundle, private_path)
             complete.assert_not_called()

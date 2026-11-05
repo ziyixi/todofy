@@ -7,14 +7,12 @@ Existing Store tables and the real importer and journal run as-is.
 import importlib.resources as resources
 import json
 import pathlib
-import types
 
 import pytest
 import ziyixi_protos.newsletter.editorial_pb2 as editorial_pb2
 
 import newsletter.contracts as contracts
 import newsletter.notion_content as newsletter_notion_content
-import newsletter.notion_intake as notion_intake
 import newsletter.notion_journal as notion_journal
 import newsletter.store as newsletter_store
 import newsletter.workflow.definition as newsletter_workflow_definition

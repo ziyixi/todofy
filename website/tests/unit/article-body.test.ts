@@ -366,7 +366,7 @@ describe("article body markup", () => {
     expect(html).toContain("shiki");
     expect(html).toContain("<figcaption><span>TypeScript snippet</span></figcaption>");
     expect(html).toContain(
-      '<pre data-language="fortran" tabIndex="0"><code>PRINT *, &#x27;HELLO&#x27;</code></pre>',
+      '<pre data-language="fortran" tabindex="0"><code>PRINT *, &#x27;HELLO&#x27;</code></pre>',
     );
   });
 });

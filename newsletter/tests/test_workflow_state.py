@@ -1027,7 +1027,12 @@ def test_dag_pipeline_archive_candidates_handles_empty_and_populated_pools(
     # Empty candidate pool returns early without archiving a packet
     pipeline.repository.output = lambda _run_id, _node_id: {"candidates": []}
     pipeline.archive_candidates(run, definition, [], [])
-    assert state.archive(run["id"]) is None
+    assert (
+        store.db.execute(
+            "SELECT * FROM workflow_archives WHERE run_id=?", (run["id"],)
+        ).fetchone()
+        is None
+    )
 
     # Populated candidate pool marks used candidates and writes index packet
     cand = workflow_content.candidate(
@@ -1040,9 +1045,10 @@ def test_dag_pipeline_archive_candidates_handles_empty_and_populated_pools(
     pkt = workflow_state.packet(store, "pkt-1")
     pkt["content"]["sources"][0]["url"] = "https://example.org/paper-1"
     pipeline.archive_candidates(run, definition, [pkt["id"]], [pkt])
-    archived = state.archive(run["id"])
+    archived = store.db.execute(
+        "SELECT * FROM workflow_archives WHERE run_id=?", (run["id"],)
+    ).fetchone()
     assert archived is not None and archived["packet_id"]
     prog = pipeline.graph_progress(run["id"])
     assert prog["id"] == definition.id
     assert any(n["id"] == dedup_node.id for n in prog["nodes"])
-

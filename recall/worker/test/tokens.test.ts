@@ -4,7 +4,7 @@
 import { createHash } from 'node:crypto';
 import { create } from '@ziyixi/proto/protobuf';
 import { timestampFromMs } from '@ziyixi/proto/protobuf/wkt';
-import { DocumentItemSchema, VisitItemSchema } from '@ziyixi/proto/recall/ingest/v1/ingest_pb';
+import { DocumentItemSchema, FocusSpanSchema, VisitItemSchema } from '@ziyixi/proto/recall/ingest/v1/ingest_pb';
 import { CreateMachineTokenRequestSchema, RegenerateMachineTokenRequestSchema } from '@ziyixi/proto/recall/ui/v1/recall_ui_service_pb';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { pageIdOf } from '../../shared/url.ts';
@@ -333,7 +333,7 @@ describe('ingest planning and deduplication helpers', () => {
   }
 
   it('detects items from a newer extension build via unrecognized fields', () => {
-    expect(fromNewerBuild({ kind: 'visit', future_field: true })).toBe(true);
+    expect(fromNewerBuild({ kind: 'star', star: { id: V1, note: 'synthetic' } })).toBe(true);
     expect(fromNewerBuild({ kind: 'visit' })).toBe(false);
     expect(fromNewerBuild('not-an-object')).toBe(false);
   });
@@ -366,19 +366,19 @@ describe('ingest planning and deduplication helpers', () => {
     // Out-of-order spans, future beyond leeway, or excessive span duration are rejected.
     const reversed = create(VisitItemSchema, {
       ...validVisit,
-      focusSpans: [{ startTime: timestampFromMs(T0), endTime: timestampFromMs(T0 - 1000) }],
+      focusSpans: [create(FocusSpanSchema, { startTime: timestampFromMs(T0), endTime: timestampFromMs(T0 - 1000) })],
     });
     expect(await planVisit(reversed, ctx)).toEqual({ kind: 'reject', reason: 'invalid_item' });
 
     const future = create(VisitItemSchema, {
       ...validVisit,
-      focusSpans: [{ startTime: timestampFromMs(T0), endTime: timestampFromMs(T0 + ITEM_CLOCK_LEEWAY_MS + 1000) }],
+      focusSpans: [create(FocusSpanSchema, { startTime: timestampFromMs(T0), endTime: timestampFromMs(T0 + ITEM_CLOCK_LEEWAY_MS + 1000) })],
     });
     expect(await planVisit(future, ctx)).toEqual({ kind: 'reject', reason: 'invalid_item' });
 
     const tooLong = create(VisitItemSchema, {
       ...validVisit,
-      focusSpans: [{ startTime: timestampFromMs(T0 - VISIT_MAX_MS - 1000), endTime: timestampFromMs(T0) }],
+      focusSpans: [create(FocusSpanSchema, { startTime: timestampFromMs(T0 - VISIT_MAX_MS - 1000), endTime: timestampFromMs(T0) })],
     });
     expect(await planVisit(tooLong, ctx)).toEqual({ kind: 'reject', reason: 'invalid_item' });
   });
@@ -430,7 +430,8 @@ describe('ingest planning and deduplication helpers', () => {
       hostKey('docs.example.com'),
       T0 - 2000,
       T0,
-    )!;
+    );
+    if (!pageRow) throw new Error('expected page row');
     const plan: DocumentPlan = outcome.plan;
     store.insert('documents', {
       id: D1,

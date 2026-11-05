@@ -900,18 +900,18 @@ describe('day, format, health, and api helpers', () => {
     expect(toApiError('unexpected')).toMatchObject({ status: 0, reason: 'BAD_RESPONSE', transient: true })
 
     let attempts = 0
-    const recovered = await withRetry(async () => {
+    const recovered = await withRetry(() => {
       attempts += 1
-      if (attempts === 1) throw new ApiError(503, 'UNAVAILABLE', 'busy')
-      return 'ok'
+      if (attempts === 1) return Promise.reject(new ApiError(503, 'UNAVAILABLE', 'busy'))
+      return Promise.resolve('ok')
     }, 1)
     expect([recovered, attempts]).toEqual(['ok', 2])
 
     let badAttempts = 0
     await expect(
-      withRetry(async () => {
+      withRetry(() => {
         badAttempts += 1
-        throw new ApiError(500, 'INTERNAL', 'bug')
+        return Promise.reject(new ApiError(500, 'INTERNAL', 'bug'))
       }, 1),
     ).rejects.toThrow('bug')
     expect(badAttempts).toBe(1)

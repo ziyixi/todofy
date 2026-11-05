@@ -326,9 +326,8 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
             GenerateRequest(model=MODEL, input=""),
         )
         for request in requests:
-            with self.subTest(request=request):
-                with self.assertRaises(RpcError):
-                    await executor.generate(request, self.home)
+            with self.subTest(request=request), self.assertRaises(RpcError):
+                await executor.generate(request, self.home)
         self.assertEqual(sdk.started, 0)
 
     async def test_bad_output_tool_and_provider_errors_are_safe_and_cleaned_up(self):
@@ -422,13 +421,15 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
         sdk = FakeSdk()
         executor = self.executor(sdk)
         request = CreateConversationRequest(name=context_name(), model=MODEL)
-        with patch.object(
-            sdk,
-            "__aenter__",
-            side_effect=ServerBusyError(-32000, "Synthetic private details"),
+        with (
+            patch.object(
+                sdk,
+                "__aenter__",
+                side_effect=ServerBusyError(-32000, "Synthetic private details"),
+            ),
+            self.assertRaises(RpcError) as busy,
         ):
-            with self.assertRaises(RpcError) as busy:
-                await executor.create(request, self.home)
+            await executor.create(request, self.home)
         self.assertEqual(
             (busy.exception.code, busy.exception.reason), ("UNAVAILABLE", "MODEL_BUSY")
         )
@@ -440,13 +441,15 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
         sdk = FakeSdk()
         executor = self.executor(sdk)
         request = CreateConversationRequest(name=context_name(), model=MODEL)
-        with patch.object(
-            sdk,
-            "__aenter__",
-            side_effect=InvalidParamsError(-32602, "Private synthetic rejection"),
+        with (
+            patch.object(
+                sdk,
+                "__aenter__",
+                side_effect=InvalidParamsError(-32602, "Private synthetic rejection"),
+            ),
+            self.assertRaises(RpcError) as invalid,
         ):
-            with self.assertRaises(RpcError) as invalid:
-                await executor.create(request, self.home)
+            await executor.create(request, self.home)
         self.assertEqual(invalid.exception.code, "INVALID_ARGUMENT")
         self.assertEqual(invalid.exception.http_status, 400)
         self.assertEqual(invalid.exception.reason, "MODEL_INVALID_REQUEST")
@@ -638,9 +641,7 @@ class ModelRouterTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaisesRegex(CodexError, "Missing final model response"):
             await events.collect(
-                SimpleNamespace(
-                    thread_id="thread-1", id="turn-1", stream=empty_stream
-                )
+                SimpleNamespace(thread_id="thread-1", id="turn-1", stream=empty_stream)
             )
 
     async def test_create_timeout_and_cleanup_process_group_termination(self):

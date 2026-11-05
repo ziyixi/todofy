@@ -164,7 +164,7 @@ describe('操作与记录', () => {
         ...scenario.ops.digest,
         enabled: false,
         last_error: 'timeout',
-        items: [GEMINI_ITEM],
+        items: [{ ...GEMINI_ITEM, since: '2026-09-29T03:20:00.000Z' }],
       },
     }
     await showOps(scenario)

@@ -372,9 +372,10 @@ class Stubs:
 def runtime(monkeypatch: pytest.MonkeyPatch):
     import sys
 
-    from tests.unit.host_support import stubbed_pyodide
+    from tests.unit.host_support import NOW, stubbed_pyodide
 
-    with stubbed_pyodide(monkeypatch):
+    with stubbed_pyodide(monkeypatch) as stubs:
+        stubs["clock"]["ms"] = NOW * 1000
         from todofy.runtime import api, owner_ui
 
         js_exc = sys.modules["pyodide.ffi"].JsException
@@ -480,7 +481,7 @@ def test_write_refusals_and_model_router_error_mapping(runtime: Stubs, monkeypat
     from tests.unit.host_support import ObjectSql
     from todofy.runtime import backup
 
-    recompute_req = json.dumps({"name": "latestReports", "kind": "SUMMARY", "request_id": EVENT})
+    recompute_req = json.dumps({"name": "latestReports", "kind": "summary", "request_id": EVENT})
     env_maint = types.SimpleNamespace(MAINTENANCE_MODE="true")
     assert handle(runtime, Coordinator(), method="RecomputeReport", request=recompute_req, env=env_maint) == refusal(
         "MAINTENANCE"
@@ -490,9 +491,9 @@ def test_write_refusals_and_model_router_error_mapping(runtime: Stubs, monkeypat
     for stmt in backup.DO_SCHEMA:
         store.exec(stmt)
     monkeypatch.setattr(runtime.owner_ui.backup, "holds_ledger", lambda *_a: True)
-    assert handle(
-        runtime, Coordinator(sql=store), method="RecomputeReport", request=recompute_req
-    ) == refusal("UNAVAILABLE")
+    assert handle(runtime, Coordinator(sql=store), method="RecomputeReport", request=recompute_req) == refusal(
+        "UNAVAILABLE"
+    )
 
     monkeypatch.setattr(runtime.owner_ui.backup, "holds_ledger", lambda *_a: False)
     for code in ("UNAUTHENTICATED", "PERMISSION_DENIED", "FAILED_PRECONDITION"):
@@ -538,14 +539,14 @@ def test_runtime_api_and_owner_ui_readers(runtime: Stubs) -> None:
     import asyncio
     import types
 
-    from tests.unit.host_support import D1, ObjectSql
+    from tests.unit.host_support import D1, NOW, ObjectSql
     from todofy.runtime import backup
 
     db = D1()
     store = ObjectSql()
     for stmt in backup.DO_SCHEMA:
         store.exec(stmt)
-    now = 1_759_071_600
+    now = NOW
     db.insert(
         "mail_events",
         source_id="mail-hero-personal",
@@ -554,7 +555,7 @@ def test_runtime_api_and_owner_ui_readers(runtime: Stubs) -> None:
         payload="{}",
         state="pending",
         version=1,
-        created_at=now - 7200,
+        created_at=now - 7 * 3600,
         updated_at=now - 60,
         next_attempt_at=now - 30,
     )
@@ -583,9 +584,7 @@ def test_runtime_api_and_owner_ui_readers(runtime: Stubs) -> None:
     overview = asyncio.run(runtime.api.overview_data(env, coord))
     assert overview["build"] == "sha-1" and overview["counts"]["pending"] == 1
 
-    items, following = asyncio.run(
-        runtime.api.event_page(env, attention=False, state="pending", after=None, limit=1)
-    )
+    items, following = asyncio.run(runtime.api.event_page(env, attention=False, state="pending", after=None, limit=1))
     assert len(items) == 1 and items[0]["event_id"] == EVENT and following is None
 
     att_items, _ = asyncio.run(runtime.api.event_page(env, attention=True, state=None, after=None, limit=10))
@@ -603,9 +602,7 @@ def test_runtime_api_and_owner_ui_readers(runtime: Stubs) -> None:
     list_res = handle(runtime, coord, method="ListMailEvents", request='{"page_size": 10}', env=env)
     assert len(json.loads(list_res["ok"])["mail_events"]) == 1
 
-    legacy_res = handle(
-        runtime, coord, method="GetLegacyText", request=f'{{"name": "legacyTexts/{EVENT}"}}', env=env
-    )
+    legacy_res = handle(runtime, coord, method="GetLegacyText", request=f'{{"name": "legacyTexts/{EVENT}"}}', env=env)
     assert json.loads(legacy_res["ok"])["text"] == "legacy body"
 
     metrics_res = handle(runtime, coord, method="ListMetricDays", request='{"page_size": 5}', env=env)
@@ -613,7 +610,9 @@ def test_runtime_api_and_owner_ui_readers(runtime: Stubs) -> None:
 
     # Exercise legacy /api/v1 routes in runtime/api.py
     req = runtime.api.OwnerRequest
-    assert asyncio.run(runtime.api.handle(req("GET", "/api/v1/overview", "", None, None), env, coord, OWNER)).status == 200
+    assert (
+        asyncio.run(runtime.api.handle(req("GET", "/api/v1/overview", "", None, None), env, coord, OWNER)).status == 200
+    )
     assert (
         asyncio.run(
             runtime.api.handle(req("GET", "/api/v1/events", "view=recent&limit=10", None, None), env, coord, OWNER)
@@ -622,7 +621,9 @@ def test_runtime_api_and_owner_ui_readers(runtime: Stubs) -> None:
     )
     assert (
         asyncio.run(
-            runtime.api.handle(req("GET", "/api/v1/events", "view=attention&state=pending", None, None), env, coord, OWNER)
+            runtime.api.handle(
+                req("GET", "/api/v1/events", "view=attention&state=pending", None, None), env, coord, OWNER
+            )
         ).status
         == 400
     )
@@ -644,4 +645,3 @@ def test_runtime_api_and_owner_ui_readers(runtime: Stubs) -> None:
         ).status
         == 404
     )
-

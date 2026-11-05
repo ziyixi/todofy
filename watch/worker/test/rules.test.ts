@@ -390,7 +390,7 @@ describe('scheduler, pipeline, and backup cell helpers', () => {
 
     const baseRow = { id: 'w1', host: 'news.example.com' } as WatchRow;
     expect(laneOf({ ...baseRow, settings: JSON.stringify({ display_name: 'News', uri: 'https://news.example.com/' }) })).toBe('news.example.com');
-    expect(laneOf({ ...baseRow, settings: JSON.stringify({ display_name: 'SPA', uri: 'https://news.example.com/', fetcher: 'BROWSER' }) })).toBe(':browser');
+    expect(laneOf({ ...baseRow, settings: JSON.stringify({ display_name: 'SPA', uri: 'https://news.example.com/', fetcher: 'browser', check_interval_minutes: 360 }) })).toBe(':browser');
     expect(laneOf({ ...baseRow, settings: '{invalid-json' })).toBe('news.example.com');
   });
 
@@ -440,7 +440,7 @@ describe('scheduler, pipeline, and backup cell helpers', () => {
     const raw = new Uint8Array(9000);
     for (let i = 0; i < raw.length; i++) raw[i] = (i * 17) & 0xff;
     const encoded = encodeCell(raw.buffer);
-    expect(encoded).toEqual({ base64: expect.any(String) });
+    expect(encoded).toEqual({ base64: expect.any(String) as unknown });
     const decoded = decodeCell(encoded);
     expect(decoded).toBeInstanceOf(ArrayBuffer);
     expect(new Uint8Array(decoded as ArrayBuffer)).toEqual(raw);

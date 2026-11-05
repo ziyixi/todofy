@@ -12,8 +12,8 @@ afterEach(() => {
 });
 
 it("exposes mailApi client methods and maps readMailSettings and updateMailCategories through api", async () => {
-  expect(typeof mailApi.listMails).toBe("function");
-  expect(typeof mailApi.getMail).toBe("function");
+  expect(typeof mailApi.listMailItems).toBe("function");
+  expect(typeof mailApi.getMailItem).toBe("function");
 
   const stored = create(MailCategoriesSchema, {
     name: "mailCategories",
@@ -50,7 +50,7 @@ it("exposes mailApi client methods and maps readMailSettings and updateMailCateg
     .spyOn(api, "updateMailCategories")
     .mockResolvedValue(updated);
   const updateResult = await categoryActions.updateMailCategories(
-    [{ id: "cat-2", labelId: "label-later", priority: 3 }],
+    [{ labelId: "label-later", priority: 3 }],
     "5",
   );
   expect(updateSpy).toHaveBeenCalledWith({

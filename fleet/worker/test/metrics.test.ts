@@ -17,8 +17,9 @@ function memorySql(db = new DatabaseSync(':memory:')): { db: DatabaseSync; sql: 
         return {
           toArray: () => rows,
           one: () => {
-            if (rows.length !== 1) throw new Error(`Expected 1 row, got ${rows.length}`);
-            return rows[0]!;
+            const first = rows[0];
+            if (rows.length !== 1 || !first) throw new Error(`Expected 1 row, got ${String(rows.length)}`);
+            return first;
           },
           [Symbol.iterator]: () => rows[Symbol.iterator](),
         };
@@ -183,11 +184,11 @@ describe('retention and range budgets', () => {
     expect(rows.find((row) => row.resolution === 86_400)?.n).toBeGreaterThanOrEqual(730);
 
     const twoYears = store.summarize('vps', 'two_years', now + DAY, []);
-    expect(twoYears).not.toBeNull();
-    for (const series of twoYears!.series) {
+    if (!twoYears) throw new Error('expected summary');
+    for (const series of twoYears.series) {
       expect(series.points.length).toBeLessThanOrEqual(244);
     }
-    expect(twoYears!.series.length).toBe(3 + 4 + 2 * 3 + 2 * 3);
+    expect(twoYears.series.length).toBe(3 + 4 + 2 * 3 + 2 * 3);
 
     const halfYear = store.summarize('vps', 'half_year', now + DAY, ['memory_used_bytes']);
     expect(halfYear?.series[0]?.points).toHaveLength(180);

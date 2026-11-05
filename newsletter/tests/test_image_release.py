@@ -61,17 +61,25 @@ def test_probe_check_console_policy_and_check_http(
         probe.check_console_policy("d" * 64)
 
     rendered = {
-        "html": '<p>MOCK</p><p>TODOFY / 与你有关</p><img src="cid:newsletter-chart">',
+        "html": (
+            "<p>MOCK</p><p>TODOFY / 与你有关</p>"
+            '<img src="cid:newsletter-chart">'
+        ),
         "text": "MOCK",
         "chart_png": "YWJj",
     }
     rendered["render_hash"] = probe.contracts.content_hash(rendered)
     preview_body = probe.rendering.preview_html(rendered).encode()
-    instruction_dir = pathlib.Path(
+    source_instruction_dir = pathlib.Path(
         str(probe.resources.files("newsletter").joinpath("instructions"))
     )
+    instruction_dir = tmp_path / "instructions"
+    instruction_dir.mkdir(exist_ok=True)
+    for md_file in source_instruction_dir.glob("*.md"):
+        (instruction_dir / md_file.name).write_bytes(md_file.read_bytes())
+    monkeypatch.setattr(probe.resources, "files", lambda _: tmp_path)
     directions = [
-        {"name": item.name, "state": "collected"}
+        {"id": item.id, "state": "collected"}
         for item in probe.instructions.load_instructions(instruction_dir)
     ]
 

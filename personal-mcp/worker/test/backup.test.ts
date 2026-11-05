@@ -65,7 +65,7 @@ function createBackupStorage(): BackupStorage {
     },
   } as unknown as SqlStorage;
   const kv = {
-    get: <T>(key: string) => kvMap.get(key) as T | undefined,
+    get: (key: string) => kvMap.get(key),
     put: (key: string, value: unknown) => { kvMap.set(key, structuredClone(value)); },
     delete: (key: string) => kvMap.delete(key),
     list: () => new Map(kvMap),

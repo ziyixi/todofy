@@ -5,13 +5,14 @@ from __future__ import annotations
 import asyncio
 import base64
 import collections
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 import contextlib
 import copy
 import hashlib
 import json
 import pathlib
 import types as std_types
+from typing import cast, TypeVar
 import urllib.parse as parse
 import uuid
 
@@ -27,6 +28,8 @@ import newsletter.notion_sync as notion_sync
 import newsletter.store as newsletter_store
 import newsletter.types as types
 import tests.support.rendering as rendering
+
+_T = TypeVar("_T")
 
 DAY = "2026-09-07"
 MATERIAL = "11111111-1111-4111-8111-111111111111"
@@ -107,12 +110,13 @@ class ApiRig:
             EDITION: source("edition", complete=complete),
         }
         self.requests: list[httpx.Request] = []
-        self.extra = None
+        self.extra: Callable[[httpx.Request], httpx.Response] | None = None
         self.api = notion_api.NotionWorkspace(
             TOKEN, MATERIAL, EDITION, transport=httpx.MockTransport(self.handle)
         )
 
     def handle(self, request: httpx.Request) -> httpx.Response:
+        """Serve synthetic Notion data-source and page responses."""
         self.requests.append(request)
         assert (
             request.url.scheme == "https"
@@ -149,6 +153,7 @@ class ApiRig:
         )
 
     def mutations(self) -> list[httpx.Request]:
+        """Return recorded non-query mutation requests."""
         return [
             r
             for r in self.requests
@@ -177,12 +182,16 @@ class FakeWorkspace:
         code: str = "NOTION_UNKNOWN",
         cancel: bool = False,
     ) -> None:
+        """Queue one simulated failure for the named workspace method."""
         self.failures[method].append((landed, code, cancel))
 
     def count(self, method: str) -> int:
+        """Count recorded invocations of the named workspace method."""
         return sum(name == method for name, _ in self.calls)
 
-    def _mutation(self, method: str, value: object, effect):
+    def _mutation(
+        self, method: str, value: object, effect: Callable[[], _T]
+    ) -> _T:
         self.calls.append((method, copy.deepcopy(value)))
         if not self.failures[method]:
             return effect()
@@ -194,6 +203,7 @@ class FakeWorkspace:
         raise adapters.AdapterError(code, ambiguous=code == "NOTION_UNKNOWN")
 
     async def lookup(self, kind: str, key: str) -> list[types.Payload]:
+        """Look up synthetic Notion pages by kind and sync key."""
         self.calls.append(("lookup", (kind, key)))
         return copy.deepcopy(
             [
@@ -205,6 +215,7 @@ class FakeWorkspace:
         )
 
     async def create(self, kind: str, properties: types.Payload) -> str:
+        """Create a synthetic Notion page and return its deterministic ID."""
         key = "".join(
             p["text"]["content"] for p in properties["sync_key"]["rich_text"]
         )
@@ -232,6 +243,8 @@ class FakeWorkspace:
     async def patch(
         self, kind: str, page_id: str, properties: types.Payload
     ) -> None:
+        """Patch properties on an existing synthetic Notion page."""
+
         def effect() -> None:
             assert self.pages[page_id]["kind"] == kind
             self.pages[page_id]["properties"].update(copy.deepcopy(properties))
@@ -279,6 +292,8 @@ class FakeWorkspace:
     async def append(
         self, page_id: str, blocks: list[types.Payload]
     ) -> list[types.Payload]:
+        """Append child blocks to a synthetic Notion page."""
+
         def effect() -> list[types.Payload]:
             current = self.pages[page_id]["blocks"]
             returned = [
@@ -291,14 +306,18 @@ class FakeWorkspace:
         return self._mutation("append", (page_id, blocks), effect)
 
     async def children(self, page_id: str) -> list[types.Payload]:
+        """Return child blocks of a synthetic Notion page."""
         self.calls.append(("children", page_id))
         return copy.deepcopy(self.pages[page_id]["blocks"])
 
     async def get_page(self, page_id: str) -> types.Payload:
+        """Return a synthetic Notion page payload by ID."""
         self.calls.append(("get_page", page_id))
         return copy.deepcopy(self.pages[page_id])
 
     async def upload_png(self, png: bytes) -> str:
+        """Store a synthetic PNG upload and return its upload ID."""
+
         def effect() -> str:
             upload_id = str(
                 uuid.uuid5(
@@ -325,17 +344,22 @@ class SyncRig:
         self.store = newsletter_store.Store(path, "mock")
         self.journal = notion_journal.NotionJournal(self.store, destination)
         self.sync = notion_sync.NotionSync(
-            self.journal, self.api, include_personal=False
+            self.journal,
+            cast(notion_api.NotionWorkspace, self.api),
+            include_personal=False,
         )
 
     def restart(self) -> None:
+        """Reopen the SQLite store while retaining external workspace state."""
         self.store.close()
         self.store = newsletter_store.Store(self.path, "mock")
         self.journal = notion_journal.NotionJournal(
             self.store, self.destination
         )
         self.sync = notion_sync.NotionSync(
-            self.journal, self.api, include_personal=False
+            self.journal,
+            cast(notion_api.NotionWorkspace, self.api),
+            include_personal=False,
         )
 
 

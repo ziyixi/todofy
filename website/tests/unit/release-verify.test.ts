@@ -128,13 +128,13 @@ describe("website wrangler.toml", () => {
 
     const dir = await mkdtemp(path.join(tmpdir(), "wrangler-cli-test-"));
     const argsLog = path.join(dir, "args.jsonl");
+    const pnpmScript = path.join(dir, "fake-pnpm.cjs");
     const pnpmBin = path.join(dir, "pnpm");
     const version = "11111111-1111-4111-8111-111111111111";
     try {
       await writeFile(
-        pnpmBin,
+        pnpmScript,
         [
-          `#!${process.execPath}`,
           'const fs = require("node:fs");',
           `const logPath = ${JSON.stringify(argsLog)};`,
           'fs.appendFileSync(logPath, JSON.stringify(process.argv.slice(2)) + "\\n");',
@@ -145,9 +145,13 @@ describe("website wrangler.toml", () => {
           "  fs.writeFileSync(outPath, process.env.FAKE_WRANGLER_OUTPUT);",
           "}",
         ].join("\n"),
+      );
+      await writeFile(
+        pnpmBin,
+        `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(pnpmScript)} "$@"\n`,
         { mode: 0o755 },
       );
-      const makeCli = (extraEnv: NodeJS.ProcessEnv = {}) =>
+      const makeCli = (extraEnv: Record<string, string> = {}) =>
         new WranglerCli({
           cwd: dir,
           env: {

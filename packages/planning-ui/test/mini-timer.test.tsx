@@ -16,7 +16,11 @@ import type {
   PlusData,
   TimerSnapshot,
 } from "../src/model";
-import { stubPictureInPicture } from "./setup";
+import {
+  fakePipWindow,
+  stubPictureInPicture,
+  type FakePipWindow,
+} from "./setup";
 
 // Document Picture-in-Picture is stubbed in setup.ts: each window's document is an iframe's,
 // whose timers are its own, and whose first close() fires pagehide as Chrome's does.
@@ -393,11 +397,11 @@ it("closes when the session ends and when the page unmounts; the owner closing i
 
 it("closes a window that opens after the session ended or the page left", async () => {
   // Chrome answers the request later than the click.
-  const opened: ((pip: Fake) => void)[] = [];
+  const opened: ((pip: FakePipWindow) => void)[] = [];
   Object.defineProperty(window, "documentPictureInPicture", {
     value: {
       requestWindow: vi.fn(
-        () => new Promise<Fake>((resolve) => opened.push(resolve)),
+        () => new Promise<FakePipWindow>((resolve) => opened.push(resolve)),
       ),
     },
     configurable: true,
@@ -410,7 +414,7 @@ it("closes a window that opens after the session ended or the page left", async 
   await act(async () =>
     fireEvent.click(screen.getByRole("button", { name: "Stop session" })),
   );
-  const late = fakeWindow();
+  const late = fakePipWindow();
   await act(async () => opened[0]!(late));
   expect(late.closed).toBe(true);
   cleanup();
@@ -419,7 +423,7 @@ it("closes a window that opens after the session ended or the page left", async 
   await screen.findByRole("button", { name: "Mini timer" });
   fireEvent.click(toggle());
   cleanup();
-  const orphan = fakeWindow();
+  const orphan = fakePipWindow();
   await act(async () => opened[1]!(orphan));
   expect(orphan.closed).toBe(true);
   expect(page.actions.timer).toHaveBeenCalledTimes(1);

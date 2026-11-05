@@ -403,4 +403,3 @@ def test_a_single_overlong_line_is_cut_hard():
     fitted = fit_summary("x" * 12_001)
     assert fitted is not None and newsletter_text_ok(fitted, MAX_SUMMARY_CHARS)
     assert fitted.startswith("x" * 100) and fitted.endswith(SUMMARY_TRUNCATED_NOTICE)
-

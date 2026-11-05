@@ -1,37 +1,40 @@
 """Local component failures never erase an independently approved story unit."""
 
 import asyncio
+import base64
 import copy
 import datetime
+import email.parser as parser
+import email.policy as email_policy
+import html
 import importlib.resources as resources
+import io
 import json
 import pathlib
 import re
 import uuid
 
+import httpx
+import PIL.Image as Image
 import pytest
 
-import newsletter.collection.instructions as instructions
+import newsletter.adapters as adapters
 import newsletter.content_config as content_config
 import newsletter.contracts as contracts
 import newsletter.editor as newsletter_editor
 import newsletter.errors as errors
-import newsletter.prompts as prompts
-import newsletter.rendering as rendering
+import newsletter.rendering as newsletter_rendering
+import newsletter.store as newsletter_store
+import newsletter.todofy as todofy
 import newsletter.usage as newsletter_usage
 import newsletter.workflow.components as components
-import newsletter.workflow.content as content
-import newsletter.workflow.definition as definition
 import newsletter.workflow.feed_excerpts as feed_excerpts
 import newsletter.workflow.publication as publication
-import newsletter.workflow.researcher as researcher
-import newsletter.workflow.sources as sources
 import newsletter.workflow.story_editor as newsletter_workflow_story_editor
-import newsletter.workflow.story_nodes as story_nodes
-import tests.support.news_first_policy as policy
 import tests.support.publication as publication_support
+import tests.support.rendering as rendering
 import tests.support.story_editor as story_editor
-import tests.support.workflow_content as workflow_content
+import tests.support.usage as tests_support_usage
 
 
 async def test_approved_body_and_signal_freeze_without_repair(rig):
@@ -2235,14 +2238,11 @@ async def test_publication_checks_the_pinned_binding_again(
 
 
 def test_components_helpers_handle_none_unknown_and_nested_citations():
+    assert components.component_content(None, None, "signal") is None
+    assert components.component_content({}, {}, "unknown") is None
+    assert components.component_citations({}, "signal") == []
+    assert components.component_citations({}, "unknown") == []
     sample = story_editor.story(reading=True, chart=True)
-    assert components.body_content(sample, copy_values=False) == {
-        k: v
-        for k, v in sample.items()
-        if k not in components.OPTIONAL_COMPONENTS
-    }
-    assert components.component_content(None, {"story_id": "s"}, "body") is None
-    assert components.component_content(sample, None, "unknown") is None
     assert components.component_citations(
         sample["recommended_reading"], "reading"
     ) == [
@@ -2250,804 +2250,477 @@ def test_components_helpers_handle_none_unknown_and_nested_citations():
         *sample["recommended_reading"].get("supporting_citations", []),
     ]
     assert components.component_citations(sample["chart"], "chart") == [
-        "pkt-1/s1"
+        "packet/source"
     ]
-    assert components.component_citations(sample, "body") == ["pkt-1/s1"]
+    assert components.component_citations(sample, "body") == ["packet/source"]
     assert components.citations(
         [
             {"citation": "a/1"},
             {"citations": ["b/2", 3], "supporting_citations": ["c/3"]},
         ]
     ) == {"a/1", "b/2", "c/3"}
-    wrapped = components.validation_draft(
-        sample, subject="Subj", title="Title"
-    )
+    wrapped = components.validation_draft(sample, subject="Subj", title="Title")
     assert "recommended_reading" in wrapped and "chart" in wrapped
 
 
-def read(path):
+@pytest.fixture
+def reader_profile():
     return (
-        resources.files("newsletter").joinpath(path).read_text(encoding="utf-8")
+        resources.files("newsletter")
+        .joinpath("policy/reader-profile.md")
+        .read_text(encoding="utf-8")
     )
 
 
-def prompt_body(filename):
-    return prompts.parse_prompt_document(
-        read(f"prompts/{filename}"), source=filename
-    ).body
-
-
-def direction_body(filename):
-    return instructions.parse_instruction_document(
-        read(f"directions/{filename}"), source=filename
-    ).body
-
-
-def test_editor_prompt_requires_newsroom_value_plain_terms_and_concrete_writing():
-    prompt = prompt_body("newsletter_editor.md")
-    for required in (
-        "先用自然中文把概念讲明白",
-        "每个选题必须回答三件事：发生了什么、旧方法卡在哪、这次变化和边界是什么",
-        "不得把论文题目、方法缩写、框架名或基准分数直接当导语",
-        "任何缩写、专门机制、评测基准、法规简称首次出现时",
-        "少写空泛判断，多写读者能抓住的具体事实",
-        "不得用“具有重要意义”“引发广泛关注”“推动行业发展”“值得持续跟踪”这类套话收尾",
-        "导语先交代今天最值得读的 2 到 3 个具体变化",
-        "`briefing` 至少写两段",
-        "`feature` 至少写三段",
-        "说明它補齐整期哪块背景、实验细节或现实约束",
-        "先写坐标轴、单位和直接观察到的差异，再写趋势与原因",
-    ):
-        assert required in prompt
-
-
-def test_workflow_prompts_enforce_reader_value_selection_and_explanation_audit():
-    planner = prompt_body("topic_planner.md")
-    for required in (
-        "选题标准是新闻性与读者收获",
-        "发生了什么、旧方法或旧规则卡在哪、这次改动带来了什么以及边界在哪",
-        "只给缩写、新名词或榜单分数、看不出真实问题与证据的条目应落选或降级",
-        "`rationale` 用两三句具体中文说明：这个选题解决什么真实问题",
-    ):
-        assert required in planner
-
-    research = prompt_body("story_research.md")
-    for required in (
-        "优先补齐能让读者真正看懂来龙去脉的材料",
-        "摘录要保留具体机制、实验设定、数字、生效范围或限制条件",
-        "如果一手页面或论文能核实作者、机构、发表或预印本状态，以及这项工作具体推进了哪一步",
-    ):
-        assert required in research
-
-    writer = prompt_body("story_writer.md")
-    for required in (
-        "读者不需要先懂行话",
-        "先用人话交代问题，再引入术语或英文缩写",
-        "每个选题写清四件事：具体事件或结果、此前做法卡在哪里、这次怎么改或测出了什么、适用条件与未解限制",
-        "`briefing` 至少写 2 段完整中文",
-        "`feature` 至少写 3 段完整中文",
-        "只要来源支持，在正文中自然交代是谁做的（作者或团队、所属机构、发表场合或预印本状态）",
-        "不要为了省事缩成一句口号，也不要用“意义重大”“值得关注”之类空话凑字数",
-    ):
-        assert required in writer
-
-    reviewer = prompt_body("story_reviewer.md")
-    for required in (
-        "可读性与信息密度同样属于审稿范围",
-        "如果正文堆砌未解释的缩写或术语、只报论文名或跑分却不讲问题与方法",
-        "应在 `findings` 指明缺口并将该组件判为 `blocked`",
-        "如果来源已经给出作者、机构或具体贡献，正文却写成听不出由来的空泛口号",
-    ):
-        assert required in reviewer
-
-
-def test_direction_files_select_explainable_news_over_title_or_score_churn():
-    expectations = {
-        "01-ai-ml.md": (
-            "发生了什么、此前方法卡在哪、这次改动如何验证、代价或失败边界是什么",
-            "不要因为换了新缩写、模型代号或榜单刷分就入选",
-        ),
-        "02-computing-systems.md": (
-            "系统瓶颈、工程折中、吞吐/延迟/能耗/成本变化与部署条件",
-            "能解释清“原来卡在哪、这次改了哪一层、生产环境付出什么代价”的条目",
-        ),
-        "03-world-tech-policy.md": (
-            "制度变化、执法动作、产业约束、基础设施事件或跨区域影响",
-            "把条文、裁决或公告翻译成具体义务、时间表、豁免条件和受影响对象",
-        ),
-        "04-math-physics-foundations.md": (
-            "非专业读者也能看懂“以前卡在哪、这次推进了哪一步、离应用还有多远”",
-            "避免只贴定理名、猜想代号或艰深记号却无法交代直观图景的条目",
-        ),
-        "05-life-health-earth.md": (
-            "研究对象、样本或数据规模、对照设计、主要结果和临床/现实距离",
-            "避免把动物实验、体外结果或早期相关性写成已经落地的医学结论",
-        ),
-    }
-    for filename, clauses in expectations.items():
-        text = direction_body(filename)
-        for clause in clauses:
-            assert clause in text
-
-
-def test_newsroom_prompt_policy_aligns_with_configured_workflow_budget():
-    workflow = json.loads(read("workflows/default.json"))
-    assert workflow["budgets"]["max_stories"] == 6
-    nodes = {node["id"]: node for node in workflow["nodes"]}
-    assert nodes["plan"]["prompt"] == "topic_planner.md"
-    assert nodes["research"]["prompt"] == "story_research.md"
-    assert nodes["write"]["writer_prompt"] == "story_writer.md"
-    assert nodes["write"]["reviewer_prompt"] == "story_reviewer.md"
-
-
-def test_news_first_editorial_prompts_state_hierarchy_provenance_and_card_roles():
-    expected = {
-        "direction_discovery.md": (
-            "同日或近 24–72 小时内首次公开、修订、裁决、发布或披露具体数据的事项",
-            "若能从打开的一手来源确认，必须填入作者或发布主体、机构、发表或发布状态",
-            "摘要先用自然中文说明真实问题，再解释新名词或缩写",
-        ),
-        "topic_planner.md": (
-            "按“当日新闻性 → 证据扎实度 → 读者收获 → 方向平衡”排序",
-            "整期体裁要有层次：至少规划 1 个 `feature`",
-            "优先把多个方向放进同一期，避免单一领域刷屏",
-        ),
-        "story_research.md": (
-            "核实谁做的（作者或发布团队、机构）、发表在何处或处于什么程序阶段",
-            "不能因为想写得好看就补入网页上没写、也没打开核实过的背景常识",
-        ),
-        "story_writer.md": (
-            "先用一两句日常中文把问题讲清楚，再给缩写、机制名、基准名或法规简称补一句自然解释",
-            "交代清楚作者或发布团队、所属机构、发表场合或预印本/政策阶段",
-            "`feature` 至少 3 段，完整展开背景、关键做法、数字证据与边界",
-            "`recommended_reading` 只在某篇核心论文、长报告、法规文本或基准文档值得读者顺着原文继续深读时填写",
-            "`signal` 必须精炼、克制、独立可读，用 1–2 段交代已确认事实、为何今天值得知道，以及哪部分细节仍在核验",
-        ),
-        "story_reviewer.md": (
-            "把预印本、动物实验、局部基准或征求意见稿夸大成既定事实",
-            "只有缩写和术语堆砌、外行读者看不懂因果链，或用空泛套话充数",
-            "`reading` 还要检查它是否解释了“为什么值得读原文、能补哪块细节”",
-        ),
-        "newsletter_editor.md": (
-            "先当科技与学术编辑部主编，再当审校人",
-            "自然交代作者或团队、机构、发表场合或阶段，以及这项工作究竟推进了什么",
-            "`recommended_reading` 像编辑部的延伸阅读卡：说清这篇原文适合补哪块背景、实验细节或制度条文",
-        ),
-    }
-    for name, phrases in expected.items():
-        text = prompt_body(name)
-        for phrase in phrases:
-            assert phrase in text, f"{name} missing {phrase}"
-
-
-def test_direction_files_require_source_provenance_and_plain_explanation():
-    for name in (
-        "01-ai-ml.md",
-        "02-computing-systems.md",
-        "03-world-tech-policy.md",
-        "04-math-physics-foundations.md",
-        "05-life-health-earth.md",
-    ):
-        text = direction_body(name)
-        assert "作者" in text or "发布主体" in text
-        assert "机构" in text
-
-
-def test_api_feed_metadata_preserves_provenance_and_plain_source_basis():
-    entries = sources.parse_arxiv(policy.ARXIV_ATOM, "01-ai-ml")
-    assert len(entries) == 1
-    entry = entries[0]
-    assert entry["authors"] == "Lin Chen, Maya Patel"
-    assert entry["affiliations"] == " Institute for Systems AI"
-    assert entry["venue"] == "arXiv cs.LG"
-    assert entry["publication_status"] == "预印本"
-    assert "Lin Chen" in entry["source_basis"]
-    assert "arXiv" in entry["source_basis"]
-    assert entry["contribution"].startswith("Separates speculative verification")
-    assert entry["evidence_urls"] == [
-        "https://arxiv.org/abs/2609.01234v1",
-        "https://doi.org/10.48550/arXiv.2609.01234",
-    ]
-
-
-def test_feed_brief_renders_provenance_and_contribution_for_writer_and_reviewer():
-    entry = sources.parse_arxiv(policy.ARXIV_ATOM, "01-ai-ml")[0]
-    candidate = researcher.normalize_candidate(
-        entry,
-        direction="01-ai-ml",
-        provenance="feed",
-        issue_date="2026-09-06",
-    )
-    assert candidate is not None
-    packet = story_nodes.feed_brief([candidate], "story-1")["packets"][0]
-    body = packet["content"]["body"]
-    for detail in (
-        "作者/主体：Lin Chen, Maya Patel",
-        "机构：Institute for Systems AI",
-        "发表场所：arXiv cs.LG（预印本）",
-        "核心贡献：Separates speculative verification",
-        "证据依据：arXiv 摘要记录",
-    ):
-        assert detail in body
-    assert packet["content"]["sources"][0]["provenance"] == "feed"
-
-
-async def test_prompt_inputs_carry_provenance_fields_into_plan_research_and_write(
-    tmp_path,
-):
-    candidate = policy.rich_candidate()
-    assert candidate is not None
-    seen = []
-
-    class RecordingEditor:
-        async def execute(
-            self,
-            prompt,
-            output_schema,
-            activity,
-            workspace,
-            *,
-            require_search=True,
-            inspect_sources=False,
-            approval_sources=None,
-        ):
-            seen.append((activity, json.loads(prompt)))
-            if activity.endswith("plan"):
-                return (
-                    json.dumps(
-                        {
-                            "stories": [
-                                {
-                                    "story_id": "story-1",
-                                    "title": "投机解码把验证延迟从批处理主路径拆开",
-                                    "kind": "feature",
-                                    "candidate_ids": [candidate["id"]],
-                                    "priority": 1,
-                                    "rationale": (
-                                        "长上下文推理过去被验证停顿拖慢；这项工作给出了可复现的验证拆分实验。"
-                                    ),
-                                }
-                            ],
-                            "coverage": [
-                                {
-                                    "direction": "01-ai-ml",
-                                    "status": "planned",
-                                    "note": "selected",
-                                }
-                            ],
-                        }
-                    ),
-                    set(),
-                    True,
-                )
-            return (
-                json.dumps(
-                    workflow_content.research_payload(
-                        url=candidate["url"],
-                        scope="abstract",
-                        excerpt=candidate["summary"],
-                    )
-                ),
-                {candidate["url"], "https://example.org/lab"},
-                True,
-            )
-
-    prep = content.ContentPreparation(RecordingEditor())
-    planned = await prep.plan(
-        [candidate],
-        [],
-        [instructions.Instruction("01-ai-ml", "AI", "Focus")],
-        "2026-09-06",
-        3,
-        tmp_path / "plan",
-    )
-    brief = await prep.research(
-        planned.stories[0],
-        [candidate],
-        "2026-09-06",
-        tmp_path / "research",
-    )
-    plan_candidate = seen[0][1]["candidates"][0]
-    research_candidate = seen[1][1]["candidates"][0]
-    for payload in (plan_candidate, research_candidate):
-        assert payload["authors"] == "Lin Chen, Maya Patel"
-        assert payload["affiliations"] == "Institute for Systems AI"
-        assert payload["venue"] == "arXiv cs.LG"
-        assert payload["publication_status"] == "预印本"
-        assert "延迟降低 28%" in payload["contribution"]
-        assert payload["evidence_urls"] == [
-            "https://example.org/spec-decode",
-            "https://example.org/lab",
-        ]
-    assert brief["candidates"][0]["authors"] == "Lin Chen, Maya Patel"
-
-
-def test_configured_edition_assembler_produces_hierarchical_newsroom_issue():
-    workflow = definition.load()
-    assemble = next(
-        node for node in workflow.nodes if node["type"] == "edition_assembler"
-    )
-    stories = policy.newsroom_stories()
-    assembled = publication.assemble(
-        "2026-09-06",
-        stories,
-        workflow.budgets,
-        config=assemble["config"],
-    )
-    assert assembled.mode == "full"
-    draft = assembled.draft
-    assert draft["title"] == "2026-09-06 科技与学术日报"
-    assert (
-        "重点跟进《投机解码把验证开销从主路径拆开》"
-        in draft["introduction"]
-    )
-    assert (
-        "并梳理《内核页表批处理压低跨核同步尾延迟》《欧盟人工智能办公室公布通用模型合规核查清单》等方向的新进展"
-        in draft["introduction"]
-    )
-    assert [section["kind"] for section in draft["sections"]] == [
-        "feature",
-        "briefing",
-        "briefing",
-    ]
-    assert "recommended_reading" in draft and "chart" in draft
-    contracts.validate_draft(draft, assembled.packets)
-    rendered = rendering.render_edition(draft, assembled.packets, "2026-09-06")
-    for visible in (
-        "重点解读",
-        "简要速览",
-        "推荐阅读",
-        "延伸阅读与深读理由",
-        "数据图表",
-        "Institute for Systems AI",
-        "Cloud Kernel Lab",
-        "European AI Office",
-        "局限：",
-    ):
-        assert visible in rendered.html
-        assert visible in rendered.text
-
-
-def load_json(path: str) -> dict:
-    return json.loads(
-        resources.files("newsletter").joinpath(path).read_text("utf-8")
-    )
-
-
-def test_default_workflow_exposes_operator_tunable_newsroom_parameters():
-    raw = load_json("workflows/default.json")
-    workflow = definition.load()
-    assert raw["version"] == 1
-    assert workflow.budgets == {
-        "max_Directions": 5,
-        "max_queries_per_Direction": 4,
-        "max_candidates": 30,
-        "max_stories": 6,
-        "deep_repair_rounds": 1,
-        "minimum_publishable_stories": 2,
-    } or workflow.budgets == {
-        "max_directions": 5,
-        "max_queries_per_direction": 4,
-        "max_candidates": 30,
-        "max_stories": 6,
-        "deep_repair_rounds": 1,
-        "minimum_publishable_stories": 2,
-    }
-    nodes = {node["id"]: node for node in workflow.nodes}
-    assert nodes["feeds"]["config"] == {"arxiv_max_results_per_query": 25}
-    assert nodes["pool"]["config"] == {"recent_Candidate_days": 14} or (
-        nodes["pool"]["config"] == {"recent_candidate_days": 14}
-    )
-    assert nodes["plan"]["prompt"] == "topic_planner.md"
-    assert nodes["plan"]["config"] == {
-        "prompt_notes": [
-            "优先覆盖多个方向，避免同一期全部落在单一领域。",
-            "至少安排一个 feature 深度解读，其余用 briefing 保持信息密度。",
-        ]
-    }
-    assert nodes["research"]["prompt"] == "story_research.md"
-    assert nodes["write"]["writer_prompt"] == "story_writer.md"
-    assert nodes["write"]["reviewer_prompt"] == "story_reviewer.md"
-    assert nodes["write"]["config"]["writer_prompt_notes"]
-    assert nodes["write"]["config"]["reviewer_prompt_notes"]
-    assert nodes["assemble"]["config"] == {
-        "title_template": "{issue_date} 科技与学术日报",
-        "subject_prefix": "每日简报",
-        "fallback_subject_prefix": "阶段简报",
-        "lead_intro_template": "本期共收录 {story_count} 个独立核验选题，重点跟进{lead_titles}，并梳理{other_titles}等方向的新进展。",
-        "single_story_intro_template": "本期聚焦{lead_titles}，结合一手来源梳理问题背景、关键证据与适用边界。",
-        "fallback_intro_template": "本期共有 {full_count} 个选题完成完整核验，另有 {signal_count} 个选题先发布经独立复核的简要信号。",
-        "signal_heading": "已核实速览",
-        "signal_limitations": "仅保留已通过独立复核的事实信号；未展开部分待后续补充核查。",
-    }
-
-
-def test_content_config_manifest_tracks_all_tunable_files():
-    manifest = content_config.build_manifest()
-    assert set(manifest["files"]) == {
-        "workflows/default.json",
-        "directions/01-ai-ml.md",
-        "directions/02-computing-systems.md",
-        "directions/03-world-tech-policy.md",
-        "directions/04-math-physics-foundations.md",
-        "directions/05-life-health-earth.md",
-        "prompts/direction_discovery.md",
-        "prompts/newsletter_editor.md",
-        "prompts/story_research.md",
-        "prompts/story_reviewer.md",
-        "prompts/story_writer.md",
-        "prompts/topic_planner.md",
-    }
-    assert len(manifest["sha256"]) == 64
+def test_news_profile_excludes_legacy_research_reservations(reader_profile):
+    assert "高优先级" in reader_profile and "不排他" in reader_profile
+    assert "研究没有固定保留席位" in reader_profile
+    assert "默认全期最多一个以研究为主体" in reader_profile
+    assert "候选继续采集和归档" in reader_profile
+    assert "接受短刊" in reader_profile
+    assert "公共健康" in reader_profile and "经济" in reader_profile
 
 
 @pytest.mark.parametrize(
-    ("mutate", "message"),
+    "source",
+    ["NeurIPS", "ICML", "ICLR", "ACL", "CVPR", "Nature", "Science", "arXiv"],
+)
+def test_research_discovery_accepts_multiple_venues_without_venue_as_proof(
+    reader_profile, source
+):
+    assert source in reader_profile
+    assert "声誉不等于证据" in reader_profile
+    assert "顶级研究组" in reader_profile
+
+
+def test_legacy_whole_edition_policy_is_not_packaged():
+    assert not (
+        resources.files("newsletter").joinpath("policy/editorial.md").is_file()
+    )
+
+
+@pytest.mark.parametrize("direction", ["01-ai-ml.md", "02-science.md"])
+def test_research_guides_require_read_scope_and_clear_overview(
+    direction,
+):
+    instruction = (
+        resources.files("newsletter")
+        .joinpath(f"instructions/{direction}")
+        .read_text(encoding="utf-8")
+    )
+    assert "摘要页或落地页不等于 PDF 正文" in instruction
+    assert "full_text 只用于实际读到全文的来源" in instruction
+    assert "同步调整 URL、access_scope、excerpt 和 body" in instruction
+    assert "删除未读方法与数字，不能仅替换 URL" in instruction
+    assert "缺少支撑核心结论的证据时返回 no_findings" in instruction
+    assert "2–3 句自足概览" in instruction
+    assert "不点击链接也应知道研究做了什么" in instruction
+
+
+@pytest.fixture
+def newsroom_config(tmp_path):
+    authored = pathlib.Path(__file__).resolve().parents[1] / "content-config"
+    snapshot = content_config.build_directory(authored, "a" * 40)
+    root = tmp_path / "configuration"
+    content_config.install_snapshot(root, snapshot)
+    loaded = content_config.load_active(root)
+    assert loaded == snapshot
+    return loaded
+
+
+@pytest.mark.parametrize("mode", ["brief", "deep"])
+@pytest.mark.parametrize(
+    "limitation", ["", "该虚构服务仅向已登记的测试用户开放。"]
+)
+async def test_authored_policy_allows_empty_or_specific_context(
+    rig, newsroom_config, mode, limitation
+):
+    """Keep both paths publishable without adding model rounds or text gates."""
+    policy = {
+        name: newsroom_config["files"]["policy/" + name]
+        for name in ("editorial.md", "reader-profile.md")
+    }
+    content = story_editor.story("虚构机构开放了一个离线测试服务。")
+    content.update(kind="technology", limitations=limitation)
+    original = copy.deepcopy(content)
+    rig.replies = [
+        story_editor.reply(story_editor.writer(content)),
+        story_editor.reply(story_editor.review()),
+    ]
+    result = await rig.run(mode=mode, policy=policy)
+    assert result["content"] == original
+    assert result["issues"] == []
+    assert len(rig.calls) == 2 and not rig.replies
+    writer, reviewer = rig.calls
+    assert writer["instructions"] == policy["editorial.md"]
+    assert reviewer["instructions"] == policy["editorial.md"]
+    assert writer["prompt"]["reader_profile"] == policy["reader-profile.md"]
+    assert reviewer["prompt"]["content_untrusted"] == original
+    assert writer["path"] != reviewer["path"]
+    publication.validate_result(result)
+    assembled = publication.assemble(
+        "newsroom-test",
+        "2026-09-06",
+        [publication_support.task(id="story-a")],
+        [result],
+    )
+    section = assembled["draft"]["sections"][0]
+    assert section["heading"] == original["title"]
+    assert section["paragraphs"] == original["paragraphs"]
+    assert section["limitations"] == limitation
+    assert assembled["review"]["passed"] is True
+
+
+@pytest.mark.parametrize(
+    "limitation",
     [
-        (
-            lambda raw: raw["nodes"][1].update(config={"unknown_knob": 1}),
-            "unknown config keys",
-        ),
-        (
-            lambda raw: raw["nodes"][1].update(
-                config={"arxiv_max_results_per_query": 0}
-            ),
-            "arxiv_max_results_per_query",
-        ),
-        (
-            lambda raw: raw["nodes"][2].update(
-                config={"recent_candidate_days": 90}
-            ),
-            "recent_candidate_days",
-        ),
-        (
-            lambda raw: raw["nodes"][3].update(
-                config={"prompt_notes": ["   "]}
-            ),
-            "prompt_notes",
-        ),
-        (
-            lambda raw: raw["nodes"][6].update(
-                config={"title_template": "{unknown_field}"}
-            ),
-            "unsupported template fields",
-        ),
+        "",
+        "仅适用于虚构测试组 A & B。\n<b>这里是原文，不是 HTML。</b>",
+        "此虚构测试没有对照组，现有证据无法证明改善由这项措施造成。",
     ],
 )
-def test_workflow_validation_rejects_invalid_node_config(mutate, message):
-    raw = copy.deepcopy(load_json("workflows/default.json"))
-    mutate(raw)
-    with pytest.raises(ValueError, match=message):
-        definition.validate(raw)
-
-
-def test_assembler_applies_custom_editorial_templates():
-    stories = [
-        publication_support.approved_story(
-            "story-1", "新型稀疏注意力降低长文本推理显存", priority=1
-        ),
-        publication_support.approved_story(
-            "story-2", "Linux 调度器补丁缩短尾延迟", priority=2
-        ),
-    ]
-    stories[0]["content"]["kind"] = "feature"
-    result = publication.assemble(
+def test_authored_email_preserves_context_and_optional_sections(
+    newsroom_config, limitation
+):
+    draft = copy.deepcopy(rendering.SAMPLE_DRAFT)
+    draft["sections"][0]["limitations"] = ""
+    draft["sections"][1]["limitations"] = limitation
+    original = copy.deepcopy(draft)
+    summary = newsletter_usage.summarize_usage(tests_support_usage.record_one())
+    rendered = newsletter_rendering.render_edition(
+        draft,
+        rendering.SAMPLE_PACKETS,
         "2026-09-06",
-        stories,
-        {"minimum_publishable_stories": 2},
-        config={
-            "title_template": "{issue_date} 焦点研报（{story_count} 篇）",
-            "subject_prefix": "研报精选",
-            "lead_intro_template": "主打：{lead_titles}；同场关注：{other_titles}。",
-        },
+        is_fixture=True,
+        personal_digest=todofy.unavailable_digest(),
+        usage=summary,
+        template_source=newsroom_config["files"]["templates/edition.html.j2"],
     )
-    assert result.mode == "full"
-    assert result.draft["title"] == "2026-09-06 焦点研报（2 篇）"
-    assert result.draft["subject"].startswith(
-        "研报精选 · 2026-09-06 · 新型稀疏注意力降低长文本推理显存"
+    parsed = rendering.ParsedEmail(rendered["html"])
+    visible = "".join(parsed.text)
+    assert draft == original
+    assert 'class="story-note"' not in rendered["html"]
+    assert rendered["html"].count('class="story-context ink"') == bool(
+        limitation
     )
-    assert result.draft["introduction"] == (
-        "主打：《新型稀疏注意力降低长文本推理显存》；"
-        "同场关注：《Linux 调度器补丁缩短尾延迟》。"
+    if limitation:
+        assert limitation in rendered["text"]
+        for line in limitation.splitlines():
+            assert html.escape(line) in rendered["html"]
+            assert line in visible
+        assert "<b>这里是原文，不是 HTML。</b>" not in rendered["html"]
+    for section in draft["sections"]:
+        for paragraph in section["paragraphs"]:
+            assert paragraph["text"] in visible
+            assert paragraph["text"] in rendered["text"]
+    assert rendered["chart_png"]
+    assert any(
+        image["src"] == newsletter_rendering.CHART_CID
+        for image in parsed.images
     )
-
-
-def test_direction_front_matter_is_validated_and_stripped_from_prompt_body():
-    instructions_list = instructions.load_instructions()
-    assert [item.slug for item in instructions_list] == [
-        "01-ai-ml",
-        "02-computing-systems",
-        "03-world-tech-policy",
-        "04-math-physics-foundations",
-        "05-life-health-earth",
-    ]
-    for item in instructions_list:
-        assert not item.body.startswith("---")
-        assert "Selection criteria:" in item.body
-        assert "Explainability bar:" in item.body
-
-
-def test_direction_parser_rejects_missing_front_matter():
-    with pytest.raises(ValueError, match="front matter"):
-        instructions.parse_instruction_document(
-            "# Missing metadata\nBody only.\n", source="broken.md"
+    assert "图表说明：" + draft["chart"]["limitations"] in visible
+    for source in rendering.SAMPLE_PACKETS[0]["content"]["sources"]:
+        assert source["url"] in parsed.links
+        assert source["url"] in rendered["text"]
+    footer = newsletter_usage.usage_footer(summary, is_fixture=True)
+    for output in (visible, rendered["text"]):
+        for paragraph in draft["recommended_reading"]["reason"].split("\n\n"):
+            assert paragraph in output
+        assert output.index(draft["chart"]["limitations"]) < output.index(
+            "TODOFY / 与你有关"
         )
+        assert output.index("来源与核对") < output.index("TODOFY / 与你有关")
+        assert output.index("TODOFY / 与你有关") < output.index(footer)
+        assert output.rstrip().endswith(footer)
 
 
-def test_prompt_front_matter_is_validated_and_stripped_from_rendered_prompts():
-    expected = {
-        "direction_discovery.md": {
-            "stage": "discovery",
-            "schema": "discovery_schema",
-            "placeholders": ("direction_instructions", "issue_date", "name"),
-        },
-        "topic_planner.md": {
-            "stage": "planning",
-            "schema": "plan_schema",
-            "placeholders": (
-                "candidates_json",
-                "directions_json",
-                "issue_date",
-                "max_stories",
-                "recent_issues_json",
+@pytest.fixture(autouse=True)
+def forbid_network(monkeypatch):
+    async def forbidden(*args, **kwargs):
+        pytest.fail("Reader acceptance attempted real network access")
+
+    monkeypatch.setattr(
+        httpx.AsyncHTTPTransport, "handle_async_request", forbidden
+    )
+
+
+@pytest.mark.parametrize("chart_status", ["approved", "blocked", "not_present"])
+async def test_degraded_mail_keeps_topic_identity_and_chart_audit(
+    tmp_path, rig, chart_status
+):
+    science = story_editor.story(chart=chart_status != "not_present")
+    science.update(kind="science", title="离线科学样题：两组观测意味着什么")
+    proposed_chart = copy.deepcopy(science.get("chart"))
+    rig.replies = [
+        story_editor.reply(story_editor.writer(science)),
+        story_editor.reply(story_editor.review(chart=chart_status)),
+    ]
+    science_result = await rig.run(mode="deep")
+    assert (
+        len(rig.calls) == 2
+    )  # A rejected optional chart cannot trigger body repair.
+
+    tasks = [
+        publication_support.task(1),
+        publication_support.task(2, id="story-a"),
+        publication_support.task(3),
+        publication_support.task(4),
+    ]
+    values = [
+        publication_support.result(
+            1,
+            content=publication_support.story(
+                1,
+                kind="ai_ml",
+                title="离线 AI 样题：已审简讯保留",
+                limitations="AI 样题的独立边界。",
             ),
-        },
-        "story_research.md": {
-            "stage": "research",
-            "schema": "brief_schema",
-            "placeholders": ("candidates_json", "issue_date", "story_json"),
-        },
-        "story_writer.md": {
-            "stage": "writing",
-            "schema": "story_writer_schema",
-            "placeholders": (
-                "brief_json",
-                "issue_date",
-                "mode",
-                "prior_attempt_json",
-                "story_json",
+        ),
+        publication_support.result(
+            1, "deep", content=False, reason="editor_unavailable"
+        ),
+        science_result,
+        publication_support.result(
+            3,
+            content=publication_support.story(
+                3,
+                kind="world",
+                title="离线世界样题：独立公共事件",
+                limitations="世界样题的独立边界。",
             ),
-        },
-        "story_reviewer.md": {
-            "stage": "review",
-            "schema": "story_review_schema",
-            "placeholders": (
-                "brief_json",
-                "issue_date",
-                "proposal_json",
-                "story_json",
-            ),
-        },
-        "newsletter_editor.md": {
-            "stage": "monolithic_editor",
-            "schema": "output_schema",
-            "placeholders": ("issue_date", "packets_json", "section_kinds"),
-        },
+        ),
+        publication_support.result(4, content=False),
+    ]
+    store = newsletter_store.Store(tmp_path / "reader.sqlite3", "mock")
+    try:
+        repository = publication.PublicationRepository(store)
+        repository.save_plan("reader-release", publication_support.DAY, tasks)
+        tasks_by_id = {item["id"]: item for item in tasks}
+        for value in values:
+            repository.save(
+                "reader-release",
+                tasks_by_id[value["story_id"]],
+                value["mode"],
+                value,
+                issue_date=publication_support.DAY,
+            )
+        built = publication.assemble(
+            "reader-release",
+            publication_support.DAY,
+            tasks,
+            repository.results("reader-release"),
+            reason="workflow_deadline",
+        )
+        repository.record_publication(
+            "reader-release", publication_support.DAY, tasks, built
+        )
+    finally:
+        store.close()
+
+    # Diagnostics must survive the freeze and a process restart, not just exist
+    # in an in-memory fixture. They are operator audit, not invented reader
+    # copy.
+    store = newsletter_store.Store(tmp_path / "reader.sqlite3", "mock")
+    try:
+        repository = publication.PublicationRepository(store)
+        assert repository.get_publication("reader-release") == built
+        saved = next(
+            value
+            for value in repository.results("reader-release")
+            if value["story_id"] == "story-a"
+        )
+        audit = next(
+            item
+            for item in saved["assessments"]
+            if item["component"] == "chart"
+        )
+        assert audit["status"] == chart_status
+        if chart_status == "blocked":
+            assert audit["findings"] == ["fixture finding"]
+        if chart_status == "not_present":
+            assert audit["content_hash"] == ""
+    finally:
+        store.close()
+
+    assert built["coverage"]["mode"] == "partial"
+    assert [item["disposition"] for item in built["coverage"]["stories"]] == [
+        "brief",
+        "deep",
+        "brief",
+        "deferred",
+    ]
+    personal = await todofy.FakeTodofy().fetch(publication_support.DAY)
+    rendered = newsletter_rendering.render_edition(
+        built["draft"],
+        built["packets"],
+        publication_support.DAY,
+        is_fixture=True,
+        personal_digest=personal,
+        usage=newsletter_usage.summarize_usage(
+            tests_support_usage.record_one()
+        ),
+    )
+    panels = rendered["html"].split('class="story-panel"')[1:]
+    sections = built["draft"]["sections"]
+    assert len(panels) == 3
+    for panel, section, label in zip(
+        panels, sections, ["AI / ML 进展", "科学进展", "世界简报"], strict=True
+    ):
+        assert label in panel
+        assert f">{section['heading']}</h2>" in panel
+        assert section["limitations"] in panel
+        assert f"{label}｜{section['heading']}" in rendered["text"]
+        for paragraph in section["paragraphs"]:
+            assert paragraph["text"] in panel
+        for other in sections:
+            if other is not section:
+                assert other["heading"] not in panel
+                assert other["limitations"] not in panel
+    assert "今日简讯" not in rendered["html"]
+    assert "另有 1 个入选选题暂未刊出" in rendered["text"]
+    for output in (rendered["html"], rendered["text"]):
+        assert output.index("TODOFY / 与你有关") > output.index(
+            sections[-1]["heading"]
+        )
+        assert output.index("TODOFY / 与你有关") > output.index(
+            "https://example.org/research/3"
+        )
+        if chart_status == "approved":
+            assert output.index("TODOFY / 与你有关") > output.index(
+                proposed_chart["question"]
+            )
+        assert output.index(personal["items"][-1]["detail"]) < output.index(
+            "MOCK · 用量"
+        )
+    public_html = rendered["html"].split("TODOFY / 与你有关", 1)[0]
+    assert personal["items"][0]["detail"] not in public_html
+
+    edition = {
+        "id": "reader-fixture",
+        "is_fixture": True,
+        "state": "ready",
+        "draft": built["draft"],
+        "rendered": rendered,
     }
-    for name, meta in expected.items():
-        raw = resources.files("newsletter").joinpath(f"prompts/{name}").read_text("utf-8")
-        document = prompts.parse_prompt_document(raw, source=name)
-        assert document.name == name.removesuffix(".md")
-        assert document.stage == meta["stage"]
-        assert document.schema == meta["schema"]
-        assert document.placeholders == meta["placeholders"]
-        assert not document.body.startswith("---")
-        assert "## 写作与核查要求" in document.body or "## 核查与输出要求" in document.body
-
-
-def test_prompt_parser_rejects_undeclared_placeholder():
-    raw = (
-        "---\n"
-        "name: sample\n"
-        "stage: writing\n"
-        "schema: story_writer_schema\n"
-        "placeholders:\n"
-        "  - issue_date\n"
-        "---\n"
-        "Date: {issue_date}, Unexpected: {story_json}\n"
+    mail = adapters.FakeMail(tmp_path / "mail")
+    sent = await mail.send(edition, "reader-fixture")
+    artifact = next((tmp_path / "mail").glob("*.eml"))
+    frozen_bytes = artifact.read_bytes()
+    message = parser.BytesParser(policy=email_policy.default).parsebytes(
+        frozen_bytes
     )
-    with pytest.raises(ValueError, match="placeholders do not match"):
-        prompts.parse_prompt_document(raw, source="sample.md")
+    assert sent["delivery_state"] == "simulated"
+    assert message["X-Newsletter-Simulated"] == "true"
+    # MIME uses CRLF transport line endings; no text or inline styling may
+    # change.
+    for subtype, field in (("html", "html"), ("plain", "text")):
+        decoded = message.get_body(preferencelist=(subtype,)).get_content()
+        assert decoded.replace("\r\n", "\n").rstrip("\n") == rendered[
+            field
+        ].rstrip("\n")
+    images = [
+        part
+        for part in message.walk()
+        if part.get_content_type() == "image/png"
+    ]
+    parsed = rendering.ParsedEmail(rendered["html"])
+    if chart_status == "approved":
+        assert built["draft"]["chart"] == proposed_chart
+        assert len(images) == len(parsed.images) == 1
+        assert parsed.images[0]["src"] == newsletter_rendering.CHART_CID
+        assert parsed.images[0]["alt"] == proposed_chart["alt_text"]
+        assert images[0]["Content-ID"] == "<newsletter-chart>"
+        png = base64.b64decode(rendered["chart_png"])
+        assert images[0].get_payload(decode=True) == png
+        image = Image.open(io.BytesIO(png))
+        assert image.format == "PNG" and image.width == 1280
+        assert (
+            newsletter_rendering.CHART_CID
+            not in newsletter_rendering.preview_html(rendered)
+        )
+        assert "data:image/png;base64," in newsletter_rendering.preview_html(
+            rendered
+        )
+    else:
+        assert "chart" not in built["draft"]
+        assert not images and not parsed.images and rendered["chart_png"] == ""
+        assert newsletter_rendering.CHART_CID not in rendered["html"]
+        assert "一图看懂" not in rendered["html"]
+    assert await mail.send(edition, "reader-fixture") == sent
+    assert artifact.read_bytes() == frozen_bytes
+    assert len(list((tmp_path / "mail").glob("*.eml"))) == 1
 
 
-def reader_issue_stories():
-    ai = publication_support.approved_story(
-        "story-ai",
-        "分块验证把长文本推理的首字延迟压低三成",
-        priority=1,
-        reading=True,
-        chart=True,
-    )
-    ai["content"].update(
-        kind="feature",
-        paragraphs=[
-            {
-                "text": (
-                    "大语言模型在生成长回答时，往往先用小模型猜出候选词，再由大模型逐段复核，这一步叫“投机解码”。"
-                    "过去验证阶段仍要反复读写整段键值缓存（KV cache，用来暂存历史上下文的显存区域），"
-                    "当输入拉长到数万字时，显存带宽会先成为瓶颈 [ai-packet/s1]。"
-                ),
-                "citations": ["ai-packet/s1"],
-            },
-            {
-                "text": (
-                    "System AI Lab 的 Lin Chen 与 Maya Patel 在预印本中把验证拆成固定长度的小块，"
-                    "只对命中率下降的片段回退重算，其余块直接复用缓存摘要 [ai-packet/s1]。"
-                    "这样做的关键不是换更大的模型，而是减少验证失败时的连带重算范围 [ai-packet/s1]。"
-                ),
-                "citations": ["ai-packet/s1"],
-            },
-            {
-                "text": (
-                    "在 32K 上下文基准上，吞吐从 82 tok/s 提升到 114 tok/s，P95 延迟从 410 ms 降到 295 ms [ai-packet/s1]。"
-                    "但当代码或数学推理任务里候选命中率低于 55% 时，额外记账会让收益缩到 6% 以内 [ai-packet/s1]。"
-                ),
-                "citations": ["ai-packet/s1"],
-            },
-        ],
-        limitations="实验集中在单机 8 卡 A100 与英文长文档；跨节点张量并行和极短问答尚未验证 [ai-packet/s1]。",
-        recommended_reading={
-            "title": "Chunked Speculative Verification for Long-Context Decoding",
-            "reason": (
-                "原文第 4 节给出了命中率退化曲线和缓存块大小消融实验，适合对照生产负载评估何时关闭投机分支 [ai-packet/s1]。"
-            ),
-            "citation": "ai-packet/s1",
-        },
-        chart={
-            "title": "32K 上下文下的解码吞吐对比",
-            "subtitle": "合成验收样本",
-            "kind": "bar",
-            "unit": "tok/s",
-            "source_label": "System AI Lab 预印本基准",
-            "caption": (
-                "横轴为方法、单位为 tok/s；分块验证把吞吐从 82 提到 114，主要因为失败回退不再重扫整段缓存 [ai-packet/s1]。"
-            ),
-            "points": [
+def test_wide_reader_layout_has_utf8_headroom_and_disjoint_partial_usage():
+    """Guard representative HTML size, not every Gmail client's behavior."""
+    draft = copy.deepcopy(rendering.SAMPLE_DRAFT)
+    draft["title"] = draft["subject"] = "八题离线验收样张，不是真实新闻"
+    kinds = [
+        "ai_ml",
+        "science",
+        "economy",
+        "technology",
+        "health",
+        "world",
+        "feature",
+        "context",
+    ]
+    draft["sections"] = [
+        {
+            "kind": kind,
+            "heading": f"第{number}题：离线长标题说明已知变化与仍需核验的边界",
+            "paragraphs": [
                 {
-                    "series": "32K 吞吐",
-                    "category": "基线验证",
-                    "decimal_value": "82",
-                    "citations": ["ai-packet/s1"],
-                },
-                {
-                    "series": "32K 吞吐",
-                    "category": "分块验证",
-                    "decimal_value": "114",
-                    "citations": ["ai-packet/s1"],
-                },
+                    "text": (
+                        f"第{number}题第{part}段。"
+                        + "这是离线中文材料，比较方法与结果并保留不确定性。" * 8
+                    ),
+                    "citations": ["sample-packet/methods"],
+                }
+                for part in range(1, 5 if number <= 2 else 3)
             ],
-        },
-    )
-    ai["packets"][0]["id"] = "ai-packet"
-    ai["packets"][0]["content"].update(
-        title=ai["content"]["title"],
-        body=ai["content"]["paragraphs"][0]["text"]
-        + ai["content"]["paragraphs"][1]["text"]
-        + ai["content"]["paragraphs"][2]["text"]
-        + ai["content"]["limitations"]
-        + ai["content"]["recommended_reading"]["reason"]
-        + ai["content"]["chart"]["caption"],
-    )
-    ai["packets"][0]["content"]["sources"][0].update(
-        id="s1",
-        title="Chunked Speculative Verification for Long-Context Decoding",
-        url="https://example.com/ai-paper",
-        access_scope="full_text",
-        provenance="web_open",
-        excerpt=ai["packets"][0]["content"]["body"],
-    )
-    ai["packets"][0]["content_hash"] = contracts.content_hash(
-        ai["packets"][0]["content"]
-    )
-    ai["provenance"] = {
-        "packets_hash": contracts.content_hash(ai["packets"])
-    }
-    for item in ai["assessments"]:
-        target = components.component_content(
-            ai["content"], ai["signal"], item["component"]
+            "limitations": (
+                f"第{number}题仅为离线样张，不能当作事实或推断因果。"
+            ),
+        }
+        for number, kind in enumerate(kinds, 1)
+    ]
+    packets = copy.deepcopy(rendering.SAMPLE_PACKETS)
+    # Exercise production footer formatting without sending or claiming these
+    # synthetic source/usage values came from a real account.
+    packets[0]["is_fixture"] = False
+    usage = newsletter_usage.summarize_usage(
+        tests_support_usage.record_one(
+            tests_support_usage.notification(
+                6_000_000, 90_000, cached=5_000_000
+            )
         )
-        if target is not None:
-            item["content_hash"] = contracts.content_hash(target)
-
-    policy_story = publication_support.approved_story(
-        "story-policy",
-        "欧盟公布通用大模型合规清单，明确训练数据摘要与事故上报时限",
-        priority=2,
     )
-    policy_story["content"].update(
-        kind="briefing",
-        paragraphs=[
-            {
-                "text": (
-                    "围绕通用人工智能模型（GPAI，指可被下游改装用于多种任务的底座模型）的监管细则此前停留在原则条文，"
-                    "模型提供方并不清楚训练数据披露要细到什么粒度、系统性风险事故要在多久内通报 [policy-packet/s1]。"
-                ),
-                "citations": ["policy-packet/s1"],
-            },
-            {
-                "text": (
-                    "欧盟人工智能办公室此次发布的执行清单要求：算力超过阈值的通用模型须提交按数据源类别汇总的训练语料说明，"
-                    "并在发生严重安全事件后 72 小时内提交初报；开源权重模型若不涉及系统性风险，可豁免部分商业机密备案 [policy-packet/s1]。"
-                ),
-                "citations": ["policy-packet/s1"],
-            },
-        ],
-        limitations="清单属于配套执行指南，成员国监管机构在罚款裁量与跨境取证协作上仍保留解释空间 [policy-packet/s1]。",
+    usage["partial"] = True
+    rendered = newsletter_rendering.render_edition(
+        draft,
+        packets,
+        publication_support.DAY,
+        personal_digest=todofy.unavailable_digest(),
+        usage=usage,
     )
-    policy_story["packets"][0]["id"] = "policy-packet"
-    policy_story["packets"][0]["content"].update(
-        title=policy_story["content"]["title"],
-        body=policy_story["content"]["paragraphs"][0]["text"]
-        + policy_story["content"]["paragraphs"][1]["text"]
-        + policy_story["content"]["limitations"],
+    html_bytes = len(rendered["html"].encode("utf-8"))
+    assert html_bytes < 90 * 1024, (
+        f"Representative email HTML grew to {html_bytes} UTF-8 bytes"
     )
-    policy_story["packets"][0]["content"]["sources"][0].update(
-        id="s1",
-        title="EU AI Office GPAI Compliance Checklist",
-        url="https://example.com/eu-gpai-checklist",
-        access_scope="full_text",
-        provenance="web_open",
-        excerpt=policy_story["packets"][0]["content"]["body"],
-    )
-    policy_story["packets"][0]["content_hash"] = contracts.content_hash(
-        policy_story["packets"][0]["content"]
-    )
-    policy_story["provenance"] = {
-        "packets_hash": contracts.content_hash(policy_story["packets"])
-    }
-    for item in policy_story["assessments"]:
-        target = components.component_content(
-            policy_story["content"], policy_story["signal"], item["component"]
+    assert html_bytes > len(
+        rendered["html"]
+    )  # Count bytes, not Chinese characters.
+    assert (
+        "data:image/png;base64," not in rendered["html"]
+    )  # CID data isn't inlined into HTML.
+    assert rendered["html"].count('class="story-panel"') == 8
+    for output in (rendered["html"], rendered["text"]):
+        assert (
+            "非缓存输入 1,000,000 · 缓存输入 5,000,000 · 输出 90,000" in output
         )
-        if target is not None:
-            item["content_hash"] = contracts.content_hash(target)
-    return [ai, policy_story]
-
-
-def test_assembled_issue_meets_reader_explainability_and_density_bar():
-    workflow = definition.load()
-    assemble_cfg = next(
-        node["config"]
-        for node in workflow.nodes
-        if node["id"] == "assemble"
-    )
-    stories = reader_issue_stories()
-    result = publication.assemble(
-        "2026-09-06",
-        stories,
-        workflow.budgets,
-        config=assemble_cfg,
-    )
-    assert result.mode == "full"
-    draft = result.draft
-    contracts.validate_draft(draft, result.packets)
-    rendered = rendering.render_edition(draft, result.packets, "2026-09-06")
-
-    assert draft["title"] == "2026-09-06 科技与学术日报"
-    assert "重点跟进《分块验证把长文本推理的首字延迟压低三成》" in draft["introduction"]
-    assert "《欧盟公布通用大模型合规清单，明确训练数据摘要与事故上报时限》" in draft["introduction"]
-
-    feature, briefing = draft["sections"]
-    assert feature["kind"] == "feature" and len(feature["paragraphs"]) >= 3
-    assert briefing["kind"] == "briefing" and len(briefing["paragraphs"]) >= 2
-
-    full_text = rendered.text
-    for explained_term in (
-        "这一步叫“投机解码”",
-        "KV cache，用来暂存历史上下文的显存区域",
-        "GPAI，指可被下游改装用于多种任务的底座模型",
-    ):
-        assert explained_term in full_text
-
-    for banned_cliche in (
-        "具有重要意义",
-        "引发广泛关注",
-        "推动行业发展",
-        "值得持续跟踪",
-    ):
-        assert banned_cliche not in full_text
-
-    assert "第 4 节给出了命中率退化曲线" in draft["recommended_reading"]["reason"]
-    assert "横轴为方法、单位为 tok/s" in draft["chart"]["caption"]
-    assert "重点解读" in rendered.html and "简要速览" in rendered.html
-
+        assert "6,090,000 tokens" in output and "11,090,000" not in output
+        assert "部分用量，未含未返回用量的调用" in output
+        assert "Todofy/Gemini 用量未计入" in output
+        assert output.index("TODOFY / 与你有关") < output.index("模型已记录")
+        assert "plan" not in output.lower()

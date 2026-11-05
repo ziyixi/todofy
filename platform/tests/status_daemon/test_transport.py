@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from personal_cloud.deployment.kubernetes import DependencyUnavailable
+from personal_cloud.status_daemon import server as daemon_server
 from personal_cloud.status_daemon.config import Configuration
 from personal_cloud.status_daemon.reader import (
     MONITOR_URL,
@@ -18,7 +19,6 @@ from personal_cloud.status_daemon.reader import (
     ReadError,
     read_json,
 )
-from personal_cloud.status_daemon import server as daemon_server
 from personal_cloud.status_daemon.server import Cache, Service, _offset, create_app
 from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb
 from ziyixi_proto.rpc_status import RpcError
@@ -478,9 +478,7 @@ class API(unittest.TestCase):
             self.assertNotIn("private", failed.text)
 
     def test_daemon_entrypoint_validates_config_and_serves(self):
-        config = Configuration(
-            "vps", "personal-cloud", (CONFIG,), "example/project"
-        )
+        config = Configuration("vps", "personal-cloud", (CONFIG,), "example/project")
         router = Mock(summary=Mock(), plan=Mock())
         with (
             patch("builtins.open", unittest.mock.mock_open(read_data="{}")),
@@ -488,9 +486,7 @@ class API(unittest.TestCase):
             patch.object(daemon_server, "Reader") as reader_cls,
             patch.object(daemon_server.uvicorn, "run") as run_mock,
         ):
-            self.assertEqual(
-                daemon_server.main(lambda _cfg, _svc: router), 0
-            )
+            self.assertEqual(daemon_server.main(lambda _cfg, _svc: router), 0)
             run_mock.assert_called_once()
         with (
             patch("builtins.open", unittest.mock.mock_open(read_data="{}")),

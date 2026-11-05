@@ -1,8 +1,6 @@
 """Repository extraction preserves lazy scans and atomic replay receipts."""
 
-from collections.abc import Iterator
 import json
-import pathlib
 import sqlite3
 
 import pytest

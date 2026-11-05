@@ -13,7 +13,6 @@ import newsletter.model_client as model_client
 import newsletter.notion_api as notion_api
 import newsletter.preflight as preflight
 import newsletter.schema_compat as schema_compat
-import newsletter.settings as newsletter_settings
 import newsletter.store as newsletter_store
 import newsletter.workflow.story_editor as story_editor
 

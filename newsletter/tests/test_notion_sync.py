@@ -14,7 +14,6 @@ import json
 import pathlib
 import sqlite3
 import urllib.parse as parse
-import uuid
 
 import fastapi
 import httpx
@@ -1291,4 +1290,3 @@ def test_retired_whole_edition_recipe_is_rejected_before_freezing(
             )
     finally:
         with_store.close()
-

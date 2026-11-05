@@ -101,9 +101,9 @@ function makeEnv(
   answers: {
     startCanary?: unknown;
     guard?: unknown;
-    websiteSync?: unknown | (() => unknown);
-    dismissAttention?: unknown | (() => unknown);
-    restoreAttention?: unknown | (() => unknown);
+    websiteSync?: unknown;
+    dismissAttention?: unknown;
+    restoreAttention?: unknown;
     view?: () => unknown;
   } = {},
 ) {
@@ -121,7 +121,7 @@ function makeEnv(
     },
     requestWebsiteSync: vi.fn((requestId: string, at: number | null) => {
       calls.at.push(at);
-      if (typeof answers.websiteSync === 'function') return Promise.resolve(answers.websiteSync());
+      if (typeof answers.websiteSync === 'function') return Promise.resolve((answers.websiteSync as () => unknown)());
       return Promise.resolve(
         answers.websiteSync ?? {
           ok: true,
@@ -131,12 +131,12 @@ function makeEnv(
     }),
     dismissAttention: vi.fn((_name: string, _etag: string, _requestId: string, at: number | null) => {
       calls.at.push(at);
-      if (typeof answers.dismissAttention === 'function') return Promise.resolve(answers.dismissAttention());
+      if (typeof answers.dismissAttention === 'function') return Promise.resolve((answers.dismissAttention as () => unknown)());
       return Promise.resolve(answers.dismissAttention ?? { ok: true, item: { ...ATTENTION_ITEM, dismissed_at: '2026-09-29T16:00:00Z' } });
     }),
     restoreAttention: vi.fn((_name: string, _etag: string, _requestId: string, at: number | null) => {
       calls.at.push(at);
-      if (typeof answers.restoreAttention === 'function') return Promise.resolve(answers.restoreAttention());
+      if (typeof answers.restoreAttention === 'function') return Promise.resolve((answers.restoreAttention as () => unknown)());
       return Promise.resolve(answers.restoreAttention ?? { ok: true, item: ATTENTION_ITEM });
     }),
     tick: vi.fn(() => Promise.resolve({ ran: true })),

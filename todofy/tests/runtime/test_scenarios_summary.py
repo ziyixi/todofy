@@ -155,4 +155,3 @@ def test_a_summary_is_stored_without_a_task_and_a_duplicate_arrival_changes_noth
     assert worker.trigger_cron().status_code == 200
     assert len(fresh_gemini.calls_mentioning(event_id)) == 1
     assert worker.d1(f"SELECT count(*) AS n FROM summaries WHERE event_id='{event_id}'") == [{"n": 1}]
-

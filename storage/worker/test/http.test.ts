@@ -109,9 +109,13 @@ describe('owner client handlers', () => {
   it('validates pagination cursors and clamps listClients page sizes to 64', async () => {
     const { store } = sqliteStore();
     const context = ownerContext(store);
-    await expect(handlers.listClients({ pageSize: -1, pageToken: '' } as never, context)).rejects.toMatchObject({ reason: 'BAD_REQUEST' });
+    expect(() => handlers.listClients({ pageSize: -1, pageToken: '' } as never, context)).toThrow(
+      expect.objectContaining({ reason: 'BAD_REQUEST' }),
+    );
     for (const pageToken of ['malformed-token', encodePageToken(123, {}), encodePageToken('not-a-uuid', {})]) {
-      await expect(handlers.listClients({ pageSize: 10, pageToken } as never, context)).rejects.toMatchObject({ reason: 'BAD_REQUEST' });
+      expect(() => handlers.listClients({ pageSize: 10, pageToken } as never, context)).toThrow(
+        expect.objectContaining({ reason: 'BAD_REQUEST' }),
+      );
     }
 
     const firstId = '00000000-0000-4000-8000-000000000001';
@@ -120,10 +124,16 @@ describe('owner client handlers', () => {
     seedNamespaceAndKey({ id: secondId, token_sha256: '2'.repeat(64) }, store);
 
     const spy = vi.spyOn(store, 'clients');
-    const firstPage = await handlers.listClients({ pageSize: 1, pageToken: '' } as never, context);
+    const firstPage = (await handlers.listClients({ pageSize: 1, pageToken: '' } as never, context)) as {
+      clients: { name: string }[];
+      nextPageToken: string;
+    };
     expect(firstPage.clients).toHaveLength(1);
     expect(firstPage.nextPageToken).not.toBe('');
-    const secondPage = await handlers.listClients({ pageSize: 100, pageToken: firstPage.nextPageToken } as never, context);
+    const secondPage = (await handlers.listClients({ pageSize: 100, pageToken: firstPage.nextPageToken } as never, context)) as {
+      clients: { name: string }[];
+      nextPageToken: string;
+    };
     expect(secondPage.clients.map((client) => client.name)).toEqual(['clients/' + secondId]);
     expect(secondPage.nextPageToken).toBe('');
     expect(spy).toHaveBeenLastCalledWith(firstId, 65);
@@ -141,17 +151,17 @@ describe('owner client handlers', () => {
       } as never, context)).rejects.toMatchObject({ reason: 'BAD_REQUEST' });
     }
     await expect(handlers.createClient({
-      requestId, client: { label: 'Synthetic', namespace: 'synthetic', access: Client_Access.ACCESS_UNSPECIFIED },
+      requestId, client: { label: 'Synthetic', namespace: 'synthetic', access: Client_Access.UNSPECIFIED },
     } as never, context)).rejects.toMatchObject({ reason: 'BAD_REQUEST' });
 
-    const created = await handlers.createClient({
+    const created = (await handlers.createClient({
       requestId, client: { label: 'Synthetic', namespace: 'synthetic', access: Client_Access.READ_WRITE },
-    } as never, context);
+    } as never, context)) as { apiKey: string };
     expect(created.apiKey).toMatch(/^sto_/);
 
-    const replayed = await handlers.createClient({
+    const replayed = (await handlers.createClient({
       requestId, client: { label: 'Synthetic', namespace: 'synthetic', access: Client_Access.READ_WRITE },
-    } as never, context);
+    } as never, context)) as { apiKey: string };
     expect(replayed.apiKey).toBe('');
 
     await expect(handlers.createClient({
@@ -182,14 +192,18 @@ describe('owner client handlers', () => {
     seedNamespaceAndKey({ id }, store);
 
     for (const name of ['clients/not-a-uuid', 'other/' + id]) {
-      await expect(handlers.deleteClient({ name } as never, context)).rejects.toMatchObject({ httpStatus: 400, reason: 'BAD_REQUEST' });
+      expect(() => handlers.deleteClient({ name } as never, context)).toThrow(
+        expect.objectContaining({ httpStatus: 400, reason: 'BAD_REQUEST' }),
+      );
     }
-    await expect(handlers.deleteClient({ name: 'clients/00000000-0000-4000-8000-000000000099' } as never, context))
-      .rejects.toMatchObject({ httpStatus: 404, reason: 'NOT_FOUND' });
+    expect(() => handlers.deleteClient({ name: 'clients/00000000-0000-4000-8000-000000000099' } as never, context)).toThrow(
+      expect.objectContaining({ httpStatus: 404, reason: 'NOT_FOUND' }),
+    );
 
     await handlers.deleteClient({ name: 'clients/' + id } as never, context);
-    await expect(handlers.deleteClient({ name: 'clients/' + id } as never, context))
-      .rejects.toMatchObject({ httpStatus: 404, reason: 'NOT_FOUND' });
+    expect(() => handlers.deleteClient({ name: 'clients/' + id } as never, context)).toThrow(
+      expect.objectContaining({ httpStatus: 404, reason: 'NOT_FOUND' }),
+    );
   });
 });
 

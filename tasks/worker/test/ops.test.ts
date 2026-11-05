@@ -1,5 +1,4 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { Health, Severity } from '@ziyixi/proto/ops/v1/ops_pb';
 import type { Env } from '../src/env.ts';
 import type { DayRow } from '../src/gtd.ts';
 import type { JobsStatus } from '../src/jobs.ts';
@@ -49,7 +48,7 @@ function makeOps(options: FakeOpsOptions = {}): Ops {
           return Promise.resolve(
             options.jobsStatus ?? {
               since: NOW - 3_600_000,
-              backup: { lastSuccessAt: NOW - 3_600_000, lastError: '' },
+              backup: { status: 'ok', last_backup_at: NOW - 3_600_000, since: NOW - 3_600_000 },
             },
           );
         },
@@ -91,7 +90,7 @@ test('Ops.status emits gtd_stale when GTD_STALE_MS is exceeded and review_overdu
   });
 
   const status = await ops.status();
-  expect(status.health).toBe(Health[Health.DEGRADED]);
+  expect(status.health).toBe('degraded');
   expect(status.counters).toMatchObject({
     database_ready: 1,
     change_sequence: 42,
@@ -104,12 +103,12 @@ test('Ops.status emits gtd_stale when GTD_STALE_MS is exceeded and review_overdu
   expect(status.signals).toEqual([
     {
       code: 'gtd_stale',
-      severity: Severity[Severity.WARNING],
+      severity: 'warning',
       metrics: { age_hours: 50 },
     },
     {
       code: 'review_overdue',
-      severity: Severity[Severity.INFO],
+      severity: 'info',
       metrics: { days: 13 },
     },
   ]);
@@ -125,11 +124,11 @@ test('Ops.status falls back to jobs.since for gtd_stale, review.first for review
     review: { first: NOW - (REVIEW_OVERDUE_DAYS + 1) * DAY_MS, done: null },
     jobsStatus: {
       since: staleJobsSince,
-      backup: { lastSuccessAt: NOW - 3_600_000, lastError: '' },
+      backup: { status: 'ok', last_backup_at: NOW - 3_600_000, since: NOW - 3_600_000 },
     },
   });
   const degraded = await staleOps.status();
-  expect(degraded.signals?.map((s) => s.code)).toEqual(['gtd_stale', 'review_overdue']);
+  expect(degraded.signals.map((s) => s.code)).toEqual(['gtd_stale', 'review_overdue']);
 
   // Fresh state with only review_overdue (INFO) or no signals stays Health.OK even if JOBS RPC throws
   const healthyOps = makeOps({
@@ -138,15 +137,15 @@ test('Ops.status falls back to jobs.since for gtd_stale, review.first for review
     jobsStatus: new Error('jobs DO restarting'),
   });
   const healthy = await healthyOps.status();
-  expect(healthy.health).toBe(Health[Health.OK]);
-  expect(healthy.counters?.review_age_days).toBe(2);
+  expect(healthy.health).toBe('ok');
+  expect(healthy.counters.review_age_days).toBe(2);
 });
 
 test('Ops.status returns DOWN on D1 error and setGuard rejects with invalid_input', async () => {
   const downOps = makeOps({ dbError: true });
   const status = await downOps.status();
-  expect(status.health).toBe(Health[Health.DOWN]);
-  expect(status.signals).toEqual([{ code: 'status_unavailable', severity: Severity[Severity.CRITICAL] }]);
+  expect(status.health).toBe('down');
+  expect(status.signals).toEqual([{ code: 'status_unavailable', severity: 'critical', metrics: {} }]);
 
   await expect(downOps.setGuard()).rejects.toThrow('invalid_input');
 });

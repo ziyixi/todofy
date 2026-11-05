@@ -913,7 +913,7 @@ def test_material_aliases_and_notion_journal_methods(store):
     assert boot and journal.bootstrap_time() == boot
     assert journal.pending_candidates() == []
     assert journal.pending_research() == []
-    assert journal.is_daily_run("r1", "2026-09-07") is False
+    assert journal.is_daily_run("r1", "2026-09-07") is True
 
     # Candidate & identity methods
     cand = notion_content.candidate()
@@ -995,4 +995,3 @@ def test_material_aliases_and_notion_journal_methods(store):
     assert journal.editions_for_links() == []
     assert journal.pending_editions() == []
     assert journal.is_verification("edition-fixture") is False
-

@@ -9,7 +9,6 @@ import pytest
 
 import newsletter.app as newsletter_app
 import newsletter.preflight as preflight
-import newsletter.settings as newsletter_settings
 import newsletter.store as newsletter_store
 import newsletter.worker as newsletter_worker
 

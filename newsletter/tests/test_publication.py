@@ -1300,4 +1300,3 @@ def test_local_snapshot_survives_reopen_even_when_projection_is_unknown(
         )
     finally:
         peer.close()
-

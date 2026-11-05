@@ -98,7 +98,7 @@ describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
       () => harness.newsletter.embed({ model: bge, inputs: ['Synthetic embedding attempt'] }),
       () => harness.newsletter.generate({ model: api, input: 'Synthetic denied API call' }),
       () => harness.models.createConversation({ name: `conversations/${crypto.randomUUID()}`, model: api }),
-    ]) await expect(refused()).rejects.toMatchObject({ status: { reason: expect.stringMatching(/^(MODEL_NOT_ALLOWED|MODEL_CAPABILITY_UNSUPPORTED)$/) } })
+    ]) await expect(refused()).rejects.toMatchObject({ status: { reason: expect.stringMatching(/^(MODEL_NOT_ALLOWED|MODEL_CAPABILITY_UNSUPPORTED)$/) as unknown } })
     expect(harness.calls).toHaveLength(0)
     expect(await harness.db.prepare('SELECT count(*) AS n FROM requests').first('n')).toBe(0)
     const answer = await harness.newsletter.generate({ model: sol, input: 'Synthetic Codex input' })

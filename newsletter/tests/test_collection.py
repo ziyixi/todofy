@@ -343,9 +343,7 @@ async def test_failed_second_packet_never_leaves_untracked_material(
 ):
     store, runs, pipeline, run = environment
 
-    class PartlyInvalidCollector(
-        newsletter_collection_collector.MockCollector
-    ):
+    class PartlyInvalidCollector(newsletter_collection_collector.MockCollector):
         async def collect(self, *args):
             result = await super().collect(*args)
             invalid = copy.deepcopy(result.packets[0])

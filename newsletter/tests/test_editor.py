@@ -4,16 +4,18 @@ import asyncio
 import copy
 import dataclasses
 import json
+import re
 
-import google.protobuf.json_format as json_format
+import model_router_client as models
 import pytest
 import ziyixi_protos.newsletter.editorial_pb2 as editorial_pb2
 
 import newsletter.collection.instructions as instructions
 import newsletter.contracts as contracts
 import newsletter.editor as newsletter_editor
-import newsletter.editor_schema as editor_schema
 import newsletter.errors as newsletter_errors
+import newsletter.model_schema as model_schema
+import newsletter.usage as usage
 import newsletter.workflow.content as newsletter_workflow_content
 import newsletter.workflow.schema as newsletter_workflow_schema
 import tests.support.editor as editor
@@ -407,192 +409,323 @@ async def test_mock_chart_tag_does_not_invent_numbers(tmp_path, packet):
     assert error.value.code == "invalid_input"
 
 
-def sample_output(packet):
-    return {
-        "draft": editor.make_draft([packet]),
-        "review": {
-            "passed": True,
-            "findings": ["All claims match the frozen source."],
-        },
-        "supplemental_packets": [],
-    }
+EVIDENCE_URL = "https://example.com/evidence"
+INVALID_ANSWER = {"code": 13, "reason": "MODEL_INVALID_ANSWER"}
 
 
-def make_packet(packet, identifier, url, *, scope="full_text", excerpt=None):
-    content = copy.deepcopy(packet["content"])
-    content["sources"][0].update(
-        id="s1",
-        url=url,
-        access_scope=scope,
-        excerpt=excerpt or content["sources"][0]["excerpt"],
-    )
-    return {"id": identifier, "content": content}
-
-
-async def test_draft_correction_reuses_thread_and_checks_validated_schema(
+async def test_format_correction_reuses_research_and_context(
     tmp_path, fake_router, packet
 ):
-    output = sample_output(packet)
-    output["supplemental_packets"] = [
-        make_packet(packet, "sup-1", "https://example.com/evidence")
+    value = {"packets": [packet["content"]]}
+    fake_router.turns = [
+        editor.FakeTurn("", failure=INVALID_ANSWER),
+        editor.FakeTurn(value, research=False),
     ]
-    output["draft"]["sections"][0]["paragraphs"].append(
-        {"text": packet["content"]["body"], "citations": ["sup-1/s1"]}
+    text, opened, searched = await editor.live_editor(tmp_path).execute(
+        "{}", {}, "synthetic", tmp_path / "job"
     )
-    first = editor.FakeTurn(output)
-    first.omit_action = "openPage"
-    second = editor.FakeTurn(output)
-    second.omit_action = "search"
-    fake_router.turns = [first, second]
-    result = await editor.live_editor(tmp_path).prepare(
-        [packet], "2026-09-05", tmp_path / "job"
-    )
-    assert result.supplemental_packets[0]["id"] == "sup-1"
-    assert (
-        result.supplemental_packets[0]["content"]["sources"][0]["provenance"]
-        == "web_open"
-    )
+    assert json.loads(text) == value
+    assert opened == {EVIDENCE_URL} and searched
     assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 2
-    assert fake_router.prompts[1]["unverified_urls"] == [
-        "https://example.com/evidence"
-    ]
+    assert "JSON Schema" in fake_router.prompts[1]["task"]
     assert fake_router.closed
 
 
 @pytest.mark.parametrize(
-    "mutator",
+    "failure",
     [
-        lambda out, _: out["supplemental_packets"][0]["content"]["sources"][
-            0
-        ].update(url="https://example.com/unread-pdf"),
-        lambda out, _: out["draft"]["sections"][0]["paragraphs"].append(
-            {"text": "invented", "citations": ["missing/source"]}
-        ),
-        lambda out, _: out.update(
-            review={"passed": False, "findings": ["Rejected by review."]}
-        ),
+        {"code": 13, "reason": "MODEL_INTERNAL"},
+        {"code": 13, "reason": "MODEL_OUTPUT_LIMIT"},
+        {"code": 8, "reason": "MODEL_QUOTA_EXCEEDED"},
+        {"code": 4, "reason": "MODEL_TIMEOUT"},
+        {"code": 16, "reason": "MODEL_UNAUTHENTICATED"},
     ],
 )
-async def test_draft_correction_still_validates_the_corrected_output(
-    tmp_path, fake_router, packet, mutator
+async def test_other_failures_do_not_spend_a_correction(
+    tmp_path, fake_router, failure
 ):
-    first = sample_output(packet)
-    first["supplemental_packets"] = [
-        make_packet(packet, "sup-1", "https://example.com/unread-pdf")
-    ]
-    second = copy.deepcopy(first)
-    second["supplemental_packets"][0]["content"]["sources"][0]["url"] = (
-        "https://example.com/evidence"
-    )
-    mutator(second, packet)
-    fake_router.turns = [editor.FakeTurn(first), editor.FakeTurn(second)]
-    with pytest.raises(newsletter_errors.EditorError) as caught:
-        await editor.live_editor(tmp_path).prepare(
-            [packet], "2026-09-05", tmp_path / "job"
+    fake_router.turn.failure = failure
+    with pytest.raises(newsletter_errors.EditorError):
+        await editor.live_editor(tmp_path).execute(
+            "{}", {}, "synthetic", tmp_path / "job"
         )
-    assert caught.value.code == "invalid_output"
+    assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 1
+    assert fake_router.closed
+
+
+@pytest.mark.parametrize("first_failure", [True, False])
+async def test_format_and_provenance_share_the_second_turn(
+    tmp_path, fake_router, packet, first_failure
+):
+    value = {"packets": [packet["content"]]}
+    invalid = editor.FakeTurn("", failure=INVALID_ANSWER, research=False)
+    unverified = editor.FakeTurn(value, research=False)
+    fake_router.turns = (
+        [invalid, unverified] if first_failure else [unverified, invalid]
+    )
+    with pytest.raises(newsletter_errors.EditorError) as error:
+        await editor.live_editor(tmp_path).execute(
+            "{}", {}, "synthetic", tmp_path / "job"
+        )
+    assert error.value.code == "invalid_output"
     assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 2
     assert fake_router.closed
 
 
-async def test_unused_unopened_supplemental_source_is_discarded_without_retry(
-    tmp_path, fake_router, packet
+async def test_two_invalid_answers_stop_without_a_third_turn(
+    tmp_path, fake_router
 ):
-    output = sample_output(packet)
-    output["supplemental_packets"] = [
-        make_packet(packet, "unused", "https://example.com/unread-pdf"),
-        make_packet(packet, "used", "https://example.com/evidence"),
+    fake_router.turn.failure = INVALID_ANSWER
+    with pytest.raises(newsletter_errors.EditorError) as error:
+        await editor.live_editor(tmp_path).execute(
+            "{}", {}, "synthetic", tmp_path / "job"
+        )
+    assert error.value.code == "invalid_output"
+    assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 2
+    assert fake_router.closed
+
+
+async def test_format_correction_uses_original_timeout(tmp_path, fake_router):
+    hanging = editor.FakeTurn({}, hang=True)
+    fake_router.turns = [
+        editor.FakeTurn("", failure=INVALID_ANSWER),
+        hanging,
     ]
-    output["draft"]["sections"][0]["paragraphs"].append(
-        {"text": packet["content"]["body"], "citations": ["used/s1"]}
+    with pytest.raises(newsletter_errors.EditorError) as error:
+        await editor.live_editor(tmp_path, timeout_seconds=0.05).execute(
+            "{}", {}, "synthetic", tmp_path / "job"
+        )
+    assert error.value.code == "timeout" and hanging.interrupted
+    assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 2
+    assert fake_router.closed
+
+
+def approval(component, *, passed=True):
+    return {
+        "prior_withdrawal": None,
+        "assessments": [
+            {
+                "component": component,
+                "status": "approved" if passed else "blocked",
+                "findings": ["Synthetic review only."],
+            }
+        ],
+        "issues": [],
+    }
+
+
+def limited_turn(value, missing):
+    if missing == "both":
+        return editor.FakeTurn(value, research=False)
+    return editor.discovery_turn(value, omit_action=missing)
+
+
+@pytest.mark.parametrize("component", ["body", "signal"])
+@pytest.mark.parametrize("missing", ["search", "openPage", "both"])
+async def test_claimed_pass_gets_same_thread_action_correction(
+    tmp_path, fake_router, component, missing
+):
+    value = approval(component)
+    # The second turn supplies only the missing action when possible. Observed
+    # provenance must accumulate within this thread, not reset between turns.
+    complement = {"search": "openPage", "openPage": "search"}
+    corrected = (
+        limited_turn(value, complement[missing])
+        if missing != "both"
+        else editor.FakeTurn(value)
     )
-    fake_router.turn = editor.FakeTurn(output)
-    result = await editor.live_editor(tmp_path).prepare(
-        [packet], "2026-09-05", tmp_path / "job"
+    fake_router.turns = [limited_turn(value, missing), corrected]
+    text, opened, searched = await editor.live_editor(tmp_path).execute(
+        "{}", {}, "synthetic", tmp_path / "job"
     )
-    assert [item["id"] for item in result.supplemental_packets] == ["used"]
+    assert json.loads(text) == value
+    assert searched and opened == {"https://example.com/evidence"}
+    assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 2
+    correction = fake_router.prompts[1]
+    assert correction["unverified_urls"] == []
+    assert correction["missing_approval_actions"] == (
+        ["search", "openPage"] if missing == "both" else [missing]
+    )
+    assert "blocked" in correction["task"] and "HOLD" in correction["task"]
+    assert "review.passed" not in correction["task"]
+    assert "实际" in correction["task"] and "web search" in correction["task"]
+    assert fake_router.closed
+
+
+@pytest.mark.parametrize("component", ["body", "signal"])
+async def test_correction_may_honestly_hold_without_inventing_research(
+    tmp_path, fake_router, component
+):
+    held = approval(component, passed=False)
+    fake_router.turns = [
+        editor.FakeTurn(approval(component), research=False),
+        editor.FakeTurn(held, research=False),
+    ]
+    text, opened, searched = await editor.live_editor(tmp_path).execute(
+        "{}", {}, "synthetic", tmp_path / "job"
+    )
+    assert json.loads(text) == held and not opened and not searched
+    assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 2
+
+
+@pytest.mark.parametrize("component", ["body", "signal"])
+@pytest.mark.parametrize("missing", ["search", "openPage", "both"])
+async def test_unsupported_second_pass_does_not_get_a_third_turn(
+    tmp_path, fake_router, component, missing
+):
+    value = approval(component)
+    fake_router.turn = limited_turn(value, missing)
+    text, opened, searched = await editor.live_editor(tmp_path).execute(
+        "{}", {}, "synthetic", tmp_path / "job"
+    )
+    assert json.loads(text) == value
+    assert newsletter_editor._unobserved_approval_actions(
+        text, opened, searched
+    )
+    # Execute never fabricates successful actions; callers still see the gap.
+    assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 2
+
+
+@pytest.mark.parametrize("corrected_search", [True, False])
+async def test_url_and_approval_share_one_correction_budget(
+    tmp_path, fake_router, corrected_search
+):
+    value = approval("body")
+    sources = newsletter_editor.ApprovalSources({"body": [EVIDENCE_URL]})
+    corrected = (
+        editor.FakeTurn(value)
+        if corrected_search
+        else limited_turn(value, "search")
+    )
+    fake_router.turns = [editor.FakeTurn(value, research=False), corrected]
+    text, opened, searched = await editor.live_editor(tmp_path).execute(
+        "{}", {}, "synthetic", tmp_path / "job", approval_sources=sources
+    )
+    correction = fake_router.prompts[1]
+    assert correction["unverified_urls"] == [EVIDENCE_URL]
+    assert correction["missing_approval_actions"] == ["search", "openPage"]
+    assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 2
+    assert not newsletter_editor._unopened_approval_sources(
+        text, opened, sources
+    )
+    assert searched is corrected_search
+    assert newsletter_editor._unobserved_approval_actions(
+        text, opened, searched
+    ) == ([] if corrected_search else ["search"])
+
+
+@pytest.mark.parametrize("component", ["body", "signal"])
+async def test_honest_initial_hold_does_not_force_actions(
+    tmp_path, fake_router, component
+):
+    value = approval(component, passed=False)
+    fake_router.turn = editor.FakeTurn(value, research=False)
+    text, opened, searched = await editor.live_editor(tmp_path).execute(
+        "{}", {}, "synthetic", tmp_path / "job"
+    )
+    assert json.loads(text) == value and not opened and not searched
     assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 1
 
 
-async def test_cited_unopened_supplement_requests_only_cited_url_then_drops_unused(
+async def test_unapproved_writer_output_still_corrects_new_unopened_sources(
     tmp_path, fake_router, packet
 ):
-    output = sample_output(packet)
-    output["supplemental_packets"] = [
-        make_packet(packet, "unused", "https://example.com/unread-pdf"),
-        make_packet(packet, "used", "https://example.com/evidence"),
-    ]
-    output["draft"]["sections"][0]["paragraphs"].append(
-        {"text": packet["content"]["body"], "citations": ["used/s1"]}
-    )
-    first = editor.FakeTurn(output)
-    first.omit_action = "openPage"
-    fake_router.turns = [first, editor.FakeTurn(output)]
-    result = await editor.live_editor(tmp_path).prepare(
-        [packet], "2026-09-05", tmp_path / "job"
-    )
-    assert [item["id"] for item in result.supplemental_packets] == ["used"]
-    assert len(fake_router.prompts) == 2
-    assert fake_router.prompts[1]["unverified_urls"] == [
-        "https://example.com/evidence"
-    ]
-
-
-async def test_supporting_reading_citation_must_also_be_opened(
-    tmp_path, fake_router, packet
-):
-    excerpt = "Synthetic primary source excerpt."
-    output = sample_output(packet)
-    output["supplemental_packets"] = [
-        make_packet(
-            packet,
-            "primary",
-            "https://example.com/evidence",
-            scope="abstract",
-            excerpt=excerpt,
-        ),
-        make_packet(
-            packet,
-            "support",
-            "https://example.com/unread-pdf",
-            scope="full_text",
-            excerpt=excerpt,
-        ),
-    ]
-    output["draft"]["recommended_reading"] = {
-        "title": "Synthetic paper",
-        "reason": "Synthetic primary source excerpt.",
-        "citation": "primary/s1",
-        "supporting_citations": ["support/s1"],
+    # The story writer claims no approval, but its new supplemental sources
+    # still need an independent open.
+    value = {
+        "content": {"body": "Synthetic draft only."},
+        "signal": None,
+        "supplemental_packets": [
+            {"id": "supplement-1", "content": packet["content"]}
+        ],
     }
-    fake_router.turn = editor.FakeTurn(output)
-    with pytest.raises(newsletter_errors.EditorError) as caught:
-        await editor.live_editor(tmp_path).prepare(
-            [packet], "2026-09-05", tmp_path / "job"
-        )
-    assert caught.value.code == "invalid_output"
-    assert len(fake_router.prompts) == 2
-    assert fake_router.prompts[1]["unverified_urls"] == [
-        "https://example.com/unread-pdf"
+    fake_router.turns = [
+        editor.FakeTurn(value, research=False),
+        limited_turn(value, "search"),
     ]
+    text, opened, searched = await editor.live_editor(tmp_path).execute(
+        "{}", {}, "synthetic", tmp_path / "job"
+    )
+    assert json.loads(text) == value and opened and not searched
+    assert len(fake_router.prompts) == 2
+    assert fake_router.prompts[1]["unverified_urls"] == [EVIDENCE_URL]
+    assert fake_router.prompts[1]["missing_approval_actions"] == []
+
+
+@pytest.mark.parametrize("component", ["body", "signal"])
+async def test_action_correction_uses_original_timeout(
+    tmp_path, fake_router, component
+):
+    value = approval(component)
+    hanging = editor.FakeTurn(value, hang=True)
+    fake_router.turns = [editor.FakeTurn(value, research=False), hanging]
+    with pytest.raises(newsletter_errors.EditorError) as error:
+        await editor.live_editor(tmp_path, timeout_seconds=0.05).execute(
+            "{}", {}, "synthetic", tmp_path / "job"
+        )
+    assert error.value.code == "timeout" and hanging.interrupted
+    assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 2
+    assert fake_router.closed
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {},
+        # Legacy whole-edition approval shapes are no longer produced, so
+        # they never spend the correction opportunity.
+        {"passed": True},
+        {"review": {"passed": True}},
+        {"assessments": [{"component": "body", "status": "blocked"}]},
+        {"prior_withdrawal": None},
+    ],
+)
+def test_action_inspection_requires_an_exact_true_claim(value):
+    assert (
+        newsletter_editor._unobserved_approval_actions(
+            json.dumps(value), set(), False
+        )
+        == []
+    )
+
+
+def test_action_inspection_rejects_non_object():
+    with pytest.raises(newsletter_errors.EditorError) as error:
+        newsletter_editor._unobserved_approval_actions("[]", set(), False)
+    assert error.value.code == "invalid_output"
+
+
+def draft_schema():
+    return model_schema.message_schema(editorial_pb2.Draft.DESCRIPTOR)
 
 
 @pytest.fixture
-def proto_packet():
+def enum_fields():
+    schema_draft = draft_schema()["properties"]
+    source = model_schema.packet_body_schema()["properties"]["sources"][
+        "items"
+    ]["properties"]
+    return {
+        "section_kind": schema_draft["sections"]["items"]["properties"]["kind"],
+        "chart_kind": schema_draft["chart"]["anyOf"][0]["properties"]["kind"],
+        "source_access_scope": source["access_scope"],
+    }
+
+
+@pytest.fixture
+def schema_packet():
     return editorial_pb2.Packet(
-        id="p1",
-        content=editorial_pb2.PacketContent(
-            title="Packet",
-            body="Fact",
-            tags=["ai"],
+        id="fixture-packet",
+        content=editorial_pb2.PacketBody(
+            title="Synthetic research fixture",
+            body="A synthetic value used only for offline validation.",
             sources=[
                 editorial_pb2.Source(
-                    id="s1",
-                    title="Source",
-                    url="https://example.com/s1",
-                    excerpt="Fact",
+                    id="fixture-source",
+                    title="Synthetic source",
+                    url="https://example.org/fixture",
+                    excerpt="Synthetic value: 12.",
                     access_scope="full_text",
-                    provenance="provided",
                 )
             ],
         ),
@@ -600,175 +733,417 @@ def proto_packet():
 
 
 @pytest.fixture
-def proto_draft():
+def schema_draft():
     return editorial_pb2.Draft(
-        subject="Subject",
-        title="Title",
-        introduction="Fact",
-        limitations="Limited",
+        subject="Synthetic subject",
+        title="Synthetic title",
         sections=[
             editorial_pb2.Section(
-                kind="briefing",
-                heading="Heading",
+                kind="feature",
+                heading="Synthetic heading",
                 paragraphs=[
-                    editorial_pb2.Paragraph(text="Fact", citations=["p1/s1"])
+                    editorial_pb2.Paragraph(
+                        text="Synthetic statement.",
+                        citations=["fixture-packet/fixture-source"],
+                    )
                 ],
-                limitations="Section limits",
             )
         ],
+        chart=editorial_pb2.Chart(
+            kind="bar",
+            question="What is the synthetic value?",
+            metric="Synthetic measurement",
+            unit="fixture units",
+            period="Synthetic period",
+            caption="Synthetic data only.",
+            alt_text="Synthetic value is 12.",
+            points=[
+                editorial_pb2.ChartPoint(
+                    label="A",
+                    decimal_value="12",
+                    citations=["fixture-packet/fixture-source"],
+                )
+            ],
+        ),
     )
 
 
-def as_dict(message):
-    return json_format.MessageToDict(
-        message,
-        preserving_proto_field_name=True,
-        always_print_fields_with_no_presence=True,
+def test_schema_enums_exactly_match_shared_contract_values(enum_fields):
+    assert contracts.SECTION_KINDS == (
+        "world",
+        "feature",
+        "context",
+        "ai_ml",
+        "science",
+        "economy",
+        "technology",
+        "health",
     )
-
-
-def test_output_schema_stays_strict_recursive_and_aligned_with_proto():
-    schema = editor_schema.output_schema()
-    assert set(schema["properties"]) == {
-        field.name for field in editorial_pb2.EditorOutput.DESCRIPTOR.fields
-    }
-    section_schema = schema["properties"]["draft"]["properties"]["sections"][
-        "items"
-    ]
-    assert section_schema["properties"]["kind"]["enum"] == list(
-        contracts.SECTION_KINDS
+    assert contracts.CHART_KINDS == ("bar", "line")
+    assert contracts.SOURCE_ACCESS_SCOPES == (
+        "metadata",
+        "abstract",
+        "full_text",
+        "dataset",
     )
-    chart = schema["properties"]["draft"]["properties"]["chart"]["anyOf"][0]
-    assert set(chart["properties"]) == {
-        field.name for field in editorial_pb2.ChartSpec.DESCRIPTOR.fields
-    }
-    point = chart["properties"]["points"]["items"]
-    assert set(point["required"]) == {
-        "series",
-        "category",
-        "decimal_value",
-        "missing_reason",
-        "citations",
-    }
-
-    def check_objects(node):
-        if isinstance(node, dict):
-            if node.get("type") == "object":
-                assert node["additionalProperties"] is False
-                assert set(node["required"]) == set(node["properties"])
-            for value in node.values():
-                check_objects(value)
-        elif isinstance(node, list):
-            for item in node:
-                check_objects(item)
-
-    check_objects(schema)
+    for field, values in (
+        ("section_kind", contracts.SECTION_KINDS),
+        ("chart_kind", contracts.CHART_KINDS),
+        ("source_access_scope", contracts.SOURCE_ACCESS_SCOPES),
+    ):
+        assert enum_fields[field] == {"type": "string", "enum": list(values)}
 
 
-def test_normalize_output_strips_nullable_Reading_and_chart_wrappers(
-    proto_packet, proto_draft
+@pytest.mark.parametrize("section_kind", contracts.SECTION_KINDS)
+@pytest.mark.parametrize("chart_kind", contracts.CHART_KINDS)
+@pytest.mark.parametrize("access_scope", contracts.SOURCE_ACCESS_SCOPES)
+def test_every_schema_enum_combination_is_accepted_by_contracts(
+    enum_fields,
+    schema_packet,
+    schema_draft,
+    section_kind,
+    chart_kind,
+    access_scope,
 ):
-    raw = {
-        "draft": {
-            **as_dict(proto_draft),
-            "recommended_reading": None,
-            "chart": {
-                "title": "Latency",
-                "subtitle": "",
-                "kind": "bar",
-                "unit": "ms",
-                "source_label": "Source",
-                "caption": "Fact",
-                "points": [
-                    {
-                        "series": "S",
-                        "category": "A",
-                        "decimal_value": "1.5",
-                        "missing_reason": None,
-                        "citations": ["p1/s1"],
-                    },
-                    {
-                        "series": "S",
-                        "category": "B",
-                        "decimal_value": None,
-                        "missing_reason": "Not reported",
-                        "citations": ["p1/s1"],
-                    },
-                ],
-            },
-        },
-        "review": {"passed": True, "findings": ["Verified"]},
-        "supplemental_packets": [],
-    }
-    normalized = editor_schema.normalize_output(json.dumps(raw))
-    assert "recommended_reading" not in normalized["draft"]
-    points = normalized["draft"]["chart"]["points"]
-    assert points[0] == {
-        "series": "S",
-        "category": "A",
-        "decimal_value": "1.5",
-        "citations": ["p1/s1"],
-    }
-    assert points[1] == {
-        "series": "S",
-        "category": "B",
-        "missing_reason": "Not reported",
-        "citations": ["p1/s1"],
-    }
-    contracts.validate_draft(normalized["draft"], [as_dict(proto_packet)])
-
-
-def test_normalize_output_preserves_reading_card(proto_packet, proto_draft):
-    raw = {
-        "draft": {
-            **as_dict(proto_draft),
-            "recommended_reading": {
-                "title": "Paper",
-                "reason": "Fact",
-                "citation": "p1/s1",
-            },
-            "chart": None,
-        },
-        "review": {"passed": True, "findings": ["Verified"]},
-        "supplemental_packets": [],
-    }
-    normalized = editor_schema.normalize_output(json.dumps(raw))
-    assert "chart" not in normalized["draft"]
-    assert normalized["draft"]["recommended_reading"]["citation"] == "p1/s1"
-    contracts.validate_draft(normalized["draft"], [as_dict(proto_packet)])
+    schema_draft.sections[0].kind = section_kind
+    schema_draft.chart.kind = chart_kind
+    schema_packet.content.sources[0].access_scope = access_scope
+    assert section_kind in enum_fields["section_kind"]["enum"]
+    assert chart_kind in enum_fields["chart_kind"]["enum"]
+    assert access_scope in enum_fields["source_access_scope"]["enum"]
+    contracts.validate_packet_body(schema_packet.content)
+    contracts.validate_draft(schema_draft, [schema_packet])
 
 
 @pytest.mark.parametrize(
-    "payload",
+    "kind", ["world_brief", "main_read", "innovation_radar"]
+)
+def test_real_run_section_aliases_are_rejected_by_schema_and_contracts(
+    enum_fields, schema_packet, schema_draft, kind
+):
+    # Literal values observed in the failed live run, not an imported live
+    # artifact.
+    assert kind not in enum_fields["section_kind"]["enum"]
+    schema_draft.sections[0].kind = kind
+    with pytest.raises(
+        contracts.ContractError, match="Unsupported section kind"
+    ):
+        contracts.validate_draft(schema_draft, [schema_packet])
+
+
+@pytest.mark.parametrize("kind", ["pie", "BAR", ""])
+def test_invalid_chart_kinds_are_rejected_by_schema_and_contracts(
+    enum_fields, schema_packet, schema_draft, kind
+):
+    assert kind not in enum_fields["chart_kind"]["enum"]
+    schema_draft.chart.kind = kind
+    with pytest.raises(contracts.ContractError, match="Unsupported chart kind"):
+        contracts.validate_draft(schema_draft, [schema_packet])
+
+
+@pytest.mark.parametrize("scope", ["fulltext", "FULL_TEXT", ""])
+def test_invalid_source_scopes_are_rejected_by_schema_and_contracts(
+    enum_fields, schema_packet, scope
+):
+    assert scope not in enum_fields["source_access_scope"]["enum"]
+    schema_packet.content.sources[0].access_scope = scope
+    with pytest.raises(
+        contracts.ContractError, match="Unsupported source access_scope"
+    ):
+        contracts.validate_packet_body(schema_packet.content)
+
+
+def test_schema_enum_arrays_are_fresh_and_do_not_mutate_contract_constants(
+    enum_fields,
+):
+    enum_fields["section_kind"]["enum"].append("world_brief")
+    fresh = draft_schema()["properties"]["sections"]["items"]["properties"]
+    assert fresh["kind"]["enum"] == list(contracts.SECTION_KINDS)
+    assert "world_brief" not in contracts.SECTION_KINDS
+
+
+@pytest.mark.parametrize("changed_index", range(2))
+def test_material_schema_consumers_own_independent_mutable_trees(changed_index):
+    expected = model_schema.packet_body_schema()
+    materials = [
+        model_schema.packet_body_schema(),
+        model_schema.packet_body_schema(),
+    ]
+    changed = materials[changed_index]
+    changed["required"].append("fixture-only")
+    changed["properties"]["sources"]["items"]["properties"]["access_scope"][
+        "enum"
+    ].clear()
+    assert materials[1 - changed_index] == expected
+    assert model_schema.packet_body_schema() == expected
+
+
+@pytest.fixture
+def identifier_fields():
+    return [
+        model_schema.packet_body_schema()["properties"]["sources"]["items"][
+            "properties"
+        ]["id"]
+    ]
+
+
+def test_source_schema_explains_the_shared_local_id_grammar(identifier_fields):
+    assert contracts.IDENTIFIER_PATTERN == r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}"
+    for field in identifier_fields:
+        assert field["type"] == "string"
+        assert field["pattern"] == "^" + contracts.IDENTIFIER_PATTERN + "$"
+        assert (
+            isinstance(field["description"], str)
+            and field["description"].strip()
+        )
+
+
+@pytest.mark.parametrize(
+    "identifier", ["s1", "paper-1", "A.b_c:2026", "0", "A" * 128]
+)
+def test_safe_ids_match_schema_and_are_accepted_by_strict_contracts(
+    identifier_fields, schema_packet, schema_draft, identifier
+):
+    assert all(
+        re.search(field["pattern"], identifier) is not None
+        for field in identifier_fields
+    )
+    schema_packet.id = identifier
+    schema_packet.content.sources[0].id = identifier
+    citation = identifier + "/" + identifier
+    schema_draft.sections[0].paragraphs[0].citations[:] = [citation]
+    schema_draft.chart.points[0].citations[:] = [citation]
+    contracts.validate_packet_body(schema_packet.content)
+    contracts.validate_draft(schema_draft, [schema_packet])
+
+
+@pytest.mark.parametrize(
+    "identifier",
     [
-        "not-json",
-        "[]",
-        json.dumps({"draft": "bad", "review": {}, "supplemental_packets": []}),
-        json.dumps(
-            {
-                "draft": {"chart": "bad"},
-                "review": {},
-                "supplemental_packets": [],
-            }
-        ),
-        json.dumps(
-            {
-                "draft": {"chart": {"points": "bad"}},
-                "review": {},
-                "supplemental_packets": [],
-            }
-        ),
-        json.dumps(
-            {
-                "draft": {"chart": {"points": ["bad"]}},
-                "review": {},
-                "supplemental_packets": [],
-            }
-        ),
+        "",
+        "fixture/source",
+        "10.0000/synthetic-doi",
+        "https://example.org/synthetic",
+        "A" * 129,
+        "来源一",
+        "évidence",
+        "_source",
+        "source label",
     ],
 )
-def test_normalize_output_rejects_malformed_shapes(payload):
-    with pytest.raises(newsletter_errors.EditorError) as error:
-        editor_schema.normalize_output(payload)
-    assert error.value.code == "invalid_output"
+def test_invalid_ids_do_not_satisfy_schema_or_backend(
+    identifier_fields, schema_packet, schema_draft, identifier
+):
+    assert all(
+        re.search(field["pattern"], identifier) is None
+        for field in identifier_fields
+    )
+    schema_packet.content.sources[0].id = identifier
+    with pytest.raises(
+        contracts.ContractError, match=r"source\.id is not a valid identifier"
+    ):
+        contracts.validate_packet_body(schema_packet.content)
+    schema_packet.content.sources[0].id = "fixture-source"
+    schema_packet.id = identifier
+    with pytest.raises(
+        contracts.ContractError, match=r"packet\.id is not a valid identifier"
+    ):
+        contracts.validate_draft(schema_draft, [schema_packet])
 
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n"])
+def test_backend_identifier_validation_still_rejects_trailing_newlines(
+    schema_packet, schema_draft, ending
+):
+    # JSON Schema's ^/$ anchors may accept a final newline in some regex
+    # engines.
+    # They guide model output; backend fullmatch remains the strict authority.
+    schema_packet.content.sources[0].id = "fixture-source" + ending
+    with pytest.raises(
+        contracts.ContractError, match=r"source\.id is not a valid identifier"
+    ):
+        contracts.validate_packet_body(schema_packet.content)
+    schema_packet.content.sources[0].id = "fixture-source"
+    schema_packet.id += ending
+    with pytest.raises(
+        contracts.ContractError, match=r"packet\.id is not a valid identifier"
+    ):
+        contracts.validate_draft(schema_draft, [schema_packet])
+
+
+@pytest.mark.parametrize("location", ["paragraph", "chart", "reading"])
+@pytest.mark.parametrize(
+    "citation", ["supplement-1/missing-source", "supplement-2/fixture-source"]
+)
+def test_supplement_citations_require_real_packet_sources(
+    schema_packet, schema_draft, location, citation
+):
+    schema_packet.id = "supplement-1"
+    existing = "supplement-1/fixture-source"
+    schema_draft.sections[0].paragraphs[0].citations[:] = [existing]
+    schema_draft.chart.points[0].citations[:] = [existing]
+    if location == "paragraph":
+        schema_draft.sections[0].paragraphs[0].citations[:] = [citation]
+    elif location == "chart":
+        schema_draft.chart.points[0].citations[:] = [citation]
+    else:
+        schema_draft.recommended_reading.CopyFrom(
+            editorial_pb2.RecommendedReading(
+                citation=citation, reason="Fixture"
+            )
+        )
+    with pytest.raises(
+        contracts.ContractError,
+        match="Citation does not identify an available packet/source",
+    ):
+        contracts.validate_draft(schema_draft, [schema_packet])
+
+
+@pytest.mark.parametrize("ending", ["\n", "\r\n"])
+def test_backend_citation_existence_remains_strict_about_trailing_newlines(
+    schema_packet, schema_draft, ending
+):
+    schema_draft.sections[0].paragraphs[0].citations[:] = [
+        "fixture-packet/fixture-source" + ending
+    ]
+    with pytest.raises(
+        contracts.ContractError,
+        match="Citation does not identify an available packet/source",
+    ):
+        contracts.validate_draft(schema_draft, [schema_packet])
+
+
+async def test_correction_reuses_context_and_adds_per_call_usage(
+    tmp_path, fake_router, packet
+):
+    value = {"packets": [packet["content"]]}
+    first = editor.FakeTurn(value, research=False)
+    first.usage = models.Usage(
+        available=True, input_tokens=100, output_tokens=20
+    )
+    second = editor.FakeTurn(value)
+    second.usage = models.Usage(
+        available=True, input_tokens=150, output_tokens=50
+    )
+    fake_router.turns = [first, second]
+    records = []
+    with usage.usage_scope(records.append, "synthetic"):
+        await editor.live_editor(tmp_path).execute(
+            "{}", {}, "synthetic", tmp_path / "workspace"
+        )
+    assert fake_router.thread_starts == 1 and len(fake_router.prompts) == 2
+    assert usage.summarize_usage(records)["usage"]["total_tokens"] == 320
+    assert records[-1]["turns_started"] == 2
+    # Both Router traces of the one invocation, for the owner console.
+    assert [request["name"] for request in records[-1]["requests"]] == [
+        "requests/synthetic-1",
+        "requests/synthetic-2",
+    ]
+    assert "failure" not in records[-1] and records[-1]["finished_at"]
+
+
+@pytest.mark.parametrize("first_usage_available", [True, False])
+async def test_format_recovery_retains_both_usage_receipts(
+    tmp_path, fake_router, first_usage_available
+):
+    first = editor.FakeTurn(
+        "", failure={"code": 13, "reason": "MODEL_INVALID_ANSWER"}
+    )
+    if first_usage_available:
+        first.usage = models.Usage(
+            available=True, input_tokens=100, output_tokens=20
+        )
+    second = editor.FakeTurn({})
+    second.usage = models.Usage(
+        available=True, input_tokens=150, output_tokens=50
+    )
+    fake_router.turns = [first, second]
+    records = []
+    with usage.usage_scope(records.append, "writer"):
+        await editor.live_editor(tmp_path).execute(
+            "{}", {}, "synthetic", tmp_path / "workspace"
+        )
+    summary = usage.summarize_usage(records)
+    assert summary["usage"]["total_tokens"] == (
+        320 if first_usage_available else 200
+    )
+    assert records[-1]["turns_started"] == 2
+    assert records[-1]["turns_completed"] == 2
+    assert len(records[-1]["requests"]) == 2
+    assert records[-1]["status"] == "completed"
+    assert summary["partial"] is not first_usage_available
+
+
+async def test_bad_output_retains_known_usage(tmp_path, fake_router):
+    fake_router.turn.bundle = "not JSON"
+    fake_router.turn.usage = models.Usage(
+        available=True, input_tokens=100, output_tokens=20
+    )
+    records = []
+    with (
+        pytest.raises(newsletter_errors.EditorError),
+        usage.usage_scope(records.append, "synthetic"),
+    ):
+        await editor.live_editor(tmp_path).execute(
+            "{}", {}, "synthetic", tmp_path / "workspace"
+        )
+    assert usage.summarize_usage(records)["usage"]["total_tokens"] == 120
+    assert records[-1]["status"] == "failed"
+    assert records[-1]["failure"] == "invalid_output"
+
+
+@pytest.mark.parametrize(
+    ("failure", "code"),
+    [({"code": 8}, "rate_limit"), ({"code": 16}, "authentication")],
+)
+async def test_router_failure_records_its_safe_category(
+    tmp_path, fake_router, failure, code
+):
+    fake_router.turn.failure = failure
+    records = []
+    with (
+        pytest.raises(newsletter_errors.EditorError),
+        usage.usage_scope(records.append, "synthetic"),
+    ):
+        await editor.live_editor(tmp_path).execute(
+            "{}", {}, "synthetic", tmp_path / "workspace"
+        )
+    assert records[-1]["failure"] == code
+    assert records[-1]["requests"] == [
+        {"name": "requests/synthetic-1", "model": ""}
+    ]
+
+
+async def test_editor_timeout_records_timeout(tmp_path, fake_router):
+    fake_router.turn.hang = True
+    records = []
+    with (
+        pytest.raises(newsletter_errors.EditorError),
+        usage.usage_scope(records.append, "selection"),
+    ):
+        await editor.live_editor(tmp_path, timeout_seconds=0.05).execute(
+            "{}", {}, "synthetic", tmp_path / "workspace"
+        )
+    assert records[-1]["failure"] == "timeout"
+    assert records[-1]["turns_completed"] == 0
+
+
+async def test_outer_cancellation_records_interrupted(tmp_path, fake_router):
+    # A node budget or worker stop cancels the call from outside the editor.
+    fake_router.turn.hang = True
+    records = []
+
+    async def run():
+        with usage.usage_scope(records.append, "selection"):
+            await editor.live_editor(tmp_path).execute(
+                "{}", {}, "synthetic", tmp_path / "workspace"
+            )
+
+    task = asyncio.create_task(run())
+    await fake_router.turn.started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert records[-1]["status"] == "failed"
+    assert records[-1]["failure"] == "interrupted"
+    assert records[-1]["purpose"] == "selection"

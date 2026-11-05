@@ -8,8 +8,9 @@ import { create } from '@ziyixi/proto/protobuf'
 import { Change_State, Change_SuppressionReason } from '@ziyixi/proto/watch/ui/v1/change_pb'
 import { Watch_Fetcher, Watch_NotifyPolicy, WatchSchema } from '@ziyixi/proto/watch/ui/v1/watch_pb'
 import { PreviewWatchResponseSchema } from '@ziyixi/proto/watch/ui/v1/watch_ui_service_pb'
+import { mountApp } from './app.ts'
 import { draftOf, watchOf } from './settings.ts'
-import { button, buttons, change, FakeServer, mount, settle, until, watch } from './test/fakeServer.ts'
+import { button, buttons, change, FakeServer, mount, NOW, settle, until, watch } from './test/fakeServer.ts'
 
 const text = (root: HTMLElement) => root.textContent ?? ''
 

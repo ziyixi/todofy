@@ -24,8 +24,9 @@ function createFleetState(overrides: Partial<Env> = {}): { db: DatabaseSync; sta
         return {
           toArray: () => rows,
           one: () => {
-            if (rows.length !== 1) throw new Error(`Expected 1 row, got ${rows.length}`);
-            return rows[0]!;
+            const first = rows[0];
+            if (rows.length !== 1 || !first) throw new Error(`Expected 1 row, got ${String(rows.length)}`);
+            return first;
           },
           [Symbol.iterator]: () => rows[Symbol.iterator](),
         };
@@ -43,7 +44,7 @@ function createFleetState(overrides: Partial<Env> = {}): { db: DatabaseSync; sta
     storage: {
       sql,
       transactionSync<T>(fn: () => T): T {
-        const sp = `sp_${++depth}`;
+        const sp = `sp_${String(++depth)}`;
         db.exec(`SAVEPOINT ${sp}`);
         try {
           const result = fn();
@@ -59,10 +60,16 @@ function createFleetState(overrides: Partial<Env> = {}): { db: DatabaseSync; sta
       },
     },
   } as unknown as DurableObjectState;
+  const holder: { state?: FleetState } = {};
   const env: Env = {
-    FLEET: {} as DurableObjectNamespace<FleetState>,
+    FLEET: {
+      idFromName: (name: string) => name as unknown as DurableObjectId,
+      get: () => holder.state as unknown as DurableObjectStub<FleetState>,
+    } as unknown as DurableObjectNamespace<FleetState>,
     ASSETS: { fetch: () => Promise.resolve(new Response('ok')) } as unknown as Fetcher,
     PUBLIC_HOST: 'fleet.example.test',
+    ACCESS_ISSUER: 'https://issuer.example.test',
+    ACCESS_AUDIENCE: 'b'.repeat(64),
     HOST_KEY: 'vps',
     HOST_EPOCH: '1',
     REPORT_HMAC_KEY: 'a'.repeat(64),
@@ -70,10 +77,7 @@ function createFleetState(overrides: Partial<Env> = {}): { db: DatabaseSync; sta
     ...overrides,
   };
   const state = new FleetState(ctx, env);
-  env.FLEET = {
-    idFromName: (name: string) => name as unknown as DurableObjectId,
-    get: () => state as unknown as DurableObjectStub<FleetState>,
-  } as unknown as DurableObjectNamespace<FleetState>;
+  holder.state = state;
   return { db, state, env };
 }
 
@@ -592,8 +596,10 @@ describe('FleetState change tracking, retention cap, and ops entrypoints', () =>
 });
 
 describe('HTTP and receipt error surfaces (http.ts & receipt.ts)', () => {
-  const signBytes = (secret: string, bytes: Uint8Array) =>
-    createHmac('sha256', Buffer.from(secret, 'hex')).update(bytes).digest('hex');
+  const signBytes = (secret: string, bytes: Uint8Array) => {
+    const key = Uint8Array.from(secret.match(/../g)?.map((h) => Number.parseInt(h, 16)) ?? []);
+    return createHmac('sha256', key).update(bytes).digest('hex');
+  };
 
   it('rejects malformed receipt methods, headers, unconfigured HMAC key, empty/invalid UTF-8/oversized bodies, and DO exceptions', async () => {
     const { env } = createFleetState();
@@ -638,7 +644,7 @@ describe('HTTP and receipt error surfaces (http.ts & receipt.ts)', () => {
       headers: {
         'content-type': 'application/json',
         'x-fleet-key-id': REPORT_KEY_ID,
-        'x-fleet-signature': signBytes(env.REPORT_HMAC_KEY!, badUtf8),
+        'x-fleet-signature': signBytes(env.REPORT_HMAC_KEY ?? '', badUtf8),
       },
       body: badUtf8,
     }), env, NOW);
@@ -655,7 +661,7 @@ describe('HTTP and receipt error surfaces (http.ts & receipt.ts)', () => {
 
     // 503 Unexpected DO exception
     const validBytes = new TextEncoder().encode(JSON.stringify(fixture));
-    const validSig = signBytes(env.REPORT_HMAC_KEY!, validBytes);
+    const validSig = signBytes(env.REPORT_HMAC_KEY ?? '', validBytes);
     const brokenEnv: Env = {
       ...env,
       FLEET: {
@@ -684,9 +690,11 @@ describe('HTTP and receipt error surfaces (http.ts & receipt.ts)', () => {
     expect(wrongHost.status).toBe(404);
 
     // Auth not_configured / keys_unavailable -> 503
+    const noBypassEnv: Env = { ...env };
+    delete noBypassEnv.DEV_AUTH_BYPASS;
     const unconfiguredAuth = await handleRequest(
       new Request('https://fleet.example.test/api/v1/status'),
-      { ...env, DEV_AUTH_BYPASS: undefined, ACCESS_AUDIENCE: undefined },
+      { ...noBypassEnv, ACCESS_AUDIENCE: '' },
     );
     expect(unconfiguredAuth.status).toBe(503);
 
@@ -696,8 +704,7 @@ describe('HTTP and receipt error surfaces (http.ts & receipt.ts)', () => {
         headers: { 'cf-access-jwt-assertion': 'eyJhbGciOiJSUzI1NiIsImtpZCI6ImxIn0.e30.sig' },
       }),
       {
-        ...env,
-        DEV_AUTH_BYPASS: undefined,
+        ...noBypassEnv,
         ACCESS_ISSUER: 'https://issuer.example.test',
         ACCESS_AUDIENCE: 'b'.repeat(64),
         ACCESS_OWNER: 'owner@example.test',
@@ -727,7 +734,7 @@ describe('HTTP and receipt error surfaces (http.ts & receipt.ts)', () => {
         get: () => ({ view: () => Promise.reject(new Error('do_down')) }) as unknown as DurableObjectStub<FleetState>,
       } as unknown as DurableObjectNamespace<FleetState>,
     };
-    const doFailure = await handleRequest(new Request('http://127.0.0.1/api/v1/status'), brokenDoEnv);
+    const doFailure = await handleRequest(new Request('http://127.0.0.1/api/v1/fleetStatus'), brokenDoEnv);
     expect(doFailure.status).toBe(503);
 
     // Asset fallback with STRICT_CSP

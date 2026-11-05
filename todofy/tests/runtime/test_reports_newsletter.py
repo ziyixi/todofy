@@ -158,7 +158,9 @@ def test_the_newsletter_gets_the_counts_on_demand(probe):
     """reports.serve computes on demand at the real time: seed around it."""
     now = int(time.time())
     probe.insert("summaries", event_id="new", created_at=now - HOUR, subject="s", summary="新邮件", model="m")
-    probe.insert("summaries", event_id="old", created_at=now - 3 * DAY, subject="s", summary="三天前仍待处理", model="m")
+    probe.insert(
+        "summaries", event_id="old", created_at=now - 3 * DAY, subject="s", summary="三天前仍待处理", model="m"
+    )
     response = probe.worker.hooks.get("/api/recommendation", params={"top": "10"}, auth=NEWSLETTER)
     body = assert_contract(response, "/api/recommendation")
     assert (body["new_count"], body["carryover_count"], body["task_count"]) == (1, 1, 2)
@@ -210,4 +212,3 @@ def test_row_from_before_the_latest_precompute_is_recomputed(probe):
     probe.gemini.queue_generate(text_reply("今日重点：护照。"))
     body = assert_contract(get(probe, "/api/summary", REPORT_PRECOMPUTE_UTC=precompute_hours_ago(2)), "/api/summary")
     assert (body["status"], body["summary"]) == ("ok", "今日重点：护照。")
-

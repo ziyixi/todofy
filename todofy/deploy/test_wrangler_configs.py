@@ -207,4 +207,3 @@ def test_gateway_test_configs_match_the_shipped_gateway(name: str) -> None:
         assert config[key] == GATEWAY[key], key
     assert "d1_databases" not in config and "d1_databases" not in GATEWAY
     assert config["vars"]["TODOFY_PUBLIC_HOST"].endswith(".localhost")
-

@@ -34,7 +34,7 @@ function fakeEnv(counted: boolean, reviewed: boolean, zone = 'America/Los_Angele
     bind: () => ({}),
   });
   return {
-    TIMEZONE: zone,
+    TIME_ZONE: zone,
     DB: {
       prepare: () => makeStmt(),
       batch: () =>
@@ -81,19 +81,19 @@ test('runJobs schedules RETRY_MS when collectDay or Sunday createReview fails, a
 
   // 1. collectDay throws -> collect scheduled at sundayNow + RETRY_MS
   vi.mocked(gtdModule.collectDay).mockRejectedValueOnce(new Error('collect failed'));
-  vi.mocked(reviewModule.createReview).mockResolvedValueOnce(undefined);
+  vi.mocked(reviewModule.createReview).mockResolvedValueOnce('created');
   const retryCollect = await runJobs(fakeEnv(false, false, 'UTC'), sundayNow);
   expect(retryCollect).toBe(sundayNow + RETRY_MS);
 
   // 2. collectDay succeeds, createReview throws -> review scheduled at sundayNow + RETRY_MS
-  vi.mocked(gtdModule.collectDay).mockResolvedValueOnce(undefined);
+  vi.mocked(gtdModule.collectDay).mockResolvedValueOnce('2030-04-14');
   vi.mocked(reviewModule.createReview).mockRejectedValueOnce(new Error('review failed'));
   const retryReview = await runJobs(fakeEnv(false, false, 'UTC'), sundayNow);
   expect(retryReview).toBe(sundayNow + RETRY_MS);
 
   // 3. Both succeed -> next due is Monday 2030-04-15 at COLLECT_HOUR (06:00 UTC), which is earlier than next Sunday REVIEW_HOUR
-  vi.mocked(gtdModule.collectDay).mockResolvedValueOnce(undefined);
-  vi.mocked(reviewModule.createReview).mockResolvedValueOnce(undefined);
+  vi.mocked(gtdModule.collectDay).mockResolvedValueOnce('2030-04-14');
+  vi.mocked(reviewModule.createReview).mockResolvedValueOnce('created');
   const nextMondayCollect = await runJobs(fakeEnv(false, false, 'UTC'), sundayNow);
   expect(nextMondayCollect).toBe(
     Date.parse(`2030-04-15T${String(COLLECT_HOUR).padStart(2, '0')}:00:00Z`),
