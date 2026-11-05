@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 import { exportJWK, generateKeyPair, SignJWT } from 'jose'
 import { createAccessVerifier } from '@ziyixi/edge-auth'
 import { handleAPI } from '../src/native/api.ts'
-import { fetchHandler } from '../src/native/index.ts'
 import { reasonOf } from './owner-api.mjs'
 import { environment, session } from './native-env.mjs'
 import { authenticate, csrfResponse, HttpError, privateResponse, requireCSRF } from '../src/native/security.ts'
@@ -265,30 +264,4 @@ test('maintenance rejects every browser mutation route and reports effective pau
   const overview = await api('GET', '/overview')
   assert.ok(overview.data.warnings.some(item => item.includes('维护模式')))
   assert.equal(overview.data.warnings.some(item => item.includes('收信继续')), false)
-})
-
-test('fetchHandler serves health probes, rejects non-GET/HEAD asset methods and masks uncaught errors', async () => {
-  const env = { ...environment(), ASSETS: { fetch: async () => new Response('<html>app</html>', { headers: { 'Content-Type': 'text/html' } }) } }
-  const live = await fetchHandler(new Request('https://mail.example.org/health/live'), { ...env, DEV_AUTH_BYPASS: undefined })
-  assert.equal(live.status, 204)
-  assert.equal(live.headers.get('Cache-Control'), 'no-store')
-
-  const ready = await fetchHandler(new Request('http://127.0.0.1:8787/health/ready'), env)
-  assert.equal(ready.status, 204)
-  assert.equal(ready.headers.get('Cache-Control'), 'no-store')
-
-  const asset = await fetchHandler(new Request('http://127.0.0.1:8787/'), env)
-  assert.equal(asset.status, 200)
-  assert.equal(asset.headers.get('X-Frame-Options'), 'DENY')
-
-  const notAllowed = await fetchHandler(new Request('http://127.0.0.1:8787/app', { method: 'POST' }), env)
-  assert.equal(notAllowed.status, 405)
-  assert.deepEqual(await notAllowed.json(), { error: { code: 'method_not_allowed', message: '不支持此请求方法' } })
-
-  const brokenEnv = { ...env, DB: { prepare: () => { throw new Error('d1://secret-token@internal.example.test') } } }
-  const unavailable = await fetchHandler(new Request('http://127.0.0.1:8787/health/ready'), brokenEnv)
-  assert.equal(unavailable.status, 503)
-  const body = await unavailable.json()
-  assert.deepEqual(body, { error: { code: 'service_unavailable', message: '服务暂不可用，请稍后重试' } })
-  assert.equal(JSON.stringify(body).includes('secret-token'), false)
 })

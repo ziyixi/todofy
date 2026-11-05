@@ -101,7 +101,7 @@ describe('节点时间线 (Timeline)', () => {
     expect(rows[1]?.querySelector('.bar.over')).not.toBeNull();
     expect(rows[2]).toHaveTextContent('简讯');
     expect(rows[2]).toHaveTextContent('预算 180 秒');
-    expect(rows[2]?.querySelector('.bar.running.open')).not.toBeNull();
+    expect(rows[2]?.querySelector('.bar.ok.open')).not.toBeNull();
     expect(rows[3]).toHaveTextContent('深读');
     expect(rows[3]).toHaveTextContent('1 分');
     expect(rows[4]).toHaveTextContent('发布');

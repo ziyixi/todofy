@@ -164,6 +164,7 @@ describe('操作与记录', () => {
         ...scenario.ops.digest,
         enabled: false,
         last_error: 'timeout',
+        last_receipt: { ...scenario.ops.digest.last_receipt!, item_count: 1 },
         items: [{ ...GEMINI_ITEM, since: '2026-09-29T03:20:00.000Z' }],
       },
     }
@@ -173,7 +174,8 @@ describe('操作与记录', () => {
     expect(within(digest).getByText('没有绑定 Tasks 的建任务入口（TASK_INBOX），不会创建摘要任务。')).toBeInTheDocument()
     expect(within(digest).getByText(/上次创建失败：超时。下次定时检查会用同一请求重试/)).toBeInTheDocument()
     const items = within(digest).getByRole('list', { name: '摘要项目' })
-    expect(within(items).getByText('Todofy：模型预算超过 80%')).toBeInTheDocument()
+    expect(within(items).getByText('Todofy')).toBeInTheDocument()
+    expect(within(items).getByText('模型预算超过 80%')).toBeInTheDocument()
     expect(within(items).getByText('gemini_budget_80')).toBeInTheDocument()
     expect(within(items).getByText('percent')).toBeInTheDocument()
   })

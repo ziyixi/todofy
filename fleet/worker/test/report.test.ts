@@ -690,8 +690,7 @@ describe('HTTP and receipt error surfaces (http.ts & receipt.ts)', () => {
     expect(wrongHost.status).toBe(404);
 
     // Auth not_configured / keys_unavailable -> 503
-    const noBypassEnv: Env = { ...env };
-    delete noBypassEnv.DEV_AUTH_BYPASS;
+    const noBypassEnv: Env = { ...env, DEV_AUTH_BYPASS: 'false' };
     const unconfiguredAuth = await handleRequest(
       new Request('https://fleet.example.test/api/v1/status'),
       { ...noBypassEnv, ACCESS_AUDIENCE: '' },

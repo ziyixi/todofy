@@ -104,7 +104,7 @@ test('validates schema before invoking and supports keyboard submission', async 
   expect(screen.getByRole('alert')).toHaveTextContent('JSON Schema 格式无效')
   expect(api.generate).not.toHaveBeenCalled()
   await user.clear(screen.getByLabelText('JSON Schema'))
-  await user.type(screen.getByLabelText('JSON Schema'), '[1, 2]')
+  await user.type(screen.getByLabelText('JSON Schema'), '[[1, 2]')
   await user.click(screen.getByRole('button', { name: '运行推理' }))
   expect(screen.getByRole('alert')).toHaveTextContent('JSON Schema 需为对象或布尔值。')
   expect(api.generate).not.toHaveBeenCalled()

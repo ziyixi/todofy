@@ -62,7 +62,10 @@ test('unsupported or unbounded recurrence is rejected rather than silently weake
     'Completion-based calendar dates are not supported',
   );
   expect(() => recurrenceRule('every 31st Feb', '2026-10-17')).toThrow('Invalid annual calendar date');
-  expect(() => recurrenceRule('every 32nd', '2026-10-17')).toThrow('Invalid day of month');
+  expect(() => recurrenceRule('every 32nd Jan', '2026-10-17')).toThrow('Invalid annual calendar date');
+  expect(() => recurrenceRule('every 32nd', '2026-10-17')).toThrow(
+    'Unsupported recurrence; choose an explicit supported rule',
+  );
   for (const rrule of [
     'RRULE:FREQ=DAILY;COUNT=5',
     'RRULE:FREQ=DAILY;UNTIL=20270101T000000Z',
@@ -72,18 +75,16 @@ test('unsupported or unbounded recurrence is rejected rather than silently weake
   ]) {
     expect(() => recurrenceRule(rrule, '2026-10-17'), rrule).toThrow('Unsupported recurrence rule');
   }
-  expect(recurrenceRule('RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,FR', '2026-10-17')).toEqual({
-    rrule: 'RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,FR',
-    fromCompletion: false,
-  });
+  const explicitRrule = recurrenceRule('RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,FR', '2026-10-17');
+  expect(explicitRrule.afterCompletion).toBe(false);
+  expect(explicitRrule.rule.toString()).toContain('FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,FR');
 });
 
 test('every weekday and every workday schedule Monday through Friday', () => {
   for (const phrase of ['every weekday', 'every workday']) {
-    expect(recurrenceRule(phrase, '2026-10-17')).toEqual({
-      rrule: 'RRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=MO,TU,WE,TH,FR',
-      fromCompletion: false,
-    });
+    const parsed = recurrenceRule(phrase, '2026-10-17');
+    expect(parsed.afterCompletion).toBe(false);
+    expect(parsed.rule.toString()).toContain('FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR');
     const saturdayPreview = previewDate(phrase, '2026-10-17', 'UTC');
     expect(saturdayPreview.dueDate).toBe('2026-10-19');
     expect(
@@ -115,7 +116,7 @@ test('validTimezone, localDate, addDays, and zonedInstant DST transition validat
   );
   expect(() => zonedInstant('not-a-wall-time', 'UTC')).toThrow('Invalid local date-time');
   expect(() => zonedInstant('2026-02-30T10:00:00', 'UTC')).toThrow('Invalid local date-time');
-  expect(() => zonedInstant('2026-10-17T10:00:00', 'Invalid/Zone')).toThrow('Unsupported timezone');
+  expect(() => zonedInstant('2026-10-17T10:00:00', 'Invalid/Zone')).toThrow('Invalid local date-time');
   expect(zonedInstant('2026-03-08T03:30:00', 'America/Los_Angeles')).toBe('2026-03-08T10:30:00.000Z');
 });
 

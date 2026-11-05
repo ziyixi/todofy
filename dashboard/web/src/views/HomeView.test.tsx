@@ -367,7 +367,7 @@ describe('首页', () => {
 
     expect(within(strip).getByText(/2 项提醒暂不能关闭：提醒控制存储已满/)).toBeInTheDocument()
 
-    const list = within(strip).getByRole('list', { name: '待处理项目' })
+    const list = within(strip).getByRole('list', { name: '需关注的项目' })
     expect(within(list).getAllByRole('listitem')).toHaveLength(3)
 
     const toggle = within(strip).getByRole('button', { name: '还有 1 项' })

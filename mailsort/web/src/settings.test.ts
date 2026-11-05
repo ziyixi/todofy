@@ -320,6 +320,6 @@ describe('range undo preview truncation and error recovery', () => {
     previewBtn.click()
     await settle()
     expect(undo.textContent).not.toContain('正在统计')
-    expect(root.querySelector('#toast')?.textContent).toContain('UNAVAILABLE')
+    expect(root.querySelector('#toast')?.textContent).toContain('请求失败')
   })
 })

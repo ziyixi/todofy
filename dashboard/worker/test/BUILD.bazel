@@ -185,6 +185,7 @@ proto_vitest_test(
     deps = [
         "//dashboard/worker/src:api-types",
         "//dashboard/worker/src:attention-state",
+        "//dashboard/worker/src:module_group_18",
     ],
 )
 

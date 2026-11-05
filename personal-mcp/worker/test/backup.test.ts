@@ -222,7 +222,7 @@ it('surfaces backups_not_bound, part_hash_mismatch, part_rows_mismatch, and veri
     error: 'backups_not_bound',
   });
 
-  const makeBucket = (sha256: string, partRows: number, manifestRows = partRows) => createR2Bucket({
+  const makeBucket = (sha256: string, partRows: number, manifestRows = partRows, partBytes = compressed) => createR2Bucket({
     [`${prefix}${MANIFEST}`]: JSON.stringify({
       format: BACKUP_FORMAT,
       schema_version: SCHEMA_VERSION,
@@ -235,15 +235,16 @@ it('surfaces backups_not_bound, part_hash_mismatch, part_rows_mismatch, and veri
       }],
       kv: { rows: 0, parts: [] },
     }),
-    [partKey]: compressed,
+    [partKey]: partBytes,
   });
 
-  const started = await startRestore(storage, makeBucket('0'.repeat(64), 1), prefix, SLOT);
+  const started = await startRestore(storage, makeBucket(validSha, 2), prefix, SLOT);
   expect(started.status).toBe(202);
   expect(await restoreStep(storage, undefined, SLOT)).toBe(SLOT + RESTORE_RETRY_MS);
   expect(restoreState(storage)).toMatchObject({ phase: 'running', errors: 1, error_code: 'backups_not_bound' });
 
-  expect(await restoreStep(storage, makeBucket('0'.repeat(64), 1), SLOT)).toBe(SLOT + RESTORE_RETRY_MS);
+  const corruptBytes = new Uint8Array(gzipSync('[1,"corrupt"]\n'));
+  expect(await restoreStep(storage, makeBucket(validSha, 2, 2, corruptBytes), SLOT)).toBe(SLOT + RESTORE_RETRY_MS);
   expect(restoreState(storage)).toMatchObject({ phase: 'running', errors: 2, error_code: 'part_hash_mismatch' });
 
   // Third consecutive step failure transitions phase to failed with part_rows_mismatch.

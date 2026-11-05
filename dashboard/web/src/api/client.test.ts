@@ -157,14 +157,14 @@ describe('api client', () => {
     await expect(api.startCanary('', REQUEST_ID)).rejects.toMatchObject({
       status: 400,
       code: 'bad_request',
-      message: '请求格式不正确',
+      message: '请求格式无效',
     })
     expect(calls).toHaveLength(0)
 
     expect(toApiError(new HttpEncodeError('bad path'))).toMatchObject({
       status: 400,
       code: 'bad_request',
-      message: '请求格式不正确',
+      message: '请求格式无效',
     })
     expect(toApiError(new WireJsonError('unrecognized enum'))).toMatchObject({
       status: 200,

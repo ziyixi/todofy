@@ -276,7 +276,7 @@ it('rejects watch_create at the 32-link limit before preparing or calling Watch'
   const full = createWork(client.work, 60, { links });
   const reply = await client.call('watch_create', { work_id: full.id, request_id: uuid(61), ...settings });
   expect(reply.error?.message ?? reply.result?.isError).toBeTruthy();
-  expect(JSON.stringify(reply)).toContain('WORK_LINK_LIMIT');
+  expect(JSON.stringify(reply)).toContain('This work already has 32 links');
   expect(client.preparations()).toBe(0);
   expect(client.seen).toEqual([]);
 });
@@ -303,7 +303,7 @@ it('pauses the newly created watch when linking fails because the work closed in
   workId = open.id;
   const reply = await client.call('watch_create', { work_id: open.id, request_id: uuid(71), ...settings });
   expect(reply.error?.message ?? reply.result?.isError).toBeTruthy();
-  expect(JSON.stringify(reply)).toContain('WATCH_LINK_FAILED');
+  expect(JSON.stringify(reply)).toContain('Its pause was requested; read watch_get to confirm');
   expect(client.seen.map(call => [call.method, call.path])).toEqual([
     ['POST', '/api/v1/watches'],
     ['POST', `/api/v1/${createdName}:pause`],

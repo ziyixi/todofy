@@ -817,13 +817,13 @@ describe('website-sync client', () => {
     expect(requestSync).toHaveBeenCalledTimes(1);
     expect(getSyncRequest).not.toHaveBeenCalled();
 
-    // Lookup=true calls getSyncRequest; rejected state does not require run_id/run_url.
-    const rejected = { request_id: REQUEST_ID, state: 'rejected' as const, error_code: 'cooldown' };
-    getSyncRequest.mockResolvedValueOnce(rejected);
-    expect(await callWebsiteRequest(syncEnv, REQUEST_ID, true)).toEqual({ ok: true, value: rejected });
+    // Lookup=true calls getSyncRequest; failed state does not require run_id/run_url.
+    const failed = { request_id: REQUEST_ID, state: 'failed' as const, error_code: 'cooldown' };
+    getSyncRequest.mockResolvedValueOnce(failed);
+    expect(await callWebsiteRequest(syncEnv, REQUEST_ID, true)).toEqual({ ok: true, value: failed });
     expect(getSyncRequest).toHaveBeenCalledTimes(1);
 
-    // Accepted without run_id or run_url returns null from conform callback -> invalid_response.
+    // Accepted without run_id or run_url returns null from conform callback -> invalid_output.
     for (const invalidAccepted of [
       { request_id: REQUEST_ID, state: 'accepted' },
       { request_id: REQUEST_ID, state: 'accepted', run_id: '42' },
@@ -831,20 +831,12 @@ describe('website-sync client', () => {
       { request_id: '11111111-2222-4333-8444-555555555555', state: 'accepted', run_id: '42', run_url: 'https://github.com/ziyixi/website/actions/runs/42' },
     ]) {
       requestSync.mockResolvedValueOnce(invalidAccepted);
-      expect(await callWebsiteRequest(syncEnv, REQUEST_ID, false)).toEqual({ ok: false, code: 'invalid_response' });
+      expect(await callWebsiteRequest(syncEnv, REQUEST_ID, false)).toEqual({ ok: false, code: 'invalid_output' });
     }
 
     const status = {
-      checked_at: '2026-09-29T16:00:00Z',
-      last_run: {
-        run_id: '42',
-        run_url: 'https://github.com/ziyixi/website/actions/runs/42',
-        status: 'completed',
-        conclusion: 'success',
-        event: 'workflow_dispatch',
-        created_at: '2026-09-29T15:55:00Z',
-        updated_at: '2026-09-29T15:58:00Z',
-      },
+      observed_at: '2026-09-29T16:00:00Z',
+      next_check_at: '2026-09-30T10:00:00Z',
     };
     getSyncStatus.mockResolvedValueOnce(status);
     expect(await callWebsiteSyncStatus(syncEnv)).toEqual({ ok: true, value: status });

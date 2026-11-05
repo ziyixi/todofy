@@ -69,6 +69,7 @@ copied_source_files(
         "pages/MessagePage.tsx",
         "pages/SettingsPage.test.tsx",
         "pages/SettingsPage.tsx",
+        "pages/SetupPage.test.tsx",
         "pages/SetupPage.tsx",
         "test/fakeServer.ts",
         "test/fixtures.tsx",

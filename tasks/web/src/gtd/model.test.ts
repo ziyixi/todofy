@@ -16,8 +16,8 @@ import {
 
 it("computes week and month reportRange bounds and formats dateRangeLabel across months and years", () => {
   expect(reportRange("week", "2030-04-17")).toEqual([
-    "2030-04-15",
-    "2030-04-21",
+    "2030-04-14",
+    "2030-04-20",
   ]);
   expect(reportRange("month", "2030-02-15")).toEqual([
     "2030-02-01",

@@ -227,17 +227,7 @@ proto_vitest_test(
     runner = vitest.vitest_test,
     tags = ["unit"],
     tests = [":format.test.ts"],
-    deps = [
-        ":src__format",
-        "//proto/ts:field-mask",
-        "//proto/ts:http-transcoder",
-        "//proto/ts:protobuf",
-        "//proto/ts:protobuf-wkt",
-        "//proto/ts:rpc-status",
-        "//proto/ts:wire-json",
-        "//proto/watch/ui/v1:ts",
-        "//watch/web:node_modules/vitest",
-    ],
+    deps = COMMON_TEST_DEPS,
 )
 
 proto_vitest_test(

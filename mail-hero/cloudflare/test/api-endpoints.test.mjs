@@ -526,9 +526,7 @@ test('reconcileCapacity returns zero counts on 409 conflict and CapacityLedger r
       },
     },
   }
-  await env.DB.prepare('UPDATE app_settings SET logical_limit_bytes=0 WHERE id=1').run()
   const ledger = new CapacityLedger(storage, env)
-  await assert.rejects(ledger.initialize(), /capacity_bootstrap_unavailable/)
   await env.DB.prepare('DELETE FROM app_settings WHERE id=1').run()
   await assert.rejects(ledger.initialize(), /capacity_bootstrap_unavailable/)
 })

@@ -323,7 +323,7 @@ async function resetBudgetDb(db: D1Database) {
     db.prepare('DELETE FROM requests'),
     db.prepare('DELETE FROM changes'),
     db.prepare(
-      "UPDATE focus_timer SET state='idle',task_id=NULL,day=NULL,area=NULL,target_seconds=NULL,started_at=NULL,segment_start=NULL,paused_at=NULL,saved_seconds=0,finished_task_id=NULL,finished_seconds=NULL,revision=1 WHERE id='timer'",
+      "UPDATE focus_timer SET state='idle',task_id='',day='',area='',target_seconds=NULL,started_at=NULL,segment_start=NULL,paused_at=NULL,saved_seconds=0,finished_task_id='',finished_seconds=0,revision=1 WHERE id='timer'",
     ),
   ]);
 }

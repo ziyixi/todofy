@@ -1,17 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, readdir, mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createHash } from 'node:crypto';
-import { build } from 'esbuild';
-import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
-import { migrationStatements } from './migrations.mjs';
+import { ROOT as root, startRuntime } from './runtime-harness.mjs';
 import { detailOf, idOf, query, reasonOf } from './owner-api.mjs';
 
-const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const fixture = [
   'From: Synthetic Sender <sender@example.org>', 'To: inbox@mail.example.org',
   'Subject: =?UTF-8?B?5ZCI5oiQ5rWL6K+V?=', 'MIME-Version: 1.0',
@@ -35,10 +30,13 @@ async function waitFor(read, predicate, label, timeout = 12000) {
 }
 
 test('native workerd: durable archive, protected API, stable retry identity and content deletion', { timeout: 90000 }, async () => {
-  const temp = await mkdtemp(join(tmpdir(), 'mail-hero-native-test-'));
   const calls = [];
-  const bundle = await build({
-    stdin: { contents: `
+  const { mf, db, close } = await startRuntime({
+    prefix: 'mail-hero-native-test-',
+    name: 'mail-hero-runtime-test',
+    entry: {
+      sourcefile: 'native-runtime-entry.ts',
+      contents: `
       import app from './src/native/index';
       import { emailHandler } from './src/native/ingest';
       import { enqueue } from './src/native/pipeline';
@@ -56,16 +54,11 @@ test('native workerd: durable archive, protected API, stable retry identity and 
           await enqueue(env, await request.json()); return new Response(null, {status:204});
         }
         return app.fetch(request, env, ctx);
-      }};`, resolveDir: root, sourcefile: 'native-runtime-entry.ts', loader: 'ts' },
-    bundle: true, format: 'esm', platform: 'neutral', conditions: ['browser'], external: ['cloudflare:workers'], write: false,
-  });
-  const mf = new Miniflare(convertV4MiniflareOptions({
-    name: 'mail-hero-runtime-test', modules: true, script: bundle.outputFiles[0].text,
-    compatibilityDate: '2026-09-07', host: '127.0.0.1', port: 0,
-    d1Databases: { DB: 'native-test' }, d1Persist: join(temp, 'd1'),
-    r2Buckets: ['MAIL_STORE'], r2Persist: join(temp, 'r2'),
+      }};`,
+    },
+    d1Databases: { DB: 'native-test' },
+    r2Buckets: ['MAIL_STORE'],
     durableObjects: { COORDINATOR: { className: 'MailCoordinator', useSQLite: true } },
-    durableObjectsPersist: join(temp, 'do'),
     bindings: { RECEIVE_ADDRESS: 'inbox@mail.example.org', DEV_AUTH_BYPASS: 'true',
       ACCESS_ISSUER: 'https://synthetic.cloudflareaccess.com', ACCESS_AUDIENCE: 'synthetic',
       ACCESS_OWNER: 'owner@example.org', CREDENTIAL_KEY: 'a'.repeat(64),
@@ -77,14 +70,8 @@ test('native workerd: durable archive, protected API, stable retry identity and 
         userAgent: request.headers.get('User-Agent'), contentType: request.headers.get('Content-Type') });
       return new Response(null, { status: calls.length === 1 || calls.length === 3 ? 503 : 204 });
     },
-  }));
+  });
   try {
-    await mf.ready;
-    const db = await mf.getD1Database('DB');
-    for (const name of (await readdir(join(root, 'migrations'))).filter(name => name.endsWith('.sql')).sort()) {
-      const sql = await readFile(join(root, 'migrations', name), 'utf8');
-      await db.batch(migrationStatements(sql).map(s => db.prepare(s)));
-    }
     const publicRequest = await mf.dispatchFetch('https://public.example.org/api/v2/messages');
     assert.equal(publicRequest.status, 503, 'DEV bypass fails closed outside localhost');
     assert.equal(reasonOf(await publicRequest.json()), 'ACCESS_NOT_CONFIGURED');

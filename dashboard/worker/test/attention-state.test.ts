@@ -165,7 +165,7 @@ describe('HomeState SQLite migrations and unit edge cases', () => {
     const env = {
       ACCOUNT_ID: '0'.repeat(32),
       CF_ANALYTICS_TOKEN: '',
-      BUILD_SHA: 'unit-test',
+      BUILD_SHA: 'unittest123',
       CANARY_UTC_HOUR: '23',
     } as unknown as Env;
     try {
@@ -184,7 +184,7 @@ describe('HomeState SQLite migrations and unit edge cases', () => {
         await expect(home.readHome(invalid, NOW)).rejects.toThrow('invalid_input');
       }
       const snapshot = await home.readHome(0, NOW);
-      expect(snapshot.build).toBe('unit-test');
+      expect(snapshot.build).toBe('unittest123');
       expect(snapshot.head_seq).toBe(0);
 
       // Stub fetch so probes and any outbound calls resolve immediately, then run a tick to trigger dropOrphanProbes().
