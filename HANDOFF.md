@@ -33,7 +33,7 @@ publication ships them; record its verification here once observed, then move th
   Machine Intelligence are read through Crossref by ISSN, papers with an abstract only
   ([sources](newsletter/docs/content-config.md#研究员订阅源)). Main publication ships the Newsletter image under the drain
   contract, the console Worker and the unchanged todofy Worker; the content config then publishes the two registry
-  entries, which the running engine already accepts. Until the image is live the console shows no 搜集标为必知 rows.
+  entries, which the running engine already accepts. Until the image is live 搜集标为必知 reads as if nothing was marked.
   Verify on the first natural run after it: discovery and briefs are marked over budget only when one item ran past
   it, 搜集标为必知 lists the world direction's marked candidates and how far each got, the reference can list law and
   international events, and both Nature sources answer ok (they yield few leads).

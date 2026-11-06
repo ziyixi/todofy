@@ -82,7 +82,7 @@ BBC 商业、卫报经济、CNBC 头条，健康方向的 BBC 健康、KFF Healt
 以及技术方向的 Ars Technica、TechCrunch、BleepingComputer、The Verge。
 这些源加入时都以 HTTPS 直接返回 200、没有跳转；这不说明托管模型能打开它们的文章页。
 nature.com 后来对不带 cookie 的订阅源请求时常以 303 跳到 cookie 检查，Nature 和 Nature Machine Intelligence
-因此改由 Crossref 按 ISSN 读取：只留有摘要的论文，新闻和评论不再成为线索。
+因此改由 Crossref 按 ISSN 读取：只留有摘要的论文，新闻和评论不再成为线索；其余 nature.com 源仍读原地址。
 它取代原先代码里固定的三个元数据源，并从已退役的 Brief 移植而来；文件头写明 Brief 最后的提交，
 未移植的条目（付费或仅作信号的源、站点地图、USGS 和停用条目）可从那里找回。开放的新闻头条源
 最初也没有移植，世界方向因此没有任何线索、只靠几次临时搜索，2026-11-04 起恢复。
