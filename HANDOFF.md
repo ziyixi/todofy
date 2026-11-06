@@ -5,6 +5,11 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
+Branch `codex/test-boundary-repair` restores the targeted runtime checks lost in the test consolidation, makes
+the proto lock test wait for observed contention, and excludes frontend test files from production inputs.
+Validate the restored scenarios, test and production build inputs, and the release plan for a test-only change.
+Merge only after the final branch SHA passes `CI gate`; verify selected publications and reconciliation after main.
+
 Main `71f87df7` carries the Storage console work and pins the private application's improvement waves. Normal main
 publication ships them; record its verification here once observed, then move this to the dated archive.
 

@@ -50,6 +50,20 @@ copied_source_files(
 )
 
 copied_source_files(
+    name = "bundle_sources",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = [
+            "**/*.test.*",
+            "BUILD.bazel",
+            "setup.ts",
+            "test/**",
+        ],
+    ),
+)
+
+copied_source_files(
     name = "typecheck_project_srcs",
     srcs = [
         "App.test.tsx",
