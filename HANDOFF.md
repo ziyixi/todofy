@@ -5,15 +5,6 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-The test suite consolidation landed on main. Its CI gate stopped at the Links backup export CPU check, which
-measured a 5.20 ms warm median against a 5 ms assertion. The backup implementation, fixture and CPU meter match
-the previous green revision. Branch `codex/links-backup-cpu` uses the existing 7 ms first-run ceiling for warm
-exports too. A local warm-only slowdown reached 8.17 ms and failed the updated guard.
-
-The same main run's comparison also treated every app as affected when a new test label was missing from the old
-graph. The repair branch compares shared labels and selects new compatible targets individually. Merge after the
-branch gate passes, then verify the cumulative main selection, its publications and same-SHA reconciliation.
-
 Main `71f87df7` carries the Storage console work and pins the private application's improvement waves. Normal main
 publication ships them; record its verification here once observed, then move this to the dated archive.
 
@@ -50,11 +41,10 @@ codes generically. It changes no source, so it publishes no service and no priva
 
 ## Latest verified release
 
-Main `9da2d116` passed its complete automatic publication: selected public service publications, the selected
-private publication, then one Home publication. The matching Personal cloud reconcile ran all fourteen actual
-Worker comparisons, VPS identity, complete resource registration and resolved infrastructure drift successfully.
-The [November 3 archive](docs/history/handoff-2026-11-03.md) records the shared changes and automatic chain;
-private application evidence is in the private HANDOFF. Documentation-only closure does not republish services.
+Main `07dbfab7` passed cumulative CI, all nine selected Worker publications, the Website release and same-source
+production reconciliation. The [November 6 archive](docs/history/handoff-2026-11-06.md) records the selection
+failure, Links CPU guard and verification. The [November 3 archive](docs/history/handoff-2026-11-03.md) records
+the earlier automatic publication changes.
 
 Shared Worker receipt recovery (`7ef001fe`) adds fixed failure stages, exact committed-result readback and a
 guarded receipt-only path without application redeployment. The old statusless Tasks receipt remains historical
