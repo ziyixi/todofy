@@ -775,7 +775,9 @@ def parse_hf_daily(raw: bytes) -> list[Entry]:
 
 # Wikipedia's Current events portal lists a day's events as bullets under
 # bold category lines; a bullet citing a source is an event, and the bullets
-# above it name its topic. Only these of the portal's categories are kept.
+# above it name its topic. Only these of the portal's categories are kept:
+# final rulings and major sanctions, which the must-know definition names,
+# are mostly filed under law and crime or international relations.
 REFERENCE_CATEGORIES = frozenset(
     {
         "Armed conflicts and attacks",
@@ -783,6 +785,8 @@ REFERENCE_CATEGORIES = frozenset(
         "Disasters and accidents",
         "Business and economy",
         "Health and environment",
+        "Law and crime",
+        "International relations",
     }
 )
 MAX_REFERENCE_ITEMS = 30

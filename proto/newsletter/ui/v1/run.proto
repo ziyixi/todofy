@@ -428,9 +428,9 @@ message MustKnowCandidate {
 }
 
 // An independent list of the day before the issue date's events (Wikipedia's Current events: conflicts, politics and
-// elections, disasters, business, health), and where each left the run. Matching is by shared English words and
-// cited sources, so a stage says what the best match reached, `match` shows that match, and a weak match is
-// UNCERTAIN. It never says that nothing was missed.
+// elections, disasters, business, health, law and crime, international relations), and where each left the run.
+// Matching is by shared English words and cited sources, so a stage says what the best match reached, `match` shows
+// that match, and a weak match is UNCERTAIN. It never says that nothing was missed.
 message ReferenceCheck {
   // Whether the reference could be read.
   enum State {

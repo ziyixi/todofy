@@ -1690,8 +1690,9 @@ def test_current_events_keep_cited_events_of_the_kept_categories():
 def test_current_events_keep_every_event_of_the_shapes_real_pages_use():
     # The shapes real pages use, with invented content: an event two
     # topics below a war, several events under one topic, a star followed
-    # by a space, a {{convert}} template and two citations. Only the
-    # categories the reference skips lose events.
+    # by a space, a {{convert}} template and two citations. Rulings and
+    # sanctions sit under law and crime and international relations; only
+    # the categories the reference skips lose events.
     page = "\n".join(
         [
             "'''Armed conflicts and attacks'''",
@@ -1700,6 +1701,10 @@ def test_current_events_keep_every_event_of_the_shapes_real_pages_use():
             "[[Ostra campaign]]",
             "***An airstrike hits a well in [[Ostra]]. "
             "[https://news.example.org/well (''Wire'')]",
+            "",
+            "'''International relations'''",
+            "*[[Sudria]] imposes sanctions on [[Norland]]. "
+            "[https://news.example.org/sanctions (Wire)]",
             "",
             "'''Law and crime'''",
             "*Police seize a {{convert|200|kg|lb|adj=on}} shipment. "
@@ -1714,6 +1719,10 @@ def test_current_events_keep_every_event_of_the_shapes_real_pages_use():
             "[https://news.example.org/count (Post)]",
             "* The [[Sudria]]n cabinet resigns. "
             "[https://news.example.org/cabinet (Wire)]",
+            "",
+            "'''Science and technology'''",
+            "*A synthetic probe reaches orbit. "
+            "[https://news.example.org/probe (Wire)]",
         ]
     )
     items = researcher.parse_current_events(fake.current_events(page))
@@ -1723,6 +1732,12 @@ def test_current_events_keep_every_event_of_the_shapes_real_pages_use():
             "Norland civil war / War crimes, Ostra campaign",
             "An airstrike hits a well in Ostra.",
         ),
+        (
+            "International relations",
+            "",
+            "Sudria imposes sanctions on Norland.",
+        ),
+        ("Law and crime", "", "Police seize a shipment."),
         (
             "Politics and elections",
             "2026 Norland elections",
@@ -1735,7 +1750,7 @@ def test_current_events_keep_every_event_of_the_shapes_real_pages_use():
         ),
         ("Politics and elections", "", "The Sudrian cabinet resigns."),
     ]
-    assert items[2]["urls"] == [
+    assert items[4]["urls"] == [
         "https://news.example.org/projection",
         "https://news.example.org/count",
     ]

@@ -299,8 +299,9 @@ sources:
     max_seeds: 4
     max_age_days: 2
     role: headline
-  # Not a lead source: yesterday's (UTC) conflicts, politics, disasters, business and health events,
-  # independent of these feeds, against which the console shows where each one left the run.
+  # Not a lead source: yesterday's (UTC) conflicts, politics, disasters, business, health, law and
+  # international relations events, independent of these feeds, against which the console shows where
+  # each one left the run.
   - id: wikipedia-current-events
     name: Wikipedia Current events
     direction: 03-world
