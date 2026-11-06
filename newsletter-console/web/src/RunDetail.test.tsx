@@ -132,7 +132,7 @@ describe('the retrieval funnel and must-know tracking', () => {
     expect(row(/^A landslide keeps/)).toHaveTextContent('○往期已见Disasters and accidents · 匹配：Landslide closes Synthetic Coast rail line');
     expect(row(/^The River Delta Council/)).toHaveTextContent('匹配：合成：河口防洪闸表决推迟');
     expect(row(/^Border guards/)).toHaveTextContent('▲未见Armed conflicts and attacks');
-    expect(must.getByText(/这里不说明没有漏报/)).toBeVisible();
+    expect(must.getByText(/这里不说明没有漏报/)).toHaveTextContent('链接打开的是现在的版本');
     // World discovery marked the flood vote must-know; selection passed it over.
     const marked = must.getByRole('link', { name: '合成：河口防洪闸表决推迟' });
     expect(marked.closest('li')).toHaveTextContent('03-world○未入选');

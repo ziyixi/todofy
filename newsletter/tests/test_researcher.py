@@ -1687,6 +1687,60 @@ def test_current_events_keep_cited_events_of_the_kept_categories():
     ]
 
 
+def test_current_events_keep_every_event_of_the_shapes_real_pages_use():
+    # The shapes real pages use, with invented content: an event two
+    # topics below a war, several events under one topic, a star followed
+    # by a space, a {{convert}} template and two citations. Only the
+    # categories the reference skips lose events.
+    page = "\n".join(
+        [
+            "'''Armed conflicts and attacks'''",
+            "*[[Norland civil war (2025–present)|Norland civil war]]",
+            "**[[War crimes in the Norland civil war|War crimes]], "
+            "[[Ostra campaign]]",
+            "***An airstrike hits a well in [[Ostra]]. "
+            "[https://news.example.org/well (''Wire'')]",
+            "",
+            "'''Law and crime'''",
+            "*Police seize a {{convert|200|kg|lb|adj=on}} shipment. "
+            "[https://news.example.org/seizure (Wire)]",
+            "",
+            "'''Politics and elections'''",
+            "*[[2026 Norland elections]]",
+            "**[[Norland]] holds general elections. "
+            "[https://news.example.org/vote (Wire)]",
+            "**Media project that the [[Unity Party (Norland)|Unity Party]] "
+            "wins both chambers. [https://news.example.org/projection (Wire)] "
+            "[https://news.example.org/count (Post)]",
+            "* The [[Sudria]]n cabinet resigns. "
+            "[https://news.example.org/cabinet (Wire)]",
+        ]
+    )
+    items = researcher.parse_current_events(fake.current_events(page))
+    assert [(i["category"], i["topic"], i["text"]) for i in items] == [
+        (
+            "Armed conflicts and attacks",
+            "Norland civil war / War crimes, Ostra campaign",
+            "An airstrike hits a well in Ostra.",
+        ),
+        (
+            "Politics and elections",
+            "2026 Norland elections",
+            "Norland holds general elections.",
+        ),
+        (
+            "Politics and elections",
+            "2026 Norland elections",
+            "Media project that the Unity Party wins both chambers.",
+        ),
+        ("Politics and elections", "", "The Sudrian cabinet resigns."),
+    ]
+    assert items[2]["urls"] == [
+        "https://news.example.org/projection",
+        "https://news.example.org/count",
+    ]
+
+
 @pytest.mark.parametrize(
     "body",
     [

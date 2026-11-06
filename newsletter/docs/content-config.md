@@ -172,7 +172,8 @@ DW 和半岛电视台订阅源给每个链接加的 `maca`、`traffic_source` �
 ### 维基百科参照
 
 `kind: current_events` 的源（登记表里至多一个，现为 `wikipedia-current-events`）不产生线索：它用 MediaWiki
-parse API 读取刊期前一天（UTC）的维基百科 Portal:Current_events 页面（约 7KB），只保留冲突、政治与选举、
+parse API 读取刊期前一天（UTC）的维基百科 Portal:Current_events 页面（约 7KB）。07:00 运行时这一页通常只写了
+七到九成，之后几天还会补写；事件按发生日归档，前一天公布的结果可能记在更早的一页。参照只保留冲突、政治与选举、
 灾害、商业、健康五类中带引用来源的条目，至多 30 条，超过时各类轮流取（页面按类名字母排列，冲突多的
 一天不会挤掉政治），产物记为 `reference`。必知定义里的终审裁决、重大制裁多归在页面的 Law and crime、
 International relations 两类，参照不核对它们。页面有带来源的条目、却没有一行可识别的保留类名时记为
