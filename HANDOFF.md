@@ -8,8 +8,11 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 The test suite consolidation landed on main. Its CI gate stopped at the Links backup export CPU check, which
 measured a 5.20 ms warm median against a 5 ms assertion. The backup implementation, fixture and CPU meter match
 the previous green revision. Branch `codex/links-backup-cpu` uses the existing 7 ms first-run ceiling for warm
-exports too. A local warm-only slowdown reached 8.17 ms and failed the updated guard. The follow-up is test-only.
-Merge after the branch gate passes, then check cumulative main CI, publication and same-SHA reconciliation.
+exports too. A local warm-only slowdown reached 8.17 ms and failed the updated guard.
+
+The same main run's comparison also treated every app as affected when a new test label was missing from the old
+graph. The repair branch compares shared labels and selects new compatible targets individually. Merge after the
+branch gate passes, then verify the cumulative main selection, its publications and same-SHA reconciliation.
 
 Main `71f87df7` carries the Storage console work and pins the private application's improvement waves. Normal main
 publication ships them; record its verification here once observed, then move this to the dated archive.

@@ -130,30 +130,32 @@ class SelectionTest(unittest.TestCase):
             patch.object(
                 plan.subprocess, "run", return_value=subprocess.CompletedProcess([], 1)
             ),
-            patch.object(plan, "run") as run,
+            patch.object(plan, "run", return_value="old-commit") as run,
         ):
+            before = plan.baseline_targets("old", "bazel", [], False)
             targets, why = plan.affected_targets(
                 "old",
                 "bazel",
                 "target-determinator",
                 [],
                 {"//a:one"},
-                "tests(//a:check)",
+                before,
             )
         self.assertEqual(targets, {"//a:one"})
         self.assertIn("no MODULE.bazel", why)
-        run.assert_not_called()
+        run.assert_called_once()
 
     def test_current_graph_selection_is_delegated_to_the_pinned_binary(self):
         with (
-            patch.object(
-                plan.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)
-            ),
             patch.object(plan.shutil, "which", return_value="/bin/bazel"),
             patch.object(
                 plan,
                 "run",
-                side_effect=[plan.TD_VERSION, "//a:two\n//other:unselected"],
+                side_effect=[
+                    "//a:new_test",
+                    plan.TD_VERSION,
+                    "//a:two\n//other:unselected",
+                ],
             ) as run,
         ):
             targets, why = plan.affected_targets(
@@ -161,33 +163,33 @@ class SelectionTest(unittest.TestCase):
                 "bazel",
                 "target-determinator",
                 ["--output_user_root=/tmp/cache"],
-                {"//a:one", "//a:two"},
-                "tests(//a:check)",
+                {
+                    "//a:one",
+                    "//a:two",
+                    "//a:new_test",
+                    "//a:incompatible_test",
+                    "//a:release",
+                },
+                {"//a:one", "//a:two", "//a:removed_test", "//a:release"},
             )
-        self.assertEqual(targets, {"//a:two"})
+        self.assertEqual(targets, {"//a:two", "//a:new_test"})
         command = run.call_args.args[0]
         self.assertEqual(command[-1], "base")
         self.assertIn("--nocache_results", command)
-        self.assertIn("--before-query-error-behavior=ignore-and-build-all", command)
-        self.assertIn("--targets=tests(//a:check)", command)
+        self.assertIn("--before-query-error-behavior=fatal", command)
+        self.assertIn("--targets=set(//a:one //a:release //a:two)", command)
         self.assertIn("v0.34.0", why)
 
     def test_wrong_determinator_version_fails(self):
         with (
-            patch.object(
-                plan.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)
-            ),
             patch.object(plan, "run", return_value="target-determinator v0.33.2"),
             self.assertRaisesRegex(RuntimeError, "v0.34.0"),
         ):
-            plan.affected_targets("base", "bazel", "td", [], set(), "tests(//a:check)")
+            plan.affected_targets("base", "bazel", "td", [], {"//a:one"}, {"//a:one"})
 
     def test_no_affected_leaves_produces_no_runner_work(self):
         xml = '<query><rule name="//new-app:leaf_test" class="js_test"/></query>'
         with (
-            patch.object(
-                plan.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)
-            ),
             patch.object(plan.shutil, "which", return_value="/bin/bazel"),
             patch.object(plan, "run", side_effect=[plan.TD_VERSION, ""]),
         ):
@@ -197,7 +199,7 @@ class SelectionTest(unittest.TestCase):
                 "td",
                 [],
                 {"//new-app:leaf_test"},
-                "tests(//new-app:check)",
+                {"//new-app:leaf_test"},
             )
         self.assertEqual(plan.target_groups(xml, selected), {})
 
@@ -340,6 +342,11 @@ class DispatchTest(unittest.TestCase):
                 patch.object(plan, "run", side_effect=["\n".join(self.roots), xml]),
                 patch.object(
                     plan,
+                    "baseline_targets",
+                    return_value={"//newsletter:source_test", *self.catalog},
+                ),
+                patch.object(
+                    plan,
                     "affected_targets",
                     return_value=({"//newsletter:source_test"}, "native TD"),
                 ) as affected,
@@ -348,10 +355,8 @@ class DispatchTest(unittest.TestCase):
                 plan.main()
             result = json.loads(output.read_text())
         affected.assert_called_once()
-        candidates, query = affected.call_args.args[4:]
+        candidates, _ = affected.call_args.args[4:]
         self.assertEqual(candidates, {"//newsletter:source_test"})
-        self.assertNotIn(":release", query)
-        self.assertEqual(query, "set(//newsletter:source_test)")
         self.assertEqual(result["groups"], {"python": ["//newsletter:source_test"]})
         self.assertEqual(len(result["release_catalog"]), len(self.catalog))
         self.assertEqual(result["releases"], [])
@@ -364,7 +369,7 @@ class DispatchTest(unittest.TestCase):
             "td",
             [],
             {"//newsletter:image_test"},
-            plan.leaf_query(self.roots),
+            None,
         )
         self.assertEqual(
             plan.target_groups(xml, selected),
@@ -484,18 +489,8 @@ class ReleaseTest(unittest.TestCase):
             plan.release_metadata(self.metadata_xml(entries))
 
     def test_test_and_release_candidates_use_one_determinator_comparison(self):
-        records = {
-            "//tasks:release": {
-                "app": "tasks",
-                "kind": "worker",
-                "target": "//tasks:tasks",
-            }
-        }
-        query = plan.selection_query("tests(//tasks:check)", records)
+        candidates = {"//tasks/private:leaf_test", "//tasks:release"}
         with (
-            patch.object(
-                plan.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)
-            ),
             patch.object(plan.shutil, "which", return_value="/bin/bazel"),
             patch.object(
                 plan,
@@ -511,12 +506,15 @@ class ReleaseTest(unittest.TestCase):
                 "bazel",
                 "td",
                 [],
-                {"//tasks/private:leaf_test", "//tasks:release"},
-                query,
+                candidates,
+                candidates,
             )
         self.assertEqual(selected, {"//tasks/private:leaf_test", "//tasks:release"})
         self.assertEqual(run.call_count, 2)  # version check and one native comparison
-        self.assertIn("--targets=" + query, run.call_args.args[0])
+        self.assertIn(
+            "--targets=set(//tasks/private:leaf_test //tasks:release)",
+            run.call_args.args[0],
+        )
 
     def test_release_only_change_schedules_no_test_group(self):
         records = {
@@ -549,6 +547,11 @@ class ReleaseTest(unittest.TestCase):
                     return_value=(["//tasks:check"], "tests(//tasks:check)", xml),
                 ),
                 patch.object(plan, "release_scope", return_value=records),
+                patch.object(
+                    plan,
+                    "baseline_targets",
+                    return_value={"//tasks/private:leaf_test", "//tasks:release"},
+                ),
                 patch.object(
                     plan,
                     "affected_targets",
