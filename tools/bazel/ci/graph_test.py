@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -31,6 +33,7 @@ def verify(bazel: str, determinator: str) -> dict:
             "BUILD.bazel": 'exports_files(["package.json"])\n',
             "package.json": '{"name":"synthetic-root-scope","private":true}\n',
             ".gitignore": "bazel-*\nMODULE.bazel.lock\n",
+            ".bazelrc": "common --lockfile_mode=off\n",
             "test_rule.bzl": """def _test_impl(ctx):
     executable = ctx.actions.declare_file(ctx.label.name + ".sh")
     ctx.actions.write(executable, "#!/bin/sh\\nexit 0\\n", is_executable = True)
@@ -129,6 +132,27 @@ filegroup(name = "release", srcs = [":artifact"], visibility = ["//visibility:pu
             ]
             command += ["--bazel-startup-opts=" + option for option in startup]
             return set(capture(command + [base], fixture).splitlines())
+
+        def planned(base: str) -> dict:
+            output = root / "plan.json"
+            command = [
+                sys.executable,
+                str(Path(plan.__file__).absolute()),
+                "--base",
+                base,
+                "--bazel",
+                bazel,
+                "--determinator",
+                determinator,
+                "--output",
+                str(output),
+                "--release-input-query",
+                *("--bazel-startup-option=" + option for option in startup),
+            ]
+            environment = dict(os.environ)
+            environment.pop("GITHUB_OUTPUT", None)
+            subprocess.run(command, cwd=fixture, env=environment, check=True)
+            return json.loads(output.read_text(encoding="utf-8"))
 
         try:
             git("init", "-q")
@@ -284,6 +308,48 @@ filegroup(name = "release", srcs = [":artifact"], visibility = ["//visibility:pu
                 ],
                 fixture,
             )
+
+            checks_base = git("rev-parse", "HEAD")
+            app_build = fixture / "app/BUILD.bazel"
+            app_build.write_text(
+                app_build.read_text(encoding="utf-8").replace(
+                    'tests = [":covered_test"]',
+                    'tests = [":covered_test", ":new_test", ":orphan_test"]',
+                )
+                + 'fixture_test(name = "new_test", data = ["orphan.txt"])\n',
+                encoding="utf-8",
+            )
+            git("add", "app/BUILD.bazel")
+            git("commit", "-qm", "Synthetic new and newly registered checks")
+            check_plan = planned(checks_base)
+            added_checks = {
+                label for labels in check_plan["groups"].values() for label in labels
+            }
+            if (
+                added_checks != {"//app:new_test", "//app:orphan_test"}
+                or check_plan["releases"]
+            ):
+                raise AssertionError(
+                    f"Added checks selected unrelated work: {check_plan['groups']}, {check_plan['releases']}"
+                )
+
+            release_base = git("rev-parse", "HEAD")
+            with app_build.open("a", encoding="utf-8") as handle:
+                handle.write(
+                    'filegroup(name = "extension_release", srcs = [":artifact"], '
+                    'visibility = ["//visibility:public"], '
+                    'tags = ["release:extension:app", "artifact://app:artifact"])\n'
+                )
+            git("add", "app/BUILD.bazel")
+            git("commit", "-qm", "Synthetic new release facade")
+            new_release_plan = planned(release_base)
+            new_releases = new_release_plan["releases"]
+            if new_release_plan["groups"] or new_releases != [
+                {"app": "app", "kind": "extension", "target": "//app:artifact"}
+            ]:
+                raise AssertionError(
+                    f"Added release selected unrelated work: {new_release_plan['groups']}, {new_releases}"
+                )
             return {
                 "public_check_roots": sorted(roots),
                 "private_root_and_orphan_leaf_excluded": True,
@@ -295,6 +361,8 @@ filegroup(name = "release", srcs = [":artifact"], visibility = ["//visibility:pu
                 "worker_dispatch_leaves": sorted(worker_leaves),
                 "resume_source_change_leaves": sorted(resume_selected),
                 "resume_images_built": False,
+                "added_check_leaves": sorted(added_checks),
+                "added_release_candidates": new_releases,
             }
         finally:
             subprocess.run(

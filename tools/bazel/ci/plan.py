@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -20,8 +21,8 @@ GROUPS = ("node", "python", "browser", *WORKERD_SHARDS, "cpu", "container", "che
 TD_VERSION = "target-determinator v0.34.0"
 
 
-def run(command: list[str]) -> str:
-    return subprocess.check_output(command, text=True).strip()
+def run(command: list[str], *, cwd: Path | None = None) -> str:
+    return subprocess.check_output(command, cwd=cwd, text=True).strip()
 
 
 def baseline() -> tuple[str, str]:
@@ -85,7 +86,11 @@ def ci_matrix(groups: dict[str, list[str]]) -> dict[str, list[dict[str, str]]]:
 
 
 def leaf_query(roots: list[str], resume_vps_release: bool = False) -> str:
-    leaves = "tests(set(" + " ".join(sorted(set(roots))) + "))"
+    return test_leaves("set(" + " ".join(sorted(set(roots))) + ")", resume_vps_release)
+
+
+def test_leaves(roots: str, resume_vps_release: bool = False) -> str:
+    leaves = f"tests({roots})"
     query = leaves + ' except attr("tags", "manual", ' + leaves + ")"
     if resume_vps_release:
         query += ' except attr("tags", "container", ' + leaves + ")"
@@ -234,40 +239,112 @@ def selection_query(tests: str, releases: dict[str, dict[str, str]]) -> str:
     return "(" + tests + ") union set(" + " ".join(sorted(releases)) + ")"
 
 
+def baseline_targets(
+    base: str, bazel: str, startup: list[str], include_releases: bool
+) -> set[str] | None:
+    """Discover eligible baseline targets without configuring their dependencies."""
+    if not base:
+        return None
+    revision = run(
+        ["git", "rev-parse", "--verify", "--end-of-options", base + "^{commit}"]
+    )
+    module = subprocess.run(
+        ["git", "cat-file", "-e", revision + ":MODULE.bazel"],
+        capture_output=True,
+        check=False,
+    )
+    if module.returncode:
+        return None
+
+    query = test_leaves(ROOTS_QUERY)
+    if include_releases:
+        query = f"({query}) union ({RELEASES_QUERY})"
+    with tempfile.TemporaryDirectory(prefix="bazel-ci-base-") as temporary:
+        source = Path(temporary) / "source"
+        run(
+            [
+                "git",
+                "-c",
+                "submodule.recurse=false",
+                "worktree",
+                "add",
+                "--detach",
+                "--quiet",
+                str(source),
+                revision,
+            ]
+        )
+        try:
+            labels = run(
+                [
+                    bazel,
+                    *startup,
+                    "--batch",
+                    f"--output_base={Path(temporary) / 'bazel'}",
+                    "query",
+                    query,
+                    "--output=label",
+                    "--repository_cache="
+                    + str(Path.home() / ".cache/personal-cloud-bazel/repository"),
+                ],
+                cwd=source,
+            )
+            return set(labels.splitlines())
+        finally:
+            run(["git", "worktree", "remove", "--force", str(source)])
+
+
 def affected_targets(
     base: str,
     bazel: str,
     determinator: str,
     startup: list[str],
     candidates: set[str],
-    query: str,
+    before: set[str] | None,
 ) -> tuple[set[str], str]:
     if not base:
         return candidates, "all"
-    exists = subprocess.run(
-        ["git", "cat-file", "-e", base + ":MODULE.bazel"],
-        capture_output=True,
-        check=False,
+    if before is None:
+        return candidates, "base has no MODULE.bazel; all current targets"
+    added = candidates - before
+    shared = candidates & before
+    repository_cache = "--repository_cache=" + str(
+        Path.home() / ".cache/personal-cloud-bazel/repository"
     )
-    if exists.returncode:
-        return candidates, "base has no MODULE.bazel; all current checks"
+    if added:
+        # Target Determinator filters incompatible shared targets. Do the same for additions.
+        compatible = run(
+            [
+                bazel,
+                *startup,
+                "cquery",
+                "set(" + " ".join(sorted(added)) + ")",
+                "--output=starlark",
+                '--starlark:expr=str(target.label) if "IncompatiblePlatformProvider" not in providers(target) else ""',
+                repository_cache,
+            ]
+        )
+        added.intersection_update(
+            label.removeprefix("@@") for label in compatible.splitlines()
+        )
+    if not shared:
+        return added, "no shared targets with the baseline"
     if run([determinator, "--version"]) != TD_VERSION:
         raise RuntimeError("Target Determinator must be v0.34.0")
     executable = shutil.which(bazel)
     if executable is None:
         raise RuntimeError("The Bazel executable is unavailable")
-    repository_cache = str(Path.home() / ".cache/personal-cloud-bazel/repository")
     command = [
         determinator,
         "--bazel=" + executable,
-        "--targets=" + query,
+        "--targets=set(" + " ".join(sorted(shared)) + ")",
         "--nocache_results",
-        "--before-query-error-behavior=ignore-and-build-all",
-        "--bazel-opts=--repository_cache=" + repository_cache,
+        "--before-query-error-behavior=fatal",
+        "--bazel-opts=" + repository_cache,
     ]
     command += ["--bazel-startup-opts=" + option for option in startup]
     selected = run(command + [base]).splitlines()
-    return candidates.intersection(selected), "Target Determinator v0.34.0"
+    return added | shared.intersection(selected), "Target Determinator v0.34.0"
 
 
 def main() -> None:
@@ -293,7 +370,7 @@ def main() -> None:
         "--release-input-query",
         nargs="?",
         const=RELEASES_QUERY,
-        help="Include tagged public release facades in the same TD comparison; requires an explicit cumulative --base",
+        help="Include tagged public release facades; requires an explicit cumulative --base",
     )
     args = parser.parse_args()
     if args.release_input_query is not None and args.base is None:
@@ -315,7 +392,7 @@ def main() -> None:
         else {}
     )
     releases = dispatch_releases(catalog, args.app)
-    roots, query, xml = check_scope(
+    roots, _, xml = check_scope(
         args.bazel,
         args.bazel_startup_option,
         args.app,
@@ -327,16 +404,17 @@ def main() -> None:
         releases = {
             label: item for label, item in releases.items() if item["kind"] != "image"
         }
-    # Resolve the test closure before configured analysis: even an excluded test suite member
-    # can otherwise pull its image dependencies into cquery's target universe.
-    query = selection_query("set(" + " ".join(sorted(candidates)) + ")", releases)
+    # Compare only labels from both graphs. New leaves and release facades are affected by definition.
+    before = baseline_targets(
+        base, args.bazel, args.bazel_startup_option, args.release_input_query is not None
+    )
     selected, selector = affected_targets(
         base,
         args.bazel,
         args.determinator,
         args.bazel_startup_option,
         candidates | releases.keys(),
-        query,
+        before,
     )
     groups = target_groups(xml, selected)
     plan = {

@@ -1,8 +1,8 @@
 # Affected checks and releases
 
-`plan.py` discovers public `:check` facades, expands their leaf tests, and reads release metadata from application
-root BUILD files. Fixed Target Determinator compares the union in one native graph operation. It emits compatible
-test groups and selected releases; it contains no file-to-application dependency map.
+`plan.py` discovers public `:check` leaves and release facades at the current and baseline revisions. Fixed Target
+Determinator compares the targets present in both. New compatible checks and releases are selected individually, so
+adding a test does not select unrelated publications. The planner emits test groups and releases from the Bazel graph.
 
 Each public release filegroup includes its real archive, own publication wrapper/action and shared release tooling:
 
@@ -58,13 +58,13 @@ catalog remains available to the publication helper.
 
 For release selection, resolve a cumulative base and pass `--base COMMIT` plus
 `--release-input-query 'attr(tags, "release:", //...)'`. The root CI workflow contains the full invocation. A clean
-checkout and the pinned Bazel/Target Determinator binaries are required. Current-graph failures stop planning;
-a baseline predating the new roots selects all candidates rather than silently omitting them.
+checkout and the pinned Bazel/Target Determinator binaries are required. Graph failures stop planning. An empty
+baseline or a commit predating `MODULE.bazel` explicitly selects all current candidates.
 
 CI runs only the unit tests (`//tools/bazel/ci:check`): grouping, sharding, cache trimming, cumulative publication
 retry, paired images, resume and artifact reuse. `graph_test.py` is a separate manual fixture, not part of any check
 or CI run. It builds a synthetic repository and runs real Git, Bazel and Target Determinator over source-only,
-unused-document, release-input-only and image changes, worker dispatch isolation and resume source checks. Its image
+unused-document, release-input-only and image changes, new tests and releases, worker dispatch isolation and resume source checks. Its image
 actions deliberately fail if built, so the resume case also proves that no image action ran. Run it after changing
 the planner's queries or upgrading Bazel or Target Determinator:
 
