@@ -621,6 +621,9 @@ def test_must_know_candidates_go_as_far_as_their_reports():
     # Discovery's own report, opened again under another ID, stands for m0.
     opened = candidate("other", "合成：诺兰公投", url=world[0]["url"])
     rate = candidate("rate", direction="04-economy")
+    # The economy direction hands off m1 too, unmarked: the pool's merge
+    # kept world's mark, but only world marked it.
+    shared = candidate("m1", "Must 1", direction="04-economy")
     found = {
         "03-world": {
             "candidates": world,
@@ -630,8 +633,11 @@ def test_must_know_candidates_go_as_far_as_their_reports():
             },
         },
         "04-economy": {
-            "candidates": [rate],
-            "classifications": {"rate": must},
+            "candidates": [rate, shared],
+            "classifications": {
+                "rate": must,
+                "m1": {"kind": "news", "basis": "Opened news"},
+            },
         },
     }
     marked = views.must_know_candidates(

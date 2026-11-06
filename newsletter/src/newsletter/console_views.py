@@ -669,16 +669,21 @@ def consensus_leads(funnel: Funnel) -> list[run_pb.ConsensusLead]:
     return result
 
 
+def _marked(classifications: Row, identifier: str) -> bool:
+    basis = text(_mapping(classifications.get(identifier)).get("basis"))
+    return basis.startswith(content.MUST_KNOW_BASIS)
+
+
 def must_know_candidates(funnel: Funnel) -> list[run_pb.MustKnowCandidate]:
     """The candidates discovery marked must-know, and how far each got.
 
     The mark is the change_basis prefix selection keys on, the discovery
-    model's own claim; selection records no verdict of its own. A pooled
-    candidate is marked when the pool's classification (what selection
-    saw) is; one the pool left out or has not reached, when discovery's
-    is. A pool candidate at one of the candidate's addresses is the same
-    report, so a task or story citing it counts. Directions come in the
-    graph's order.
+    model's own claim; selection records no verdict of its own. A candidate
+    is listed under the direction whose discovery marked it; a pooled one
+    only while the pool's classification (what selection saw) still
+    carries the mark. A pool candidate at one of the candidate's addresses
+    is the same report, so a task or story citing it counts. Directions
+    come in the graph's order.
     """
     selected, disposition = funnel.fates()
     addresses = {text(c.get("id")): _addresses(c) for c in funnel.pool}
@@ -694,11 +699,11 @@ def must_know_candidates(funnel: Funnel) -> list[run_pb.MustKnowCandidate]:
         declared = _mapping(found.get("classifications"))
         for candidate in rows(found.get("candidates")):
             identifier = text(candidate.get("id"))
-            kinds = (
-                funnel.classifications if identifier in addresses else declared
-            )
-            basis = text(_mapping(kinds.get(identifier)).get("basis"))
-            if not basis.startswith(content.MUST_KNOW_BASIS):
+            if not _marked(declared, identifier):
+                continue
+            if identifier in addresses and not _marked(
+                funnel.classifications, identifier
+            ):
                 continue
             keys = _addresses(candidate)
             same = {

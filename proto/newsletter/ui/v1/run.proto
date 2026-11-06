@@ -392,8 +392,8 @@ message ConsensusLead {
 
 // A candidate a discovery direction handed off marked must-know: its change_basis opens 必知：, the mark selection
 // keys on. The mark is the discovery model's own claim against the must-know definition; selection judges it again and
-// records no verdict of its own. A pooled candidate counts as marked when the pool's classification (what selection
-// saw) is; one the pool left out or has not reached, when discovery's is.
+// records no verdict of its own. Listed under the direction whose discovery marked it; a pooled one only while the
+// pool's classification (what selection saw) still carries the mark.
 message MustKnowCandidate {
   // How far it got.
   enum Stage {
