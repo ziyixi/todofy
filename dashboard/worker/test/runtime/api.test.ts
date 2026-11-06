@@ -4,11 +4,15 @@
  * and the status poll interval, v1's retired paths, the tick deduplication, and the bounded Durable
  * Object storage (60-day canary retention, 14 recent runs).
  */
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { QUOTA_RESOURCES } from '../../src/idl.ts';
 import { type HomeView, type OpsView } from '../../src/api-types.ts';
 import { accessClaims, testIssuer, type TestIssuer } from '../jwt.ts';
-import { expectValid, NOW, PATHS, startFlows, SYNTHETIC_BINDINGS, type FlowHarness } from './flows.ts';
+import { d1Reads, expectValid, NOW, PATHS, startFlows, SYNTHETIC_BINDINGS, type FlowHarness } from './flows.ts';
 
 const ISSUER = SYNTHETIC_BINDINGS.ACCESS_ISSUER ?? '';
 const AUDIENCE = SYNTHETIC_BINDINGS.ACCESS_AUDIENCE ?? '';
@@ -199,4 +203,80 @@ describe('ticks and storage bounds', () => {
     expect(ids).not.toContain(`canary-${day(0)}`);
     expect(ids).toContain(`canary-${day(2)}`);
   });
+});
+
+it('migrates a persisted legacy guard store and preserves per-app changes across restart', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'home-guard-migration-'));
+  const options = { persist: dir, bindings: { CANARY_UTC_HOUR: '23' }, usage: d1Reads(90) };
+  const seededAt = NOW - 20 * 60_000;
+  const legacy = { level: 'shed', until: NOW + 23 * 3_600_000, set_at: NOW - 3_600_000 };
+  const projected = { level: legacy.level, until: new Date(legacy.until).toISOString(), set_at: new Date(legacy.set_at).toISOString() };
+  const guardSchema = (db: DatabaseSync) =>
+    (db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'guard_applied'").get() as { sql: string } | undefined)?.sql;
+  try {
+    h = await startFlows(options);
+    await h.tick(seededAt);
+    await h.dispose();
+    h = undefined;
+
+    // Recreate the schema and the global owner override from before Watch joined the guard.
+    let homeFile: string | undefined;
+    for (const file of (await readdir(dir, { recursive: true })).filter((name) => name.endsWith('.sqlite'))) {
+      const db = new DatabaseSync(join(dir, file));
+      try {
+        if (guardSchema(db) === undefined) continue;
+        expect(homeFile).toBeUndefined();
+        homeFile = join(dir, file);
+        db.exec(`CREATE TABLE guard_applied_old (
+          app TEXT PRIMARY KEY CHECK (app IN ('mail-hero', 'todofy', 'former-app')),
+          input TEXT, state TEXT, last_call_at INTEGER, last_error TEXT, consecutive_failures INTEGER NOT NULL DEFAULT 0);
+          INSERT INTO guard_applied_old SELECT * FROM guard_applied WHERE app IN ('mail-hero', 'todofy');
+          INSERT INTO guard_applied_old (app) VALUES ('former-app');
+          INSERT INTO state (key, doc, updated_at) VALUES ('status:former-app', '{}', 0), ('guard_override:former-app', '{}', 0);
+          DROP TABLE guard_applied;
+          ALTER TABLE guard_applied_old RENAME TO guard_applied;`);
+        db.prepare('INSERT INTO state (key, doc, updated_at) VALUES (?, ?, ?)').run('guard_override', JSON.stringify(legacy), legacy.set_at);
+      } finally {
+        db.close();
+      }
+    }
+    if (homeFile === undefined) throw new Error('Home SQLite database was not found');
+
+    h = await startFlows(options);
+    const migrated = await h.snapshot();
+    expect(migrated.guard.override).toBeNull();
+    expect(migrated.apps['mail-hero'].status?.app).toBe('mail-hero');
+    expect(migrated.guard.apps['mail-hero']?.last_call_at).toBe(new Date(seededAt).toISOString());
+    for (const app of ['mail-hero', 'todofy', 'watch'] as const) expect(migrated.guard.apps[app]?.override).toEqual(projected);
+
+    await h.tick(NOW);
+    expect(await h.callsOf('watch', 'setGuard')).toEqual([[{ level: 'shed', reason: 'owner_shed', until: projected.until }]]);
+    const response = await h.post(PATHS.guard, { app: 'mail-hero', level: 'normal' });
+    expect(response.status).toBe(200);
+    await response.arrayBuffer();
+    const restartedBuild = 'b'.repeat(40);
+    await h.redeploy({ BUILD_SHA: restartedBuild });
+    const restarted = await h.snapshot();
+    expect(restarted.ops.build).toBe(restartedBuild);
+    expect(restarted.guard.apps['mail-hero']?.override?.level).toBe('normal');
+    expect(restarted.guard.apps.todofy?.override).toEqual(projected);
+    expect(restarted.guard.apps.watch?.override).toEqual(projected);
+    await h.dispose();
+    h = undefined;
+
+    const db = new DatabaseSync(homeFile);
+    try {
+      expect(guardSchema(db)).not.toContain('CHECK');
+      expect(db.prepare('SELECT app FROM guard_applied ORDER BY app').all()).toEqual([
+        { app: 'mail-hero' }, { app: 'todofy' }, { app: 'watch' },
+      ]);
+      expect(db.prepare("SELECT key FROM state WHERE key = 'guard_override' OR key GLOB '*former-app'").all()).toEqual([]);
+    } finally {
+      db.close();
+    }
+  } finally {
+    await h?.dispose();
+    h = undefined;
+    await rm(dir, { recursive: true, force: true });
+  }
 });

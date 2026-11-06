@@ -31,17 +31,24 @@ js_library(
 
 npm_link_all_packages(name = "node_modules")
 
+_WEB_ASSETS = glob(
+    [
+        "public/**",
+        "index.html",
+        "_headers",
+        "_redirects",
+    ],
+    allow_empty = True,
+)
+
 js_library(
     name = "application_sources",
-    srcs = ["//model-router/web/src:application_sources_srcs"] + glob(
-        [
-            "public/**",
-            "index.html",
-            "_headers",
-            "_redirects",
-        ],
-        allow_empty = True,
-    ),
+    srcs = ["//model-router/web/src:application_sources_srcs"] + _WEB_ASSETS,
+)
+
+js_library(
+    name = "bundle_sources",
+    srcs = ["//model-router/web/src:bundle_sources"] + _WEB_ASSETS,
 )
 
 proto_package(
@@ -67,7 +74,7 @@ vite_bundle(
     out_dir = "dist",
     tool = ":vite",
     deps = [
-        ":application_sources",
+        ":bundle_sources",
         ":bundle_proto_link",
         ":node_modules/@tanstack/react-query",
         ":node_modules/@vitejs/plugin-react",

@@ -37,7 +37,11 @@ copied_source_files(
     srcs = glob(
         ["**"],
         allow_empty = True,
-        exclude = ["BUILD.bazel"],
+        exclude = [
+            "**/*.test.*",
+            "BUILD.bazel",
+            "test/**",
+        ],
     ),
 )
 
