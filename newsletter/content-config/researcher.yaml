@@ -107,11 +107,13 @@ sources:
     direction: 01-ai-ml
     kind: feed
     url: "https://huggingface.co/blog/feed.xml"
+  # Crossref by ISSN: www.nature.com answers a cookieless feed request with a 303 to a cookie check.
   - id: nature-machine-intelligence
     name: Nature Machine Intelligence
     direction: 01-ai-ml
-    kind: feed
-    url: "https://www.nature.com/natmachintell.rss"
+    kind: crossref
+    url: "https://api.crossref.org/journals/2522-5839/works"
+    requires_abstract: true # Crossref lists news and editorials as journal articles
   - id: ahead-of-ai
     name: Ahead of AI
     direction: 08-llm-architectures
@@ -130,11 +132,13 @@ sources:
     url: "https://vllm.ai/blog/rss.xml"
 
   # ---------- Science and AI for science ----------
+  # Crossref by ISSN, as for Nature Machine Intelligence; few recent Nature records carry an abstract.
   - id: nature
     name: Nature
     direction: 02-science
-    kind: feed
-    url: "https://www.nature.com/nature.rss"
+    kind: crossref
+    url: "https://api.crossref.org/journals/1476-4687/works"
+    requires_abstract: true
   - id: science
     name: Science
     direction: 02-science

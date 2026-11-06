@@ -111,7 +111,10 @@ def test_authored_registry_is_valid_and_bounded():
     )
     assert by_id["ahead-of-ai"].max_bytes == researcher.MAX_SOURCE_BYTES
     assert not by_id["nature"].keywords and not by_id["science"].keywords
-    assert by_id["science"].requires_abstract
+    # Nature's journals come through Crossref by ISSN, papers only.
+    for journal in ("nature", "nature-machine-intelligence", "science"):
+        assert by_id[journal].kind == "crossref"
+        assert by_id[journal].requires_abstract
     # Front pages are read as one per direction, for world and economy only.
     headline = {s.direction for s in registry if s.role == "headline"}
     assert headline == {"03-world", "04-economy"}
