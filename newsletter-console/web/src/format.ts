@@ -255,12 +255,14 @@ const DROP_REASONS: Readonly<Record<string, string>> = {
 };
 export const dropReason = (reason: string | undefined): string => DROP_REASONS[reason ?? ''] ?? (reason || '原因未记录');
 
-/** How far a headline consensus lead got; a published one says in which form. */
+/** How far a headline consensus lead or a candidate marked must-know got; a published one says in which form. */
 const LEAD_STAGES: Readonly<Record<string, Word>> = {
   pooled: { label: '未入选', tone: 'none' },
   selected: { label: '入选未刊', tone: 'unknown' },
   deferred: { label: '入选后暂缓', tone: 'warn' },
   published: { label: '已刊', tone: 'ok' },
+  dropped: { label: '入池被丢', tone: 'warn' },
+  pending: { label: '尚未入池', tone: 'unknown' },
 };
 const DISPOSITIONS: Readonly<Record<string, string>> = { deep: '深读', brief: '简讯', watch: '观察', deferred: '暂缓' };
 export const disposition = (value: string | undefined): string | null => DISPOSITIONS[value ?? ''] ?? (value || null);

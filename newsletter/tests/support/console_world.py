@@ -385,6 +385,7 @@ FEEDS_EXTRA: Payload = {
     },
 }
 FLOOD = WORLD + "river-delta-flood-barrier-vote-delayed"
+FLOOD_BASIS = "必知：合成：表决推迟，甲、乙两家报道"
 DISCOVERED: dict[str, Payload] = {
     "01-ai-ml": {
         "candidates": [
@@ -440,8 +441,9 @@ DISCOVERED: dict[str, Payload] = {
                 provenance="web_open",
             ),
         ],
+        # World discovery marks the vote must-know; selection passed it over.
         "classifications": {
-            "candidate-flood": {"kind": "news", "basis": "合成：表决推迟"}
+            "candidate-flood": {"kind": "news", "basis": FLOOD_BASIS}
         },
         "observed": {
             "opened": [FLOOD, "https://example.net/news/harbor-strike-over"],
@@ -463,7 +465,7 @@ POOL: Payload = {
     ],
     "classifications": {
         "candidate-chip": {"kind": "news", "basis": "合成：供货变化"},
-        "candidate-flood": {"kind": "news", "basis": "合成：表决推迟"},
+        "candidate-flood": {"kind": "news", "basis": FLOOD_BASIS},
         "candidate-harbor": {
             "kind": "news",
             "basis": "头条共识："

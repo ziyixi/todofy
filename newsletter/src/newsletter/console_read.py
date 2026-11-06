@@ -530,6 +530,7 @@ class ConsoleReader:
             headlines=tuple(views.headline_summaries(funnel.headlines)),
             consensus_leads=tuple(views.consensus_leads(funnel)),
             reference=views.reference_check(funnel),
+            must_know_candidates=tuple(views.must_know_candidates(funnel)),
             dependencies=tuple(
                 views.dependencies(
                     run=self._dependency_run(run),

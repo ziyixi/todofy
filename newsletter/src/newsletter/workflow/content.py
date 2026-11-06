@@ -199,6 +199,9 @@ CONSENSUS_OUTLETS = 3
 MAX_CONSENSUS_LEADS = 3
 # Opens a consensus lead's classification basis; selection.md keys on it.
 CONSENSUS_BASIS = "头条共识："
+# Opens the change_basis of a candidate discovery marks must-know
+# (discovery/03-world.md asks for it); selection.md keys on it too.
+MUST_KNOW_BASIS = "必知："
 # A discovery artifact lists at most this many of the URLs its call opened.
 MAX_OBSERVED_OPENS = 24
 # Editable editorial policy is deliberately separate from the fixed provider

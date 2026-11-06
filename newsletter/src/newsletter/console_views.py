@@ -425,6 +425,7 @@ _PUBLISHED = frozenset({"deep", "brief", "watch"})
 _FATES = ("deep", "brief", "watch", "deferred")
 _STAGE = run_pb.ReferenceEvent_Stage
 _LEAD = run_pb.ConsensusLead_Stage
+_MARKED = run_pb.MustKnowCandidate_Stage
 
 
 def rows(value: object) -> list[Row]:
@@ -665,6 +666,71 @@ def consensus_leads(funnel: Funnel) -> list[run_pb.ConsensusLead]:
                 excerpt_count=int32(funnel.excerpts.get(identifier)),
             )
         )
+    return result
+
+
+def must_know_candidates(funnel: Funnel) -> list[run_pb.MustKnowCandidate]:
+    """The candidates discovery marked must-know, and how far each got.
+
+    The mark is the change_basis prefix selection keys on, the discovery
+    model's own claim; selection records no verdict of its own. A pooled
+    candidate is marked when the pool's classification (what selection
+    saw) is; one the pool left out or has not reached, when discovery's
+    is. A pool candidate at one of the candidate's addresses is the same
+    report, so a task or story citing it counts. Directions come in the
+    graph's order.
+    """
+    selected, disposition = funnel.fates()
+    addresses = {text(c.get("id")): _addresses(c) for c in funnel.pool}
+    dropped = {
+        text(d.get("id")): text(d.get("reason")) for d in funnel.dropped or []
+    }
+    # The pool's artifact records its drops; without it the run is still
+    # before the pool (or stopped there).
+    pooled = funnel.dropped is not None or bool(funnel.pool)
+    result = []
+    for item in funnel.directions:
+        found = _mapping(funnel.discovered.get(text(item.get("id"))))
+        declared = _mapping(found.get("classifications"))
+        for candidate in rows(found.get("candidates")):
+            identifier = text(candidate.get("id"))
+            kinds = (
+                funnel.classifications if identifier in addresses else declared
+            )
+            basis = text(_mapping(kinds.get(identifier)).get("basis"))
+            if not basis.startswith(content.MUST_KNOW_BASIS):
+                continue
+            keys = _addresses(candidate)
+            same = {
+                i
+                for i, other in addresses.items()
+                if i == identifier or other & keys
+            }
+            fates = {disposition.get(i, "") for i in same}
+            fate = next((f for f in _FATES if f in fates), "")
+            reason = ""
+            if fate in _PUBLISHED:
+                stage = _MARKED.PUBLISHED
+            elif fate == "deferred":
+                stage = _MARKED.DEFERRED
+            elif same & selected:
+                stage = _MARKED.SELECTED
+            elif same:
+                stage = _MARKED.POOLED
+            elif pooled:
+                stage, reason = _MARKED.DROPPED, dropped.get(identifier, "")
+            else:
+                stage = _MARKED.PENDING
+            result.append(
+                run_pb.MustKnowCandidate(
+                    title=text(candidate.get("title"), MAX_LABEL_CHARS),
+                    url=http_url(candidate.get("url")),
+                    direction=text(candidate.get("direction")),
+                    stage=stage,
+                    disposition=fate,
+                    drop_reason=reason,
+                )
+            )
     return result
 
 

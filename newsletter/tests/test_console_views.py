@@ -611,6 +611,83 @@ def test_a_consensus_lead_counts_a_candidate_at_another_outlets_report():
     assert found.stage == LEAD.POOLED
 
 
+MARKED = run_pb.MustKnowCandidate_Stage
+
+
+def test_must_know_candidates_go_as_far_as_their_reports():
+    must = {"kind": "news", "basis": "必知：BBC、NPR报道"}
+    world = [candidate(f"m{n}", f"Must {n}") for n in range(7)]
+    world.append(candidate("plain", "Plain"))
+    # Discovery's own report, opened again under another ID, stands for m0.
+    opened = candidate("other", "合成：诺兰公投", url=world[0]["url"])
+    rate = candidate("rate", direction="04-economy")
+    found = {
+        "03-world": {
+            "candidates": world,
+            "classifications": {
+                **{f"m{n}": must for n in range(7)},
+                "plain": {"kind": "news", "basis": "Opened news"},
+            },
+        },
+        "04-economy": {
+            "candidates": [rate],
+            "classifications": {"rate": must},
+        },
+    }
+    marked = views.must_know_candidates(
+        funnel(
+            directions=[{"id": "03-world"}, {"id": "04-economy"}],
+            discovered=found,
+            pool=[opened, *world[1:4], *world[6:], rate],
+            # A pooled candidate is marked as selection saw it: another
+            # direction's research report of m6 won the pool's merge.
+            classifications={
+                "other": {"kind": "news", "basis": "Opened"},
+                **{f"m{n}": must for n in range(1, 4)},
+                "m6": {"kind": "research", "basis": "Paper"},
+                "plain": {"kind": "news", "basis": "Opened news"},
+                "rate": must,
+            },
+            dropped=[
+                {"id": "m4", "direction": "03-world", "reason": "history"}
+            ],
+            tasks=[
+                {"candidate_ids": ["other"]},
+                {"candidate_ids": ["m2", "m3"]},
+            ],
+            stories=[
+                {"candidate_ids": ["other"], "disposition": "brief"},
+                {"candidate_ids": ["m3"], "disposition": "deferred"},
+            ],
+        )
+    )
+    assert [
+        (m.title, m.direction, m.stage, m.disposition, m.drop_reason)
+        for m in marked
+    ] == [
+        ("Must 0", "03-world", MARKED.PUBLISHED, "brief", ""),
+        ("Must 1", "03-world", MARKED.POOLED, "", ""),
+        ("Must 2", "03-world", MARKED.SELECTED, "", ""),
+        ("Must 3", "03-world", MARKED.DEFERRED, "deferred", ""),
+        ("Must 4", "03-world", MARKED.DROPPED, "", "history"),
+        ("Must 5", "03-world", MARKED.DROPPED, "", ""),
+        ("rate", "04-economy", MARKED.POOLED, "", ""),
+    ]
+    # Before the pool nothing past discovery is known.
+    (early,) = views.must_know_candidates(
+        funnel(
+            discovered={
+                "03-world": {
+                    "candidates": world[:1],
+                    "classifications": {"m0": must},
+                }
+            }
+        )
+    )
+    assert early.stage == MARKED.PENDING
+    assert views.must_know_candidates(funnel()) == []
+
+
 REFERENDUM = {
     "category": "Politics and elections",
     "text": "Norland's electoral commission confirms that voters approved "

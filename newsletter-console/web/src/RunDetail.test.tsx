@@ -133,8 +133,38 @@ describe('the retrieval funnel and must-know tracking', () => {
     expect(row(/^The River Delta Council/)).toHaveTextContent('匹配：合成：河口防洪闸表决推迟');
     expect(row(/^Border guards/)).toHaveTextContent('▲未见Armed conflicts and attacks');
     expect(must.getByText(/这里不说明没有漏报/)).toBeVisible();
+    // World discovery marked the flood vote must-know; selection passed it over.
+    const marked = must.getByRole('link', { name: '合成：河口防洪闸表决推迟' });
+    expect(marked.closest('li')).toHaveTextContent('03-world○未入选');
+    expect(must.getByText(/选题按同一定义再判断，不另记结论/)).toBeVisible();
     // Reference and feed text is text: no event or match becomes a link.
-    expect(must.getAllByRole('link')).toHaveLength(2);
+    expect(must.getAllByRole('link')).toHaveLength(3);
+  });
+
+  it('says why the pool left out a candidate marked must-know', async () => {
+    const ready = fixture<{ must_know_candidates: Record<string, unknown>[] }>('run-ready');
+    const dropped = { ...ready.must_know_candidates[0], stage: 'dropped', drop_reason: 'history' };
+    serve(world({ [`/api/v1/${READY_RUN}`]: { ...ready, must_know_candidates: [dropped] } }));
+    show(`#/${READY_RUN}`);
+    const must = await section('必知追踪');
+    expect(must.getByRole('link', { name: '合成：河口防洪闸表决推迟' }).closest('li')).toHaveTextContent('▲入池被丢已见过');
+  });
+
+  it('says when discovery marked nothing must-know', async () => {
+    const ready = fixture<Record<string, unknown>>('run-ready');
+    serve(world({ [`/api/v1/${READY_RUN}`]: { ...ready, must_know_candidates: undefined } }));
+    show(`#/${READY_RUN}`);
+    expect((await section('必知追踪')).getByText('这次搜集没有交接标为必知的候选。')).toBeVisible();
+  });
+
+  it('says discovery has not finished instead of saying it marked nothing', async () => {
+    const ready = fixture<{ nodes: Record<string, unknown>[] }>('run-ready');
+    const nodes = ready.nodes.map((node) => node.type === 'discovery' ? { ...node, state: 'running', end_time: undefined } : node);
+    serve(world({ [`/api/v1/${READY_RUN}`]: { ...ready, state: 'running', nodes, must_know_candidates: undefined } }));
+    show(`#/${READY_RUN}`);
+    const must = await section('必知追踪');
+    expect(must.getByText('搜集尚未完成。')).toBeVisible();
+    expect(must.queryByText('这次搜集没有交接标为必知的候选。')).toBeNull();
   });
 
   it('says what a run from before the funnel did not record, never zero', async () => {

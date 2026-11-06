@@ -1082,6 +1082,11 @@ tbody tr:last-child th {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 20px 32px;
 }
+.must-routes {
+  display: grid;
+  gap: 20px;
+  align-content: start;
+}
 .must-block h3 {
   font-size: .92rem;
   font-weight: 650;

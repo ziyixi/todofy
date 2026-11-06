@@ -86,6 +86,7 @@ that login expires.
 | `RunNode.items` | 64 over the whole run |
 | `Run.funnel` | One row per discovery direction of the run's graph |
 | `Run.consensus_leads` | 3 (the candidates node offers at most three) |
+| `Run.must_know_candidates` | 5 per discovery direction of the run's graph (each hands off at most five candidates) |
 | `ReferenceCheck.events` | 30; `source_urls` 2 each |
 | `SummarizeModelUsage` | 7, 30 or 90 issue dates, ending with the newest that has a run |
 | `SourceCatalog.config_history` | 10 revisions |

@@ -214,7 +214,38 @@ function Headlines({ run }: { run: Run }) {
           })}
         </ul>
       )}
-      <p className="muted small">家数由代码按标题聚类算出，可能把同一议题的不同事件并在一起；是否必知由选题判断。摘要是代码冻结的各家标题与导语，最多支撑一段注明来源的信号。</p>
+      <p className="muted small">家数由代码按标题聚类算出，可能把同一议题的不同事件并在一起；是否必知由选题判断。搜集已作为新闻交接的组不再列入。摘要是代码冻结的各家标题与导语，最多支撑一段注明来源的信号。</p>
+    </div>
+  );
+}
+
+/** The candidates discovery marked must-know (change_basis 必知：), and how far each got. */
+function Marked({ run }: { run: Run }) {
+  const marked = run.must_know_candidates ?? [];
+  // A running discovery has listed only the directions it finished.
+  const discovering = run.state === 'running'
+    && (run.nodes ?? []).some((node) => node.type === 'discovery' && (node.state === 'pending' || node.state === 'running'));
+  return (
+    <div className="must-block">
+      <h3>搜集标为必知</h3>
+      {marked.length === 0 ? <p className="muted">{discovering ? '搜集尚未完成。' : '这次搜集没有交接标为必知的候选。'}</p> : (
+        <ul className="must-rows">
+          {marked.map((item, index) => {
+            const href = webUrl(item.url);
+            return (
+              <li key={index}>
+                <span className="must-title">{href ? <a href={href} target="_blank" rel="noopener noreferrer">{item.title}</a> : item.title}</span>
+                <span className="must-tags">
+                  <span className="chip quiet">{item.direction}</span>
+                  <Mark word={leadStage(item.stage, item.disposition)} />
+                </span>
+                {item.stage === 'dropped' ? <span className="muted small must-note">{dropReason(item.drop_reason)}</span> : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <p className="muted small">标记是搜集模型按必知定义自己写的（change_basis 以“必知：”开头），入池的以选题看到的分类为准；选题按同一定义再判断，不另记结论。</p>
     </div>
   );
 }
@@ -250,19 +281,25 @@ function Reference({ check }: { check: ReferenceCheck }) {
   );
 }
 
-/** Must-know tracking: the code-counted headline consensus and an independent reference, against what the run did. */
+/**
+ * Must-know tracking: the two ways a must-know event enters the run (discovery's mark and the code-counted headline
+ * consensus) and an independent reference, against what the run did.
+ */
 function MustKnow({ run }: { run: Run }) {
   const recorded = run.reference !== undefined || (run.headlines ?? []).length > 0
-    || (run.funnel ?? []).some((row) => row.opened_count !== undefined);
+    || (run.must_know_candidates ?? []).length > 0 || (run.funnel ?? []).some((row) => row.opened_count !== undefined);
   return (
     <section className="card must" aria-labelledby="must-title">
       <header className="card-head">
         <h2 id="must-title">必知追踪</h2>
-        <p className="muted">多家头条同报的事件与独立参照，各自走到了哪一步</p>
+        <p className="muted">搜集标为必知的候选、多家头条同报的事件与独立参照，各自走到了哪一步</p>
       </header>
       {!recorded ? <p className="muted">{NOT_RECORDED}。</p> : (
         <div className="must-grid">
-          <Headlines run={run} />
+          <div className="must-routes">
+            <Marked run={run} />
+            <Headlines run={run} />
+          </div>
           {run.reference ? <Reference check={run.reference} /> : (
             <div className="must-block"><h3>参照</h3><p className="muted">这次运行没有参照源。</p></div>
           )}

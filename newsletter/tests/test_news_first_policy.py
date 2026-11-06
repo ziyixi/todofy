@@ -294,9 +294,9 @@ def test_authored_world_rules_mark_must_know_events_for_selection():
         )
     )
     assert world == packaged
-    # The markers are the only contract between the stages.
-    assert "change_basis以“必知：”开头" in world
-    assert "basis以“必知：”开头" in selection
+    # The markers are the only contract between the stages (and the console).
+    assert f"change_basis以“{content.MUST_KNOW_BASIS}”开头" in world
+    assert f"basis以“{content.MUST_KNOW_BASIS}”开头" in selection
     assert f"basis以“{content.CONSENSUS_BASIS}”开头" in selection
     # Selection judges a headline consensus against the world definition.
     definition = world[world.index("必知事件指：") : world.index("这类事件")]
