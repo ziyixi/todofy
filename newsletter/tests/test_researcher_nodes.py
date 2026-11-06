@@ -406,6 +406,53 @@ async def pool(
     return await nodes.execute("deduplicate", context, tmp_path)
 
 
+@pytest.mark.parametrize(
+    ("sizes", "limit"),
+    [((5,) * 8, 30), ((5, 0, 1), 1), ((5, 0, 1), 5), ((5, 0, 1), 30)],
+)
+async def test_pool_interleaves_discovery_directions_before_the_cap(
+    nodes, tmp_path, sizes, limit
+):
+    groups = []
+    for direction, size in enumerate(sizes):
+        candidates = [
+            workflow_content.candidate(
+                id=f"candidate-{direction}-{index}",
+                direction=f"direction-{direction}",
+                title=f"Synthetic direction {direction}, candidate {index}",
+                url=f"https://example.org/{direction}/{index}",
+            )
+            for index in range(size)
+        ]
+        groups.append(
+            {
+                "candidates": candidates,
+                "classifications": {
+                    candidate["id"]: {"kind": "news", "basis": "Test event."}
+                    for candidate in candidates
+                },
+            }
+        )
+    context = engine.NodeContext(
+        run_id="researcher",
+        node_id="candidates",
+        item_id="",
+        params={"max_candidates": limit},
+        inputs={"discovery": groups},
+        run_inputs={"issue_date": DAY, "content_config": config()},
+    )
+    original = copy.deepcopy(groups)
+    result = await nodes.execute("deduplicate", context, tmp_path)
+    expected_ids = [
+        f"candidate-{direction}-{index}"
+        for index in range(max(sizes))
+        for direction, size in enumerate(sizes)
+        if index < size
+    ][:limit]
+    assert [c["id"] for c in result["candidates"]] == expected_ids
+    assert groups == original
+
+
 async def test_headline_consensus_enters_the_pool_as_news_first(
     nodes, tmp_path
 ):

@@ -260,28 +260,42 @@ describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
   })
 
   it('uses the root-array envelope across OpenAI and Codex and rejects invalid output while retaining consumed usage', async () => {
-    const arraySchema = { type: 'array', maxItems: 2, items: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'], additionalProperties: false } }
-    const items = [{ title: 'Synthetic reading' }]
-    harness.openaiOutputs.push(JSON.stringify({ result: items }), '{"result":[{"wrong":true}]}')
+    const arraySchema = { type: 'array', maxItems: 2, items: {
+      type: 'object', properties: { rank: { type: 'integer' }, title: { type: 'string' }, reason: { type: 'string' } },
+      required: ['rank', 'title', 'reason'], additionalProperties: false,
+    } }
+    const envelope = { type: 'object', properties: { result: arraySchema }, required: ['result'], additionalProperties: false }
+    const items = [{ rank: 1, title: 'Synthetic reading', reason: 'Synthetic practice' }]
+    const output = JSON.stringify({ result: items })
+    const malformed = '{"result":[{"wrong":true}]}'
+    harness.openaiOutputs.push(output, malformed)
     const request = { model: api, input: 'Synthetic recommendations', outputSchemaJson: JSON.stringify(arraySchema) }
     const answer = await harness.models.generate(request)
     expect(answer.error).toBeUndefined()
     expect(JSON.parse(answer.output)).toEqual(items)
-    expect(harness.calls[0]?.body.text).toEqual({ format: { type: 'json_schema', name: 'router_output', strict: true,
-      schema: { type: 'object', properties: { result: arraySchema }, required: ['result'], additionalProperties: false } } })
+    expect(harness.calls[0]?.body.text).toEqual({ format: { type: 'json_schema', name: 'router_output', strict: true, schema: envelope } })
     const invalid = await harness.models.generate(request)
     expect(invalid.output).toBe('')
     expect(invalid.error?.reason).toBe('MODEL_INVALID_ANSWER')
     expect(invalid.usage).toMatchObject({ available: true, inputTokens: 100, outputTokens: 50 })
     expect((await harness.owner.getRequest({ name: invalid.name })).state).toBe('failed')
 
-    harness.executorOutputs.push(JSON.stringify({ result: items }))
-    const codexAnswer = await harness.models.generate({ model: sol, input: 'Synthetic Codex recommendations', outputSchemaJson: JSON.stringify(arraySchema) })
+    harness.executorOutputs.push(output, malformed)
+    const codexRequest = { ...request, model: sol }
+    const codexAnswer = await harness.models.generate(codexRequest)
     expect(codexAnswer.error).toBeUndefined()
     expect(JSON.parse(codexAnswer.output)).toEqual(items)
+    const executor = harness.calls.find((call) => call.path === '/api/codex/v1/model/generations:generate')
+    expect(JSON.parse(String(executor?.body.output_schema_json))).toEqual(envelope)
     const detail = await harness.owner.getRequest({ name: codexAnswer.name })
     expect(JSON.parse(detail.request!.outputSchemaJson)).toEqual(arraySchema)
     expect(JSON.parse(detail.generation!.output)).toEqual(items)
+
+    const invalidCodex = await harness.models.generate(codexRequest)
+    expect(invalidCodex.error?.reason).toBe('MODEL_INVALID_ANSWER')
+    expect(invalidCodex.output).toBe('')
+    expect(invalidCodex.usage).toMatchObject({ available: true, inputTokens: 14, outputTokens: 5 })
+    expect((await harness.owner.getRequest({ name: invalidCodex.name })).state).toBe('failed')
   })
 
   it('keeps exhausted credits separate from rate limiting without retrying or falling back', async () => {

@@ -181,8 +181,9 @@ Keep the old database until the restored one has run for a while, then delete it
 
 The same commands work on a local copy: pass `--local --persist-to "$PRIV/d1"` in place of `--remote` to
 `migrations apply`, `execute` and `verify`, and any new UUID as the database id; `download --local --persist-to <dir>`
-reads a local bucket. `worker/test/runtime/backup.test.ts` runs the backup from the object's Alarm on real D1 and R2,
-downloads it with wrangler, restores it into a new local D1, verifies it and compares every table of the restored
-database with the original row for row; `bazel test //links/tools:check` covers the tool on synthetic data.
+reads a local bucket. `worker/test/runtime/backup.test.ts` runs the backup from the object's Alarm on real D1 and R2.
+The same suite downloads a two-link backup with Wrangler, restores it into a new local D1, compares every table with
+the original and checks that verification catches a changed row. `bazel test //links/tools:check` covers the tool
+on synthetic data.
 
 The committed synthetic build/test path is `bazel test //links:check`. Runtime backup/restore tests and tool checks are selected as leaves from that facade; remote recovery commands above are separate authorized operator work.

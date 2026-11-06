@@ -17,7 +17,7 @@ import { create } from '@ziyixi/proto/protobuf';
 import { timestampMs } from '@ziyixi/proto/protobuf/wkt';
 import { BackupRestore_State as State } from '@ziyixi/proto/mailsort/ui/v2/backup_pb';
 import { Mode, SettingsSchema } from '@ziyixi/proto/mailsort/ui/v2/status_pb';
-import { BACKUP_FORMAT, LATEST, MANIFEST, type BackupManifest } from '../../src/backup.ts';
+import { BACKUP_FORMAT, BACKUP_ROOT, LATEST, MANIFEST, timestamp, type BackupManifest } from '../../src/backup.ts';
 import { BACKUP_PART_BYTES, BACKUP_STEP_BYTES, BACKUP_STEP_PARTS, DAY as DAY_MS, RESTORE_ROWS_PER_DAY } from '../../src/limits.ts';
 import { MAILSORT_OBJECT } from '../../src/env.ts';
 import { SCHEMA_VERSION } from '../../src/store.ts';
@@ -285,6 +285,37 @@ describe('a populated store backs itself up and restores into an empty one', () 
       await rm(work, { recursive: true, force: true });
     }
   });
+});
+
+it('keeps the newest 30 complete backups in R2 and deletes older complete and incomplete prefixes', async () => {
+  const h = await startHarness({ backups: true });
+  try {
+    await h.sql("INSERT INTO flow (day, stage, outcome, label, n) VALUES ('2026-10-01', 'claude', 'applied', '', 1)");
+    const bucket = await h.mf.getR2Bucket('BACKUPS');
+    const prefixAt = (at: number) => `${BACKUP_ROOT}${timestamp(at).replaceAll(':', '')}/`;
+    const complete = Array.from({ length: 31 }, (_, index) => prefixAt(AT - (31 - index) * DAY_MS));
+    const incomplete = [prefixAt(AT - 20 * DAY_MS + SECOND), prefixAt(AT - SECOND)];
+    const part = 'meta/00001.ndjson.gz';
+    for (const prefix of complete) {
+      await bucket.put(prefix + MANIFEST, '{}');
+      await bucket.put(prefix + part, 'synthetic');
+    }
+    for (const prefix of incomplete) await bucket.put(prefix + part, 'synthetic');
+
+    await settle(h, AT, 'backup');
+
+    const current = prefixAt(AT);
+    expect(await h.kv('backup')).toMatchObject({ status: 'ok', last_key: current });
+    const kept = complete.slice(-29);
+    const { delimitedPrefixes } = await bucket.list({ prefix: BACKUP_ROOT, delimiter: '/' });
+    expect(delimitedPrefixes.sort()).toEqual([...kept, current]);
+    for (const prefix of kept) {
+      const { objects } = await bucket.list({ prefix });
+      expect(objects.map((object) => object.key).sort()).toEqual([prefix + MANIFEST, prefix + part].sort());
+    }
+  } finally {
+    await h.dispose();
+  }
 });
 
 describe('a broken part, a restart and the daily share of writes', () => {

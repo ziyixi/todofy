@@ -1,12 +1,13 @@
 """Summary step (v2 plan §5.3 A) against the fake Gemini: prompt, framing, fallback and backoff."""
 
+import time
 import uuid
 from collections.abc import Callable
 
 import pytest
 
-from tests.fakes.model_router_fake import ModelRouterFake, error_reply, text_reply
-from tests.fakes.server import retry_after_http_date, retry_after_seconds
+from tests.fakes.model_router_fake import GENERATE_PATH, ModelRouterFake, error_reply, text_reply
+from tests.fakes.server import Reply, retry_after_http_date, retry_after_seconds
 from tests.runtime.harness import Worker, mail_event, transitions
 from todofy.core.contract import parse_mail_event
 from todofy.core.mailbox import brief_of
@@ -106,6 +107,24 @@ def test_server_errors_back_off_and_recover(worker: Worker, fresh_gemini: ModelR
 
     assert [call.model for call in fresh_gemini.calls_mentioning(event_id)] == ["model-a", "gemini-probe", "model-a"]
     assert "summary_failed" in _codes(event)
+
+
+@pytest.mark.reaches("summary_failed")
+def test_alarm_closes_a_hanging_model_connection_and_retries_the_same_mail(
+    worker: Worker, fresh_gemini: ModelRouterFake
+) -> None:
+    fresh_gemini.queue_generate(Reply(hang=True), model="model-a")
+    event_id, _ = _arrive(worker)
+
+    hung = fresh_gemini.wait_for(lambda: fresh_gemini.calls_mentioning(event_id))[0]
+    assert fresh_gemini.wait_for(lambda: fresh_gemini.disconnects, timeout_s=5) == [GENERATE_PATH]
+    # The core's test config gives the Alarm 1.5 s for the model call. Allow 50 ms for dispatch.
+    assert time.time() - hung.at >= 1.45
+
+    event = worker.wait_event(event_id, {"complete"})
+    assert [call.model for call in fresh_gemini.calls_mentioning(event_id)] == ["model-a", "model-a"]
+    assert ("summarizing", "pending", "summary_failed", "worker") in transitions(event)
+    assert event["crash_count"] == 0
 
 
 @pytest.mark.reaches("llm_request_rejected")

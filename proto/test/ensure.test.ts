@@ -117,7 +117,7 @@ test('recovers a dead local lock and cleans abandoned staging directories', () =
   expect(existsSync(join(f.proto, '.generate-abandoned'))).toBe(false);
 });
 
-test('takes over a stale lock past LOCK_STALE_MS and waits when contended by a live holder', async () => {
+test('takes over a stale lock past LOCK_STALE_MS and waits when contended by a live holder', { timeout: 15_000 }, async () => {
   const f = fixture();
   const lockDir = join(f.proto, '.generate.lock');
   mkdirSync(lockDir);
@@ -131,25 +131,33 @@ test('takes over a stale lock past LOCK_STALE_MS and waits when contended by a l
 
   mkdirSync(lockDir);
   writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({ pid: process.pid, host: hostname() }));
-  const waiter = new Promise<{ code: number | null; stderr: string }>((resolve, reject) => {
+  const holder = `, held by pid ${String(process.pid)} on ${hostname()}`;
+  const contended = await new Promise<{ code: number | null; stderr: string; waited: boolean }>((resolve, reject) => {
     const child = spawn(process.execPath, f.args, {
       cwd: f.root,
       env: f.env,
       stdio: ['ignore', 'ignore', 'pipe'],
+      signal: AbortSignal.timeout(10_000),
     });
     let stderr = '';
+    let waited = false;
     child.stderr.on('data', (chunk: Uint8Array) => {
       stderr += String(chunk);
+      if (!waited && stderr.includes('waiting for ') && stderr.includes(holder)) {
+        waited = true;
+        try {
+          rmSync(lockDir, { recursive: true, force: true });
+        } catch (error) {
+          child.kill();
+          reject(error);
+        }
+      }
     });
     child.once('error', reject);
-    child.once('exit', (code) => resolve({ code, stderr }));
+    child.once('close', (code) => resolve({ code, stderr, waited }));
   });
-  setTimeout(() => {
-    rmSync(lockDir, { recursive: true, force: true });
-  }, 250);
-  const contended = await waiter;
   expect(contended.code, contended.stderr).toBe(0);
-  expect(contended.stderr).toContain(`waiting for ${lockDir}, held by pid ${String(process.pid)} on ${hostname()}`);
+  expect(contended.waited, contended.stderr).toBe(true);
   expect(existsSync(lockDir)).toBe(false);
 });
 

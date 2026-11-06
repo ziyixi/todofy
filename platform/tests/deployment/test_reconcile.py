@@ -580,6 +580,34 @@ class ManifestAcceptance(Fixture, unittest.TestCase):
         self.controller.reconcile(self.request(REQUEST))
         self.assertEqual(self.mutations(), [])
 
+    def test_frozen_admission_blocks_repair_without_effects(self):
+        self.drift_templates()
+        request = self.request()
+        repairable = self.controller.plan()
+        self.assertEqual(repairable.state, "repairable")
+        self.assertTrue(repairable.changes)
+
+        self.admission.state = "frozen"
+        before = deepcopy(self.resource_state)
+        source = self.store.latest()
+        paused = self.controller.plan(fresh=True)
+        self.assertEqual(
+            (paused.state, paused.reason_code), ("manual_required", "BUSINESS_PAUSED")
+        )
+        self.assertEqual(paused.changes, repairable.changes)
+        with self.assertRaises(RpcError) as refusal:
+            self.controller.reconcile(request)
+        self.assertEqual(
+            (refusal.exception.code, refusal.exception.reason),
+            ("FAILED_PRECONDITION", "RECONCILE_MANUAL_REQUIRED"),
+        )
+        self.assertEqual(self.store.latest(), source)
+        self.assertIsNone(self.store.reconcile_receipt(to_wire(request)))
+        self.assertEqual(self.resource_state, before)
+        self.assertEqual(self.mutations(), [])
+        self.assertEqual(self.admission.state, "frozen")
+        self.assertTrue(all(event == ("admission", "status") for event in self.events))
+
 
 if __name__ == "__main__":
     unittest.main()
