@@ -13,8 +13,8 @@
  * The daily backup's Alarm runs (the LinksBackup object, in the same isolates after the requests) on LINKS_MAX links
  * with three revisions each: the plan, export steps of STEP_BYTES of rows (D1's JSON, gzip and SHA-256), the last step
  * (the parts checked, the manifest, retention) and an idle run that only reads state.json. An Alarm may use 30 s of CPU
- * on Workers Free; each run is still held to the owner API's bounds, so the steps keep the size they had under a cron
- * trigger's 10 ms.
+ * on Workers Free. The test keeps each step below the old cron trigger's 10 ms budget, with a separate warm bound
+ * for export.
  *
  * The whole session runs in COLD_ISOLATES fresh isolates (a new harness each, measureInIsolates): every number is
  * divided by its own isolate's speed (never below 1), and the bounds hold each number's median across the isolates,
@@ -48,6 +48,8 @@ const API_INIT_BOUND_MS = 0.9 * FREE_CPU_MS;
  */
 const API_COLD_BOUND_MS = 0.7 * FREE_CPU_MS;
 const API_BOUND_MS = 0.5 * FREE_CPU_MS;
+/** Export advances the cursor between samples. Its warm upper median needs the same headroom as its first run. */
+const BACKUP_EXPORT_WARM_BOUND_MS = 0.7 * FREE_CPU_MS;
 const RUNS = 11;
 const ISSUER = SYNTHETIC_BINDINGS['ACCESS_ISSUER'] ?? '';
 const AUDIENCE = SYNTHETIC_BINDINGS['ACCESS_AUDIENCE'] ?? '';
@@ -219,7 +221,7 @@ describe('CPU per request (Workers Free: 10 ms)', () => {
     console.log(
       `cpu bounds (reference ms, medians of ${String(COLD_ISOLATES)} isolates): redirect first < ${REDIRECT_COLD_BOUND_MS.toFixed(2)}, ` +
         `median < ${REDIRECT_BOUND_MS.toFixed(2)}; API's first request < ${API_INIT_BOUND_MS.toFixed(2)}, API first < ${API_COLD_BOUND_MS.toFixed(2)}, ` +
-        `median < ${API_BOUND_MS.toFixed(2)}`,
+        `median < ${API_BOUND_MS.toFixed(2)}; backup export warm median < ${BACKUP_EXPORT_WARM_BOUND_MS.toFixed(2)}`,
     );
     for (const { label, first, median } of reference.values()) {
       if (label === REDIRECT_COLD) expect(first, label).toBeLessThan(REDIRECT_COLD_BOUND_MS);
@@ -229,7 +231,8 @@ describe('CPU per request (Workers Free: 10 ms)', () => {
         expect(median, `${label}: warm median`).toBeLessThan(REDIRECT_BOUND_MS);
       } else {
         expect(first, `${label}: first run`).toBeLessThan(API_COLD_BOUND_MS);
-        expect(median, `${label}: warm median`).toBeLessThan(API_BOUND_MS);
+        const warmBound = label === BACKUP_EXPORT ? BACKUP_EXPORT_WARM_BOUND_MS : API_BOUND_MS;
+        expect(median, `${label}: warm median`).toBeLessThan(warmBound);
       }
     }
     expect(reference.size).toBe(2 + REDIRECTS.size + 4 + 4);

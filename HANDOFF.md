@@ -1,16 +1,15 @@
 # Handoff
 
-Updated 2026-11-05 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
+Updated 2026-11-06 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
 Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-Branch `test/suite-consolidation` consolidates test suites, moves pure SQLite and validation checks out of multi-Worker
-Miniflare/workerd harnesses into fast host unit tests, extracts shared test fixtures, and expands unit and UI test
-coverage across `todofy`, `tasks`, `newsletter`, `newsletter-console`, `dashboard`, `fleet`, `platform`,
-`codex-gateway`, `model-router`, `personal-mcp`, `mail-hero`, `mailsort`, `recall`, `watch`, `storage`, `links`,
-`website`, `packages`, `proto`, `contracts`, `tools` and `infra`, while pinning the matching private test suite commit
-(details in `private/HANDOFF.md`). Merge after `CI gate` is green on the branch SHA.
+The test suite consolidation landed on main. Its CI gate stopped at the Links backup export CPU check, which
+measured a 5.20 ms warm median against a 5 ms assertion. The backup implementation, fixture and CPU meter match
+the previous green revision. Branch `codex/links-backup-cpu` uses the existing 7 ms first-run ceiling for warm
+exports too. A local warm-only slowdown reached 8.17 ms and failed the updated guard. The follow-up is test-only.
+Merge after the branch gate passes, then check cumulative main CI, publication and same-SHA reconciliation.
 
 Main `71f87df7` carries the Storage console work and pins the private application's improvement waves. Normal main
 publication ships them; record its verification here once observed, then move this to the dated archive.
