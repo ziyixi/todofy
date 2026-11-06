@@ -24,17 +24,19 @@ publication ships them; record its verification here once observed, then move th
   fills in (no Dropbox App Console change is needed), then start 扫描对象 to count each namespace's objects.
 - Private application work, operating limits and owner follow-ups, including a committed follow-up that waits for
   its own pin, are recorded only in `private/HANDOFF.md`.
-- Newsletter retrieval (not yet on main), one release: headline feeds grouped by event, with at most three
-  code-counted consensus leads a day entering the pool as news (selection still judges must-know); new health,
-  technology, world and economy feeds; cross-day event threads in the discovery and selection prompts; sha256-pinned
-  headline excerpts as abstract evidence for a one-paragraph signal; and the run page's 检索漏斗 and 必知追踪 with a
-  Wikipedia Current events reference ([workflow](newsletter/docs/workflow.md#从线索到成稿)). Release the VPS
-  Newsletter image first under the drain contract; the content config (the `role` field and the `current_events`
-  source) applies after it (the old engine rejects both, and config sync keeps the previous version until then).
-  The console Worker may go either way. The todofy Worker also redeploys, unchanged: `//todofy:core_proto_sources`
-  bundles every generated proto module. Verify on the first natural run that the world headline record has every
-  feed answering and consensus groups, consensus leads reach selection, the reference reads as available and the
-  funnel has counts.
+- Newsletter retrieval (headline consensus leads, the added feeds, event threads, frozen excerpts, and the run page's
+  检索漏斗 and 必知追踪 with the Wikipedia reference) is live; natural runs show headline groups, consensus leads, the
+  reference and funnel counts. Branch `claude/newsletter-followups` (local, based on `07dbfab7`) carries follow-ups:
+  the timeline and the overview hold a mapped node's items, not its whole span, to the per-attempt budget; 必知追踪
+  adds 搜集标为必知 (additive `newsletter.ui.v1` field `Run.must_know_candidates`) and says the reference page is read
+  before Wikipedia finishes it; the reference also keeps Law and crime and International relations; Nature and Nature
+  Machine Intelligence are read through Crossref by ISSN, papers with an abstract only
+  ([sources](newsletter/docs/content-config.md#研究员订阅源)). Main publication ships the Newsletter image under the drain
+  contract, the console Worker and the unchanged todofy Worker; the content config then publishes the two registry
+  entries, which the running engine already accepts. Until the image is live the console shows no 搜集标为必知 rows.
+  Verify on the first natural run after it: discovery and briefs are marked over budget only when one item ran past
+  it, 搜集标为必知 lists the world direction's marked candidates and how far each got, the reference can list law and
+  international events, and both Nature sources answer ok (they yield few leads).
 
 Every Storage, shared release-tool, CI/build and private-entry-point change from the November 2 review landed with
 `c5c1b7e0`; the automatic publication replaced that review's removal of the never-enabled private path. A
