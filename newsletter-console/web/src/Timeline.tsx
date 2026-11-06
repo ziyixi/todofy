@@ -45,6 +45,16 @@ function Bar({ start, end, budget, tone, frame }: { start?: string; end?: string
   );
 }
 
+/**
+ * The time a node's frozen budget bounds: each attempt runs under it, and a mapped node's items run one after another,
+ * so a mapped node counts its longest item, never its whole span. Undefined while nothing it counts has finished.
+ */
+export function budgetedSeconds(node: RunNode): number | undefined {
+  if (!node.item_count) return seconds(node.start_time, node.end_time);
+  const times = (node.items ?? []).flatMap((item) => seconds(item.start_time, item.end_time) ?? []);
+  return times.length > 0 ? Math.max(...times) : undefined;
+}
+
 function toneOf(state: string | undefined, degraded: boolean): string {
   if (state === 'failed') return 'bad';
   if (state === 'unknown') return 'unknown';
@@ -59,7 +69,10 @@ function NodeRow({ node, frame }: { node: RunNode; frame: Frame }) {
   const word = nodeState(node.state, degraded);
   const elapsed = seconds(node.start_time, node.end_time);
   const budget = node.budget_seconds ?? 0;
-  const over = budget > 0 && elapsed !== undefined && elapsed > budget;
+  const mapped = Boolean(node.item_count);
+  const used = budgetedSeconds(node);
+  const over = budget > 0 && used !== undefined && used > budget;
+  const limit = budget > 0 ? `${mapped ? '每项预算' : '预算'} ${wholeSeconds(budget)}` : '';
   const items: readonly RunNodeItem[] = node.items ?? [];
   const done = (node.item_count ?? 0) - (node.failed_item_count ?? 0);
   return (
@@ -75,19 +88,22 @@ function NodeRow({ node, frame }: { node: RunNode; frame: Frame }) {
           ) : null}
         </span>
         <span className="gantt-track">
-          <Bar start={node.start_time} end={node.end_time} budget={budget} tone={toneOf(node.state, degraded)} frame={frame} />
+          {/* A mapped node's budget is each item's: its hairline and overrun are drawn on the items. */}
+          <Bar start={node.start_time} end={node.end_time} budget={mapped ? 0 : budget} tone={toneOf(node.state, degraded)} frame={frame} />
         </span>
         <span className="gantt-time">
-          {/* Against a budget, both in whole seconds, as the failure panel says them. */}
+          {/* Against a budget, both in whole seconds, as the failure panel says them; a mapped node's is each item's. */}
           {elapsed === undefined
-            ? budget > 0 ? <span className="muted">预算 {wholeSeconds(budget)}</span> : null
-            : budget > 0 ? <>{wholeSeconds(elapsed)}<span className="muted"> / {wholeSeconds(budget)}</span></> : duration(elapsed)}
+            ? limit ? <span className="muted">{limit}</span> : null
+            : budget > 0 && !mapped ? <>{wholeSeconds(elapsed)}<span className="muted"> / {wholeSeconds(budget)}</span></>
+              : <>{duration(elapsed)}{limit ? <span className="muted"> · {limit}</span> : null}</>}
           {over ? <span className="mark bad over-note"><span aria-hidden="true">■</span>超出预算</span> : null}
         </span>
       </li>
       {open ? items.map((item) => {
         const itemWord = nodeState(item.state);
         const itemElapsed = seconds(item.start_time, item.end_time);
+        const itemOver = budget > 0 && itemElapsed !== undefined && itemElapsed > budget;
         return (
           <li key={item.item_id} className="gantt-row item">
             <span className="gantt-label">
@@ -95,9 +111,12 @@ function NodeRow({ node, frame }: { node: RunNode; frame: Frame }) {
               <span className="gantt-name" title={item.label}>{item.label || item.item_id}</span>
             </span>
             <span className="gantt-track">
-              <Bar start={item.start_time} end={item.end_time} budget={0} tone={toneOf(item.state, false)} frame={frame} />
+              <Bar start={item.start_time} end={item.end_time} budget={budget} tone={toneOf(item.state, false)} frame={frame} />
             </span>
-            <span className="gantt-time">{itemElapsed === undefined ? itemWord.label : duration(itemElapsed)}</span>
+            <span className="gantt-time">
+              {itemElapsed === undefined ? itemWord.label : duration(itemElapsed)}
+              {itemOver ? <span className="mark bad over-note"><span aria-hidden="true">■</span>超出预算</span> : null}
+            </span>
           </li>
         );
       }) : null}
@@ -127,8 +146,8 @@ function Axis({ frame }: { frame: Frame }) {
 
 /**
  * The run's frozen graph on a time axis: one row per node from its first attempt's start to its last attempt's end,
- * a hairline at the node's frozen budget, and the part past it in red. Mapped nodes open into their items. A table
- * follows with the same numbers.
+ * a hairline at the node's frozen budget, and the part past it in red. Mapped nodes open into their items, which
+ * carry the budget instead: each item's attempt runs under it. A table follows with the same numbers.
  */
 export function Timeline({ run, now = Date.now() }: { run: Run; now?: number }) {
   const nodes = run.nodes ?? [];
@@ -162,7 +181,7 @@ export function Timeline({ run, now = Date.now() }: { run: Run; now?: number }) 
                   <td>{node.start_time ? time(node.start_time, false, true) : '—'}</td>
                   <td>{node.end_time ? time(node.end_time, false, true) : '—'}</td>
                   <td>{duration(seconds(node.start_time, node.end_time))}</td>
-                  <td>{node.budget_seconds ? wholeSeconds(node.budget_seconds) : '—'}</td>
+                  <td>{node.budget_seconds ? `${node.item_count ? '每项 ' : ''}${wholeSeconds(node.budget_seconds)}` : '—'}</td>
                   <td>{node.error_code ? <code>{node.error_code}</code> : '—'}</td>
                 </tr>
               ))}

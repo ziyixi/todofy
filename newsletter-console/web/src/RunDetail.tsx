@@ -393,7 +393,7 @@ export function RunPage({ id }: { id: string }) {
       <section className="card timeline" aria-labelledby="timeline-title">
         <header className="card-head">
           <h2 id="timeline-title">节点时间线</h2>
-          <p className="muted">竖线是节点预算（这次运行开始时冻结）；超出部分为红色。可展开的节点含多个子项。</p>
+          <p className="muted">竖线是节点预算（这次运行开始时冻结）；超出部分为红色。可展开的节点含多个依次运行的子项，预算按每个子项计。</p>
         </header>
         <Timeline run={data} />
       </section>

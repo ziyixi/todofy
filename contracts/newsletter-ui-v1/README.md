@@ -96,7 +96,8 @@ that login expires.
 ## Rules that keep the console consistent
 
 - **Budgets.** A node's budget is always the one its run froze when it started (`params.timeout_seconds` of the run's
-  frozen graph), never today's configuration.
+  frozen graph), never today's configuration. It bounds each attempt: a mapped node's items (directions, stories) run
+  one after another, each under the whole budget, so a client compares the longest item with it, never the node's span.
 - **What stopped a run** (`RunFailure`). The earliest failed or unknown attempt of a node whose failure stops the run,
   else the first degraded node, else the run's own stop code. `timeout` is `NODE_BUDGET`; `interrupted` is
   `RUN_DEADLINE` when the attempt ended at or after the run's deadline, else `INTERRUPTED`; the run's

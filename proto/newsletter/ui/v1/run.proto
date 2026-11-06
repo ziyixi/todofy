@@ -162,7 +162,8 @@ message RunNode {
   string error_code = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
   // True when it finished with some items or sources failed (`partial_failure`).
   bool degraded = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-  // The node's budget in seconds as the run froze it; 0 for a node without one.
+  // The node's budget in seconds as the run froze it; 0 for a node without one. It bounds each attempt: a mapped
+  // node's items run one after another, each under it, so their sum may exceed it.
   int32 budget_seconds = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
   // When its first attempt started; absent before.
   google.protobuf.Timestamp start_time = 9 [(google.api.field_behavior) = OUTPUT_ONLY];

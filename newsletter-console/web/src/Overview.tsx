@@ -13,6 +13,7 @@ import {
 } from './format.ts';
 import { Mark } from './Mark.tsx';
 import { issueHref, runHref } from './route.ts';
+import { budgetedSeconds } from './Timeline.tsx';
 
 /** What stopped a run, in one line: 选题超出节点预算（用时 161 秒 / 预算 150 秒）. */
 export function stopSentence(run: Run): string {
@@ -277,7 +278,8 @@ function Step({ node }: { node: RunNode }) {
   const word = nodeState(node.state, node.degraded || node.error_code === 'partial_failure');
   const elapsed = seconds(node.start_time, node.end_time);
   const budget = node.budget_seconds ?? 0;
-  const ratio = budget > 0 && elapsed !== undefined ? elapsed / budget : undefined;
+  const used = budgetedSeconds(node);
+  const ratio = budget > 0 && used !== undefined ? used / budget : undefined;
   const items = node.item_count ? `${String(node.item_count - (node.failed_item_count ?? 0))}/${String(node.item_count)}` : null;
   return (
     <li className={`step ${word.tone}`}>
@@ -287,7 +289,7 @@ function Step({ node }: { node: RunNode }) {
       <span className="step-time">{elapsed === undefined ? '—' : duration(elapsed)}{items ? ` · ${items}` : ''}</span>
       {ratio !== undefined ? (
         <span className={`budget${ratio > 1 ? ' over' : ratio > 0.8 ? ' near' : ''}`} role="img"
-          aria-label={`用时 ${wholeSeconds(elapsed)}，预算 ${wholeSeconds(budget)}`}>
+          aria-label={node.item_count ? `最长子项用时 ${wholeSeconds(used)}，每项预算 ${wholeSeconds(budget)}` : `用时 ${wholeSeconds(used)}，预算 ${wholeSeconds(budget)}`}>
           <span style={{ width: `${String(Math.min(ratio, 1) * 100)}%` }} />
         </span>
       ) : <span className="budget none" aria-hidden="true" />}
@@ -335,7 +337,7 @@ function Flow({ run, edition }: { run: Run | undefined; edition: Edition | undef
           ) : null}
         </div>
       ) : null}
-      <p className="muted small chain-note">细线是用时占节点预算的比例；接近预算为黄色，超出为红色。</p>
+      <p className="muted small chain-note">细线是用时占节点预算的比例，多子项的节点按最长的子项计；接近预算为黄色，超出为红色。</p>
     </section>
   );
 }

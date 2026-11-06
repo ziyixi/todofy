@@ -93,6 +93,30 @@ describe('概览', () => {
     expect(flow.getByText('Notion 备份').closest('.side-note')).toHaveTextContent('发布之后异步复制，不是流程中的一步');
   });
 
+  it("holds a mapped step's longest item, never its whole span, to the budget", async () => {
+    // Discovery's directions run one after another, each under its own 240-second budget.
+    const ready = fixture<{ nodes: Record<string, unknown>[] }>('run-ready');
+    const discovery = async (first: [string, string], second: [string, string]) => {
+      const item = (id: string, [start_time, end_time]: [string, string]) => ({ item_id: id, label: id, state: 'succeeded', start_time, end_time });
+      const nodes = ready.nodes.map((node) => node.type === 'discovery'
+        ? { ...node, start_time: first[0], end_time: second[1], items: [item('01-ai-ml', first), item('03-world', second)] }
+        : node);
+      serve(world({ [`/api/v1/${LATEST_RUN}`]: { ...ready, nodes } }));
+      show('#/');
+      const steps = within(await (await section('今日流程')).findByRole('list', { name: '流程各步' })).getAllByRole('listitem');
+      return steps.find((step) => step.querySelector('.step-name')?.textContent === '搜集')?.querySelector('.budget');
+    };
+    // 420 seconds in all, no item past 240: near the budget, not over it.
+    let budget = await discovery(['2026-10-27T14:01:10Z', '2026-10-27T14:04:50Z'], ['2026-10-27T14:04:50Z', '2026-10-27T14:08:10Z']);
+    expect(budget).toHaveAccessibleName('最长子项用时 220 秒，每项预算 240 秒');
+    expect(budget).toHaveClass('near');
+    expect(budget).not.toHaveClass('over');
+    cleanup();
+    budget = await discovery(['2026-10-27T14:01:10Z', '2026-10-27T14:02:10Z'], ['2026-10-27T14:02:10Z', '2026-10-27T14:06:20Z']);
+    expect(budget).toHaveAccessibleName('最长子项用时 250 秒，每项预算 240 秒');
+    expect(budget).toHaveClass('over');
+  });
+
   it('reads a running run again, so the flow keeps up with the attention line', async () => {
     // Fake timers that still advance on their own, so the page's waits run as usual and the test can jump ahead.
     vi.useFakeTimers({ shouldAdvanceTime: true });

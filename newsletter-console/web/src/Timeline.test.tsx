@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import type { Run } from '@ziyixi/proto/newsletter/ui/v1/run_wire';
+import type { Run, RunNode, RunNodeItem } from '@ziyixi/proto/newsletter/ui/v1/run_wire';
 import { Timeline } from './Timeline.tsx';
 
 describe('节点时间线 (Timeline)', () => {
@@ -100,8 +100,10 @@ describe('节点时间线 (Timeline)', () => {
     expect(rows[1]).toHaveTextContent('161 秒 / 150 秒■超出预算');
     expect(rows[1]?.querySelector('.bar.over')).not.toBeNull();
     expect(rows[2]).toHaveTextContent('简讯');
-    expect(rows[2]).toHaveTextContent('预算 180 秒');
-    expect(rows[2]?.querySelector('.bar.ok.open')).not.toBeNull();
+    // Its budget is each item's: the running node's whole span is never drawn past it.
+    expect(rows[2]).toHaveTextContent('每项预算 180 秒');
+    expect(rows[2]?.querySelector('.bar.running.open')).not.toBeNull();
+    expect(rows[2]?.querySelector('.bar.over')).toBeNull();
     expect(rows[3]).toHaveTextContent('深读');
     expect(rows[3]).toHaveTextContent('1 分');
     expect(rows[4]).toHaveTextContent('发布');
@@ -129,6 +131,46 @@ describe('节点时间线 (Timeline)', () => {
     expect(tableRows[1]).toHaveTextContent('■失败');
     expect(tableRows[1]).toHaveTextContent('timeout');
     expect(tableRows[4]).toHaveTextContent('○未开始');
+  });
+
+  it('holds each item of a mapped node, never its whole span, to the budget', () => {
+    // Discovery's directions run one after another, each under its own 240-second budget.
+    const item = (n: number, from: string, to: string): RunNodeItem => ({
+      item_id: `0${String(n)}-direction`, state: 'succeeded', start_time: from, end_time: to,
+    });
+    const discovery = (last: string): RunNode => ({
+      node_id: 'discovery',
+      type: 'discovery',
+      state: 'succeeded',
+      start_time: '2026-10-27T15:01:00Z',
+      end_time: last,
+      budget_seconds: 240,
+      item_count: 3,
+      items: [
+        item(1, '2026-10-27T15:01:00Z', '2026-10-27T15:04:00Z'),
+        item(2, '2026-10-27T15:04:00Z', '2026-10-27T15:07:00Z'),
+        item(3, '2026-10-27T15:07:00Z', last),
+      ],
+    });
+    const run = (last: string): Run => ({
+      name: 'runs/6', start_time: '2026-10-27T15:00:00Z', end_time: '2026-10-27T15:20:00Z', nodes: [discovery(last)],
+    });
+    const { container, rerender } = render(<Timeline run={run('2026-10-27T15:10:30Z')} />);
+    let row = screen.getByRole('list', { name: '节点时间线' }).querySelector('li');
+    // 570 seconds in all, no item past 240: within budget.
+    expect(row).toHaveTextContent('9 分 30 秒 · 每项预算 240 秒');
+    expect(row).not.toHaveTextContent('超出预算');
+    expect(container.querySelector('.bar.over')).toBeNull();
+    expect(container.querySelector('details.twin tbody tr')).toHaveTextContent('每项 240 秒');
+
+    rerender(<Timeline run={run('2026-10-27T15:11:20Z')} />);
+    row = screen.getByRole('list', { name: '节点时间线' }).querySelector('li');
+    expect(row).toHaveTextContent('超出预算');
+    fireEvent.click(screen.getByRole('button', { name: '3/3 完成' }));
+    const items = screen.getByRole('list', { name: '节点时间线' }).querySelectorAll('li.item');
+    expect(items[1]).not.toHaveTextContent('超出预算');
+    expect(items[2]).toHaveTextContent('4 分 20 秒■超出预算');
+    expect(items[2]?.querySelector('.bar.over')).not.toBeNull();
   });
 
   it('falls back to the 3600s axis step when total run duration exceeds 6 hours', () => {
