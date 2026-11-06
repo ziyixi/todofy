@@ -674,6 +674,56 @@ async def test_deduplicate_node_applies_budget_before_remembering_candidates(
         store.close()
 
 
+@pytest.mark.parametrize("marked_first", [True, False])
+async def test_a_plain_report_of_the_same_article_keeps_its_must_know_mark(
+    tmp_path, marked_first
+):
+    directory = pathlib.Path(__file__).resolve().parents[1]
+    definition = newsletter_workflow_definition.load_definition(
+        directory / "src/newsletter/workflows/daily.yaml"
+    )
+    ids = {node.type: node.id for node in definition.nodes}
+    store = newsletter_store.Store(tmp_path / "pool.sqlite3", "mock")
+    try:
+        nodes = story_nodes.StoryNodes(
+            store, definition, workflow_content.Engine(), tmp_path
+        )
+        event = news_first_policy.news(1)
+        marked = {
+            event["id"]: {
+                "kind": "news",
+                "basis": content.MUST_KNOW_BASIS
+                + "Two outlets report a synthetic election result.",
+            }
+        }
+        reports = [
+            {"candidates": [event], "classifications": marked},
+            {"candidates": [event], "classifications": classifications(event)},
+        ]
+        ctx = newsletter_workflow_engine.NodeContext(
+            run_id="pool",
+            node_id=ids["deduplicate"],
+            item_id="",
+            params={"max_candidates": 30},
+            inputs={
+                ids["history"]: {
+                    "candidates": [],
+                    "editions": [],
+                    "watchlist": [],
+                },
+                ids["discovery"]: reports if marked_first else reports[::-1],
+            },
+            run_inputs={
+                "issue_date": workflow_content.DAY,
+                "content_config": config(),
+            },
+        )
+        result = await nodes.execute("deduplicate", ctx, tmp_path)
+        assert result["classifications"][event["id"]] == marked[event["id"]]
+    finally:
+        store.close()
+
+
 def test_deep_receipt_roundtrips_without_changing_frozen_issue(
     tmp_path,
 ):

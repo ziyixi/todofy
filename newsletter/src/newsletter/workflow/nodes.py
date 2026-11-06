@@ -28,6 +28,11 @@ import newsletter.workflow.state as newsletter_workflow_state
 import newsletter.workflow.threads as workflow_threads
 
 
+def _must_know(classification: types.Payload) -> bool:
+    basis = classification.get("basis")
+    return isinstance(basis, str) and basis.startswith(content.MUST_KNOW_BASIS)
+
+
 class EditorialNodes:
     """Run the shared discovery and selection stages of a topic recipe.
 
@@ -261,6 +266,12 @@ class EditorialNodes:
                         # Conflicting duplicate reports cannot upgrade an
                         # unknown/research candidate into a news slot.
                         if previous and previous["kind"] != "news":
+                            continue
+                        # Another direction's plain news report of the same
+                        # article must not erase the world direction's mark.
+                        if previous and _must_know(previous) > _must_know(
+                            classification
+                        ):
                             continue
                         classifications[identifier] = classification
         groups = [
