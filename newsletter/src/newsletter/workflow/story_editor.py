@@ -200,7 +200,16 @@ def _bounded_packet_schema() -> types.Payload:
     )
     source["url"].update(minLength=1, maxLength=2048)
     source["excerpt"].update(maxLength=20000)
-    source["published_at"].update(maxLength=40)
+    # The packet contract refuses a date it cannot parse, such as a month
+    # alone, and with it the writer's whole answer; the schema says so first.
+    source["published_at"].update(
+        maxLength=10,
+        pattern=r"^(?:[0-9]{4}-[0-9]{2}-[0-9]{2})?$",
+        description=(
+            "Publication date as YYYY-MM-DD, or empty when the source gives "
+            "no exact day; never guess a day."
+        ),
+    )
     return schema
 
 

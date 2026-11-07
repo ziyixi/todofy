@@ -1201,6 +1201,43 @@ def test_supplement_source_and_body_schema_are_bounded_like_contract():
     )
 
 
+async def test_a_supplement_date_the_contract_refuses_is_refused_by_schema(rig):
+    """A source page gave only its month, and the writer dated it so.
+
+    The packet contract refused the date, and with it the writer's whole
+    answer, before any review. The schema now tells the model the format.
+    """
+    pattern = newsletter_workflow_story_editor.story_writer_schema()[
+        "properties"
+    ]["supplemental_packets"]["items"]["properties"]["content"]["properties"][
+        "sources"
+    ]["items"]["properties"]["published_at"]["pattern"]
+    supplement = {
+        "id": "supplement-1",
+        "content": copy.deepcopy(rig.packet["content"]),
+    }
+    for value in ("", "2026-09-06"):
+        assert re.fullmatch(pattern, value)
+        supplement["content"]["sources"][0]["published_at"] = value
+        contracts.validate_packet_body(supplement["content"])
+    for value in ("2026-09", "2026", "Sep 2026", "2026-09-06 or later"):
+        assert not re.fullmatch(pattern, value)
+    # Code still refuses an answer that got past the schema.
+    supplement["content"]["sources"][0]["published_at"] = "2026-09"
+    content = story_editor.story()
+    content["paragraphs"][0]["citations"] = ["supplement-1/source"]
+    rig.replies = [
+        story_editor.reply(
+            story_editor.writer(content, supplements=[supplement])
+        )
+    ]
+    result = await rig.run()
+    assert result["reason"] == "invalid_output" and len(rig.calls) == 1
+    assert result["issues"][-1]["reason"] == (
+        "writer:INVALID_ARGUMENT:Invalid source published_at"
+    )
+
+
 async def test_exact_duplicate_references_removed_preserves_any_prose(
     rig,
 ):
