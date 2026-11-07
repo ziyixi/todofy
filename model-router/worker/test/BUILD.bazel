@@ -35,6 +35,7 @@ copied_source_files(
         "runtime.test.ts",
         "runtime-entry.ts",
         "runtime-harness.ts",
+        "schema.test.ts",
     ],
 )
 
@@ -159,6 +160,25 @@ proto_vitest_test(
         "//model-router/worker/src:lib",
         "//proto/modelrouter/inference/v1:ts",
         "//proto/ts:http-client",
+        "//proto/ts:rpc-status",
+    ],
+)
+
+proto_vitest_test(
+    name = "schema_test",
+    config = "//model-router/worker:test_config",
+    data = [
+        "//model-router/worker:node_modules/vitest",
+        "//model-router/worker:package_json",
+    ],
+    project = "model-router/worker",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":schema.test.ts"],
+    deps = [
+        "//model-router/worker/src:schema",
+        "//proto/modelrouter/inference/v1:ts",
+        "//proto/ts:protobuf",
         "//proto/ts:rpc-status",
     ],
 )
