@@ -5,6 +5,9 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
+Branch `codex/private-data-preparation` prepares a private application change; implementation and validation
+details are tracked only in `private/HANDOFF.md`. It does not authorize a main publication.
+
 The test suite consolidation landed on main. Its CI gate stopped at the Links backup export CPU check, which
 measured a 5.20 ms warm median against a 5 ms assertion. The backup implementation, fixture and CPU meter match
 the previous green revision. Branch `codex/links-backup-cpu` uses the existing 7 ms first-run ceiling for warm
