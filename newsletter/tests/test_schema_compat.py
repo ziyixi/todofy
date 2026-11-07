@@ -106,15 +106,24 @@ def test_unclosed_or_malformed_schema_is_configuration_failure(change):
         (r"^a\ b$", False),
         (r"^a\~b$", False),
         (r"^a\:b$", False),
+        (r"^\d+$", False),
+        (r"^\w+$", False),
+        (r"^a\b", False),
+        (r"^a\u{41}$", False),
+        ("^a\\", False),
         (r"^source\.1$", True),
         (r"^a\\b\/c$", True),
+        (r"^a\\-b$", True),
         (r"^[^\u0000-\u001f\u007f]*$", True),
-        (r"^\d+$", True),
     ],
 )
-def test_pattern_must_compile_as_router_ecma_regex(pattern, portable):
-    # Python's re accepts every one; ECMA-262 Unicode mode, which the Router
-    # validates answers with, refuses identity escapes such as re.escape's.
+def test_pattern_escapes_must_read_alike_in_router_and_gateway(
+    pattern, portable
+):
+    # The Router compiles patterns in ECMA-262 Unicode mode, the gateway with
+    # Python's re: identity escapes such as re.escape's fail in the first,
+    # \u{41} and a trailing backslash in the second, and \d, \w and \b match
+    # different text in each.
     schema = story_editor.story_writer_schema("brief")
     title = schema["properties"]["content"]["anyOf"][0]["properties"]["title"]
     title["pattern"] = pattern

@@ -45,12 +45,13 @@ _KEYWORDS = frozenset(
 _TYPES = frozenset(
     {"object", "array", "string", "number", "integer", "boolean", "null"}
 )
-# A pattern is ECMA-262 syntax, and the Model Router compiles it in Unicode
-# mode: a backslash may escape only a syntax character or "/", or start one
-# of these escapes. Anything else (re.escape writes "\-") fails to compile
-# there, so the Router rejects every answer after the model has run.
-_ESCAPE = re.compile(r"\\(.)", re.DOTALL)
-_PORTABLE_ESCAPES = frozenset("^$\\.*+?()[]{}|/dDwWsSbBfnrtv0xu")
+# The Model Router compiles a pattern as an ECMA-262 Unicode-mode regex and
+# the codex-gateway with Python's re. A backslash may escape only what both
+# read alike: a syntax character, "/" or \uXXXX. re.escape's "\-" fails to
+# compile in the Router, which then rejects every answer after the model has
+# run; \d, \w, \s and \b compile in both but match different text. This
+# checks escapes only, not the rest of the grammar.
+_PORTABLE_ESCAPE = re.compile(r"\\(?:[\^$\\.*+?()[\]{}|/]|u[0-9A-Fa-f]{4})")
 
 
 def validate_output_schema(schema: types.Payload) -> None:
@@ -72,10 +73,7 @@ def validate_output_schema(schema: types.Payload) -> None:
         pattern = node.get("pattern")
         if pattern is not None and (
             not isinstance(pattern, str)
-            or any(
-                escape.group(1) not in _PORTABLE_ESCAPES
-                for escape in _ESCAPE.finditer(pattern)
-            )
+            or "\\" in _PORTABLE_ESCAPE.sub("", pattern)
         ):
             raise errors.EditorError("configuration")
         if kind == "object":
