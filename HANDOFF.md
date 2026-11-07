@@ -1,12 +1,11 @@
 # Handoff
 
-Updated 2026-11-06 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
+Updated 2026-11-07 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
 Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-Branch `codex/private-data-preparation` prepares a private application change; implementation and validation
-details are tracked only in `private/HANDOFF.md`. It does not authorize a main publication.
+Private application work and publication evidence are tracked only in `private/HANDOFF.md`.
 
 The test suite consolidation landed on main. Its CI gate stopped at the Links backup export CPU check, which
 measured a 5.20 ms warm median against a 5 ms assertion. The backup implementation, fixture and CPU meter match
@@ -55,11 +54,11 @@ codes generically. It changes no source, so it publishes no service and no priva
 
 ## Latest verified release
 
-Main `9da2d116` passed its complete automatic publication: selected public service publications, the selected
-private publication, then one Home publication. The matching Personal cloud reconcile ran all fourteen actual
-Worker comparisons, VPS identity, complete resource registration and resolved infrastructure drift successfully.
-The [November 3 archive](docs/history/handoff-2026-11-03.md) records the shared changes and automatic chain;
-private application evidence is in the private HANDOFF. Documentation-only closure does not republish services.
+Main `d1a2db52` passed its complete automatic publication: the selected private application, then Home. The
+matching publication-triggered Personal cloud reconcile passed VPS runtime, complete resource registration,
+infrastructure comparison/routine repair and resolved drift. Private implementation and live-source evidence
+are kept only in `private/HANDOFF.md`. The [November 7 archive](docs/history/handoff-2026-11-07.md) records this
+closure; previous publication evidence remains in the dated archives.
 
 Shared Worker receipt recovery (`7ef001fe`) adds fixed failure stages, exact committed-result readback and a
 guarded receipt-only path without application redeployment. The old statusless Tasks receipt remains historical
