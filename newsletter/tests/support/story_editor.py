@@ -14,6 +14,7 @@ import pytest
 import newsletter.contracts as contracts
 import newsletter.editor as newsletter_editor
 import newsletter.model_client as model_client
+import newsletter.schema_compat as schema_compat
 import newsletter.settings as settings
 import newsletter.types as types
 import newsletter.workflow.components as components
@@ -227,6 +228,9 @@ def rig(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> StoryRig:
         *,
         approval_sources: newsletter_editor.ApprovalSources | None = None,
     ) -> tuple[str, set[str], bool]:
+        # The real execute's preflight: a schema the Router cannot read
+        # fails here, before any model work, instead of rejecting answers.
+        schema_compat.validate_output_schema(schema)
         state.calls.append(
             {
                 "prompt": json.loads(prompt),

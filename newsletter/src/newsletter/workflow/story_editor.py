@@ -204,6 +204,16 @@ def _bounded_packet_schema() -> types.Payload:
     return schema
 
 
+def _pattern_literal(value: str) -> str:
+    """Quote an ID for a schema pattern that Python and ECMA-262 both read.
+
+    The Model Router validates answers with ECMA-262 Unicode-mode patterns,
+    where an escaped hyphen from re.escape is a syntax error that rejects
+    every answer. Only regex syntax characters are escaped here.
+    """
+    return re.sub(r"[\\^$.*+?()[\]{}|/]", r"\\\g<0>", value)
+
+
 def story_writer_schema(
     mode: Literal["brief", "deep"] = "deep",
     *,
@@ -236,9 +246,9 @@ def story_writer_schema(
         ]
         if source_ids:
             alternatives.append(
-                re.escape(packet["id"])
+                _pattern_literal(packet["id"])
                 + "/(?:"
-                + "|".join(re.escape(source_id) for source_id in source_ids)
+                + "|".join(map(_pattern_literal, source_ids))
                 + ")"
             )
     alternatives.append(f"supplement-[1-6]/{contracts.IDENTIFIER_PATTERN}")

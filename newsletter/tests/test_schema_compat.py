@@ -98,6 +98,34 @@ def test_unclosed_or_malformed_schema_is_configuration_failure(change):
     assert error.value.code == "configuration"
 
 
+@pytest.mark.parametrize(
+    "pattern,portable",
+    [
+        (r"^feed\-1/(?:excerpt\-1)$", False),
+        (r"^a\#b$", False),
+        (r"^a\ b$", False),
+        (r"^a\~b$", False),
+        (r"^a\:b$", False),
+        (r"^source\.1$", True),
+        (r"^a\\b\/c$", True),
+        (r"^[^\u0000-\u001f\u007f]*$", True),
+        (r"^\d+$", True),
+    ],
+)
+def test_pattern_must_compile_as_router_ecma_regex(pattern, portable):
+    # Python's re accepts every one; ECMA-262 Unicode mode, which the Router
+    # validates answers with, refuses identity escapes such as re.escape's.
+    schema = story_editor.story_writer_schema("brief")
+    title = schema["properties"]["content"]["anyOf"][0]["properties"]["title"]
+    title["pattern"] = pattern
+    if portable:
+        schema_compat.validate_output_schema(schema)
+        return
+    with pytest.raises(errors.EditorError) as error:
+        schema_compat.validate_output_schema(schema)
+    assert error.value.code == "configuration"
+
+
 async def test_unsupported_schema_fails_before_sdk_or_usage(
     monkeypatch, tmp_path, fake_router
 ):

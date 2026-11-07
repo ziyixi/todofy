@@ -24,6 +24,7 @@ import newsletter.contracts as contracts
 import newsletter.editor as newsletter_editor
 import newsletter.errors as errors
 import newsletter.rendering as newsletter_rendering
+import newsletter.schema_compat as schema_compat
 import newsletter.store as newsletter_store
 import newsletter.todofy as todofy
 import newsletter.usage as newsletter_usage
@@ -1895,6 +1896,42 @@ def test_excerpts_are_pinned_and_the_packet_is_the_same_every_time():
         f"{packet['id']}/excerpt-2",
         f"{packet['id']}/excerpt-3",
     ]
+
+
+def test_feed_and_uuid_citations_stay_readable_by_the_router(excerpts):
+    """Real packet IDs carry hyphens; the Router reads patterns as ECMA-262.
+
+    re.escape escaped each hyphen, which ECMA-262 Unicode mode refuses to
+    compile, so every brief with excerpts and every deep or repair job had
+    all its answers rejected.
+    """
+    feed = excerpts[0]
+    research = copy.deepcopy(feed) | {
+        "id": "0f1e2d3c-4b5a-4978-8796-a5b4c3d2e1f0",
+        "workflow_id": "story-research",
+    }
+    research["content"]["sources"][0]["id"] = "source.1"
+    schema = newsletter_workflow_story_editor.story_writer_schema(
+        "brief", story_id="topic-1", packets=[feed, research]
+    )
+    schema_compat.validate_output_schema(schema)
+    signal = schema["properties"]["signal"]["anyOf"][0]["properties"]
+    pattern = signal["paragraphs"]["items"]["properties"]["citations"]["items"][
+        "pattern"
+    ]
+    assert pattern == (
+        f"^(?:{feed['id']}/(?:excerpt-1|excerpt-2|excerpt-3)"
+        f"|{research['id']}/(?:source\\.1|excerpt-2|excerpt-3)"
+        f"|supplement-[1-6]/{contracts.IDENTIFIER_PATTERN})$"
+    )
+    for ref in (
+        f"{feed['id']}/excerpt-1",
+        f"{research['id']}/source.1",
+        "supplement-2/source-1",
+    ):
+        assert re.fullmatch(pattern, ref)
+    for ref in (f"{research['id']}/sourceX1", f"{feed['id']}/excerpt-4"):
+        assert not re.fullmatch(pattern, ref)
 
 
 def test_only_intact_groups_a_url_points_at_travel_on():
