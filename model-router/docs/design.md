@@ -16,7 +16,9 @@ Router 选择供应商、调用模型、归一用量，把结果一次返回。�
 目前业务需要的可选项只有 `instructions`（含稳定块缓存提示）、`effort`、`max_output_tokens`、
 `output_schema_json`、`allow_fallback` 和 `timeout_ms`。Newsletter 的后续 turn 传 `conversation + input`。
 没有 temperature、metadata、客户端 request ID、通用消息历史或参数回显。
-现有推荐的数组根 Schema 由 Router 内部包装为模型需要的对象，返回前解包并按原 Schema 校验。每次普通调用都是一次新调用；
+现有推荐的数组根 Schema 由 Router 内部包装为模型需要的对象，返回前解包并按原 Schema 校验。`pattern` 和
+`patternProperties` 的键在调用前就按回答校验器的 Unicode（`u`）规则编译，编译失败以 `INVALID_SCHEMA` 拒绝并指出位置，
+不等模型运行后再报 `MODEL_INVALID_ANSWER`。每次普通调用都是一次新调用；
 Router 生成日志 ID，不维护客户端请求去重账本。结果返回 `name`、实际选用的 `model`、`output`、`usage`、
 必要的 `error`，以及业务需要的 web observations 和 native fallback writers。
 

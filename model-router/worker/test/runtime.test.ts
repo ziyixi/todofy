@@ -155,6 +155,19 @@ describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
     expect((await harness.owner.getRequest({ name: answer.name })).state).toBe('failed')
   })
 
+  it('refuses an uncompilable output pattern at admission, before registering or calling a model', async () => {
+    const escaped = JSON.stringify({ type: 'object', properties: { slug: { type: 'string', pattern: '^news\\-[0-9]+$' } }, required: ['slug'] })
+    for (const refused of [
+      () => harness.models.generate({ model: gemini, input: 'Synthetic pattern input', outputSchemaJson: escaped }),
+      () => harness.newsletter.generate({ model: sol, input: 'Synthetic pattern input', outputSchemaJson: escaped }),
+      () => harness.models.createConversation({ name: `conversations/${crypto.randomUUID()}`, model: sol, outputSchemaJson: escaped }),
+    ]) await expect(refused()).rejects.toMatchObject({ status: { status: 'INVALID_ARGUMENT', reason: 'INVALID_SCHEMA',
+      message: expect.stringContaining('/properties/slug/pattern') as unknown } })
+    expect(harness.calls).toHaveLength(0)
+    expect(await harness.db.prepare('SELECT count(*) AS n FROM requests').first('n')).toBe(0)
+    expect((await harness.bucket.list()).objects).toHaveLength(0)
+  })
+
   it('preserves the safe executor error reason instead of replacing it with generic unavailability', async () => {
     harness.failNextGeneration('ACCESS_KEYS_UNAVAILABLE')
     const answer = await harness.models.generate({ model: sol, input: 'Synthetic diagnostic' })

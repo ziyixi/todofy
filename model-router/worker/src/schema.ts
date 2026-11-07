@@ -1,4 +1,4 @@
-import { Validator } from '@cfworker/json-schema';
+import { Validator, escapePointer, schemaArrayKeyword, schemaKeyword, schemaMapKeyword } from '@cfworker/json-schema';
 import type { GenerateRequest } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb';
 import { invalid } from './errors.ts';
 import { routeFor } from './catalog.ts';
@@ -24,6 +24,40 @@ export function callerOutput(schemaJson: string, output: string): string {
     return output;
   }
 }
+function compiles(pattern: string): boolean {
+  try {
+    new RegExp(pattern, 'u');
+    return true;
+  } catch {
+    return false;
+  }
+}
+/**
+ * The validator compiles `pattern` values and `patternProperties` keys with the `u` flag only while checking an
+ * answer. Visit each subschema under the validator's own keyword tables once (breadth-first, without recursion)
+ * and return the JSON pointer of the first pattern that does not compile. The tables are plain objects, so only
+ * their own keys count; an unknown keyword such as `constructor` is not a subschema position.
+ */
+function uncompiledPattern(root: unknown): string | undefined {
+  const pending: [unknown, string][] = [[root, '']];
+  for (const [node, pointer] of pending) {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) continue;
+    const schema = node as Record<string, unknown>;
+    if (typeof schema.pattern === 'string' && !compiles(schema.pattern)) return `${pointer}/pattern`;
+    for (const [keyword, value] of Object.entries(schema)) {
+      const at = `${pointer}/${escapePointer(keyword)}`;
+      if (Array.isArray(value)) {
+        if (Object.hasOwn(schemaArrayKeyword, keyword)) value.forEach((item, index) => pending.push([item, `${at}/${index}`]));
+      } else if (Object.hasOwn(schemaMapKeyword, keyword) && value && typeof value === 'object') {
+        for (const [name, child] of Object.entries(value)) {
+          if (keyword === 'patternProperties' && !compiles(name)) return `${at}/${escapePointer(name)}`;
+          pending.push([child, `${at}/${escapePointer(name)}`]);
+        }
+      } else if (Object.hasOwn(schemaKeyword, keyword)) pending.push([value, at]);
+    }
+  }
+  return undefined;
+}
 export function validateConfig(config: GenerateRequest): void {
   let route;
   try {
@@ -45,11 +79,16 @@ export function validateConfig(config: GenerateRequest): void {
   if (config.outputSchemaJson) {
     if (encoder.encode(config.outputSchemaJson).length > 128 * 1024)
       invalid('SCHEMA_TOO_LARGE', 'Output schema exceeds 128 KiB.');
+    let schema: unknown;
     try {
-      new Validator(JSON.parse(config.outputSchemaJson) as ConstructorParameters<typeof Validator>[0]);
+      schema = JSON.parse(config.outputSchemaJson);
+      new Validator(schema as ConstructorParameters<typeof Validator>[0]);
     } catch {
       invalid('INVALID_SCHEMA', 'Use a valid standard JSON Schema.');
     }
+    const pointer = uncompiledPattern(schema);
+    if (pointer !== undefined)
+      invalid('INVALID_SCHEMA', `Output schema pattern at ${pointer} is not a valid Unicode (u flag) regular expression.`);
   }
 }
 export function validateOutput(config: GenerateRequest, output: string): boolean {
