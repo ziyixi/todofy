@@ -57,4 +57,9 @@ describe('Output schema admission', () => {
       'x-vendor': { pattern: '\\-' },
     })).not.toThrow();
   });
+
+  it('does not read unknown keywords named like Object.prototype members', () => {
+    const json = String.raw`{"type":"string","constructor":{"s":{"pattern":"\\-"}},"toString":[{"pattern":"\\-"}],"__proto__":{"s":{"pattern":"\\-"}}}`;
+    expect(admit(JSON.parse(json))).not.toThrow();
+  });
 });

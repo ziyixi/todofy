@@ -35,7 +35,8 @@ function compiles(pattern: string): boolean {
 /**
  * The validator compiles `pattern` values and `patternProperties` keys with the `u` flag only while checking an
  * answer. Visit each subschema under the validator's own keyword tables once (breadth-first, without recursion)
- * and return the JSON pointer of the first pattern that does not compile.
+ * and return the JSON pointer of the first pattern that does not compile. The tables are plain objects, so only
+ * their own keys count; an unknown keyword such as `constructor` is not a subschema position.
  */
 function uncompiledPattern(root: unknown): string | undefined {
   const pending: [unknown, string][] = [[root, '']];
@@ -46,13 +47,13 @@ function uncompiledPattern(root: unknown): string | undefined {
     for (const [keyword, value] of Object.entries(schema)) {
       const at = `${pointer}/${escapePointer(keyword)}`;
       if (Array.isArray(value)) {
-        if (schemaArrayKeyword[keyword]) value.forEach((item, index) => pending.push([item, `${at}/${index}`]));
-      } else if (schemaMapKeyword[keyword] && value && typeof value === 'object') {
+        if (Object.hasOwn(schemaArrayKeyword, keyword)) value.forEach((item, index) => pending.push([item, `${at}/${index}`]));
+      } else if (Object.hasOwn(schemaMapKeyword, keyword) && value && typeof value === 'object') {
         for (const [name, child] of Object.entries(value)) {
           if (keyword === 'patternProperties' && !compiles(name)) return `${at}/${escapePointer(name)}`;
           pending.push([child, `${at}/${escapePointer(name)}`]);
         }
-      } else if (schemaKeyword[keyword]) pending.push([value, at]);
+      } else if (Object.hasOwn(schemaKeyword, keyword)) pending.push([value, at]);
     }
   }
   return undefined;
