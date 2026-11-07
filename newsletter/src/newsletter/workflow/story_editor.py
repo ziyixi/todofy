@@ -134,12 +134,16 @@ _EXCERPT_WRITER_RULES = (
     "不是你打开的原文；按标题聚类也可能把不同事件误并。\n"
     "正文、阅读卡和图表引用这些来源时，仍须本轮独立open其URL。\n"
 )
-# Only a first brief writes a signal.
+# A first brief writes a signal; its repair only when none was approved.
 _EXCERPT_SIGNAL_RULES = (
     "原文打不开时，signal可以只依据这些摘要：一段，所引的每个packet"
     "都至少引用其中两家不同媒体，并确认它们说的是同一件事，写明“据X、"
     "Y报道”，只复述摘要明确写出的事件；数字只照抄摘要原文里的阿拉伯数"
     "字（代码逐个核对），不加摘要没有的数字、引语、原因、后果或定性。\n"
+)
+_EXCERPT_REPAIR_SIGNAL_RULES = (
+    "初稿signal没有通过审校：本次修订可以按上条另写这一段signal，"
+    "但只能引用这些摘要，不能引用其他来源；正文照常修订。\n"
 )
 _EXCERPT_REVIEW_RULES = (
     "workflow_id为researcher-feed的来源是代码冻结的头条订阅源摘"
@@ -150,6 +154,19 @@ _EXCERPT_REVIEW_RULES = (
     "字、引语、原因、后果或定性时，signal必须blocked。\n"
     "body、reading、chart引用这些来源时，仍须独立open其URL。\n"
 )
+
+
+def _excerpt_writer_rules(mode: str, repair: bool, excerpt_signal: bool) -> str:
+    """Return the frozen-excerpt rules for one writer job."""
+    if mode == "brief" and not repair:
+        return _EXCERPT_WRITER_RULES + _EXCERPT_SIGNAL_RULES
+    if excerpt_signal:
+        return (
+            _EXCERPT_WRITER_RULES
+            + _EXCERPT_SIGNAL_RULES
+            + _EXCERPT_REPAIR_SIGNAL_RULES
+        )
+    return _EXCERPT_WRITER_RULES
 
 
 class StoryOutputError(errors.EditorError):
@@ -229,8 +246,13 @@ def story_writer_schema(
     repair: bool = False,
     story_id: str | None = None,
     packets: Sequence[types.Payload] = (),
+    excerpt_signal: bool = False,
 ) -> types.Payload:
-    """Build the bounded schema for a story writer or repair job."""
+    """Build the bounded schema for a story writer or repair job.
+
+    A brief's first writer may add a signal; its repair only when
+    ``excerpt_signal`` lets it rest one on frozen excerpts.
+    """
     story = model_schema.message_schema(
         cast(descriptor.Descriptor, editorial_pb2.StoryContent.DESCRIPTOR)
     )
@@ -320,7 +342,7 @@ def story_writer_schema(
         {
             "content": {"anyOf": [copy.deepcopy(story), {"type": "null"}]},
             "signal": {"anyOf": [signal, {"type": "null"}]}
-            if mode == "brief" and not repair
+            if mode == "brief" and (not repair or excerpt_signal)
             else {"type": "null"},
             "supplemental_packets": {
                 "type": "array",
@@ -647,6 +669,15 @@ class StoryEditor:
                     "issues": initial["issues"] + review["issues"],
                 },
             }
+            # Without an approved signal, two outlets' frozen excerpts can
+            # still confirm the event: the repair may rest one signal on them.
+            excerpt_signal = (
+                mode == "brief"
+                and result["signal"] is None
+                and feed_excerpts.corroborated(
+                    feed_excerpts.pinned(result["packets"], self.pins)
+                )
+            )
             stage = "repair_writer"
             try:
                 repaired, repair_job = await self._write(
@@ -655,6 +686,7 @@ class StoryEditor:
                     policy,
                     workspace,
                     is_fixture,
+                    excerpt_signal=excerpt_signal,
                 )
                 result["packets"] = repaired["packets"]
                 stage = "repair_review"
@@ -666,9 +698,14 @@ class StoryEditor:
             result["assessments"].extend(final_review["assessments"])
             result["issues"].extend(repaired["issues"] + final_review["issues"])
             approved_content = self._approved_content(repaired, final_review)
-            result["content"] = approved_content
+            signal = result["signal"] or self._approved_signal(
+                repaired, final_review
+            )
+            result["content"], result["signal"] = approved_content, signal
             if approved_content is not None:
                 result["reason"] = "repaired"
+            elif signal is not None:
+                result["reason"] = "confirmed_signal"
             self._checkpoint(result, on_checkpoint)
         result["provenance"] = {
             "packets_hash": contracts.content_hash(result["packets"])
@@ -735,11 +772,10 @@ class StoryEditor:
         policy: types.Payload,
         workspace: pathlib.Path,
         is_fixture: bool,
+        *,
+        excerpt_signal: bool = False,
     ) -> tuple[types.Payload, str]:
         repair = "repair_untrusted" in context
-        excerpt_rules = _EXCERPT_WRITER_RULES
-        if context["mode"] == "brief" and not repair:
-            excerpt_rules += _EXCERPT_SIGNAL_RULES
         prompt = {
             **context,
             "task": (
@@ -750,7 +786,8 @@ class StoryEditor:
                     "格式检查的正文或signal，不是已核实内容；若sour"
                     "ce_component为signal，将其最小事件重写为符合sc"
                     "hema的简版content并重新核实出处，不能继承任何"
-                    "批准状态。不得更改已批准的简讯，不新增signal。"
+                    "批准状态。不得更改已批准的简讯；除feed_exce"
+                    "rpt_rules明确允许的以外，不新增signal。"
                     "不能承诺自行过审。"
                 )
                 if repair
@@ -771,7 +808,11 @@ class StoryEditor:
             ),
             "packets_untrusted": packets,
             **(
-                {"feed_excerpt_rules": excerpt_rules}
+                {
+                    "feed_excerpt_rules": _excerpt_writer_rules(
+                        context["mode"], repair, excerpt_signal
+                    )
+                }
                 if feed_excerpts.pinned(packets, self.pins)
                 else {}
             ),
@@ -824,7 +865,8 @@ class StoryEditor:
                 "字并解释比较问题、时期、单位和局限；没有合适数"
                 "据就null，不额外开启研究轮次或强行制图。brief"
                 "无须推荐卡；signal绝无图卡且最多1段；deep以及r"
-                "epair必须signal=null。brief初稿只要事件本身已"
+                "epair必须signal=null，feed_excerpt_rules另行允"
+                "许的repair除外。brief初稿只要事件本身已"
                 "证实，就必须另外写出1段最小signal并附非metadat"
                 "a出处，以保留关键选题；只有事件本身无法确认时s"
                 "ignal才为null。signal不是待填占位，不得为了非n"
@@ -846,6 +888,7 @@ class StoryEditor:
                     repair=repair,
                     story_id=context["story_id"],
                     packets=packets,
+                    excerpt_signal=excerpt_signal,
                 ),
                 policy.get("editorial.md", ""),
                 path,
@@ -868,9 +911,9 @@ class StoryEditor:
             "repair_content": None,
             "repair_component": "body",
         }
-        if (context["mode"] == "deep" or repair) and value[
-            "signal"
-        ] is not None:
+        if (
+            context["mode"] == "deep" or (repair and not excerpt_signal)
+        ) and value["signal"] is not None:
             raise StoryOutputError("signal_not_allowed_in_deep_or_repair")
         for name in ("content", "signal"):
             raw = value[name]
@@ -898,6 +941,17 @@ class StoryEditor:
                 if name == "signal" and any(optional.values()):
                     raise StoryOutputError(
                         "signal_contains_optional_components"
+                    )
+                # A repair adds no new reporting: its signal stands on the
+                # frozen excerpts alone.
+                if (
+                    name == "signal"
+                    and repair
+                    and not components.citations(content)
+                    <= set(feed_excerpts.pinned(all_packets, self.pins))
+                ):
+                    raise StoryOutputError(
+                        "repair_signal_cites_beyond_excerpts"
                     )
                 for key, candidate in optional.items():
                     if candidate is None:

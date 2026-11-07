@@ -7,21 +7,25 @@ import copy
 import dataclasses
 import datetime
 import importlib.resources as resources
+import json
 import pathlib
 
 import pytest
 
 import newsletter.contracts as contracts
+import newsletter.schema_compat as schema_compat
 import newsletter.store as newsletter_store
 import newsletter.workflow.content as content
 import newsletter.workflow.definition as newsletter_workflow_definition
 import newsletter.workflow.engine as engine
 import newsletter.workflow.feed_excerpts as feed_excerpts
+import newsletter.workflow.publication as publication
 import newsletter.workflow.researcher as researcher
 import newsletter.workflow.sources as sources
 import newsletter.workflow.story_editor as story_editor
 import newsletter.workflow.story_nodes as story_nodes
 import tests.support.researcher as fake
+import tests.support.story_editor as story_editor_support
 import tests.support.workflow_content as workflow_content
 
 DAY = fake.DAY
@@ -747,6 +751,109 @@ async def test_a_consensus_brief_starts_from_its_frozen_excerpts(
     assert [group["lead"] for group in narrowed] == [
         group["lead"] for group in feeds["excerpts"][1:]
     ]
+
+
+class Answers:
+    """Queued model answers for a real StoryEditor, with every call kept."""
+
+    def __init__(self, *replies):
+        self.replies, self.calls = list(replies), []
+
+    async def execute(
+        self, prompt, schema, instructions, workspace, *, approval_sources=None
+    ):
+        schema_compat.validate_output_schema(schema)
+        self.calls.append(json.loads(prompt))
+        value, opened = self.replies.pop(0)
+        return json.dumps(value), opened, True
+
+
+async def test_a_must_know_brief_without_a_verified_body_keeps_its_signal(
+    nodes, tmp_path
+):
+    """Discovery's must-know report of a headline group reaches readers.
+
+    The report is one outlet's page of a five-outlet group, so the group is
+    not offered again as a consensus lead, yet its frozen excerpts reach the
+    brief by URL. The first signal rested on a wire page the review could not
+    open; with no verifiable body, the repair's excerpt signal still runs.
+    """
+    feeds = front_page_feeds()
+    election = feeds["excerpts"][0]
+    page = election["items"][2]["url"]
+    must_know = workflow_content.candidate(
+        id="candidate-must-know",
+        direction="04-economy",
+        title="Synthetic election result",
+        url=page,
+    )
+    basis = content.MUST_KNOW_BASIS + "虚构选举改变执政党"
+    pooled = await pool(
+        nodes,
+        tmp_path,
+        feeds,
+        [must_know],
+        {must_know["id"]: {"kind": "news", "basis": basis}},
+        content_config=config(),
+    )
+    offered = pooled["classifications"].get(election["lead"], {})
+    assert not offered.get("basis", "").startswith(content.CONSENSUS_BASIS)
+    assert election in pooled["excerpts"]
+    (packet,) = feed_excerpts.packets([election], is_fixture=True)
+    wire = "https://agency.example.org/freedonia"
+    body = story_editor_support.story("虚构的自由党赢得议会多数。")
+    body["story_id"] = "story-vote"
+    first = copy.deepcopy(body)
+    first["paragraphs"][0]["citations"] = ["supplement-1/source-1"]
+    signal = copy.deepcopy(body)
+    signal["paragraphs"][0] = {
+        "text": "据BBC、The Guardian报道，虚构的自由党赢得议会多数。",
+        "citations": [f"{packet['id']}/excerpt-1", f"{packet['id']}/excerpt-3"],
+    }
+    body["paragraphs"][0]["citations"] = signal["paragraphs"][0]["citations"]
+    supplement = {
+        "id": "supplement-1",
+        "content": {
+            "title": "Synthetic wire report",
+            "body": "Only the wire's summary was readable.",
+            "tags": ["fixture"],
+            "sources": [
+                {
+                    "id": "source-1",
+                    "title": "Synthetic wire",
+                    "url": wire,
+                    "excerpt": "The Liberty Party won a majority.",
+                    "access_scope": "abstract",
+                    "published_at": DAY,
+                }
+            ],
+        },
+    }
+    review = story_editor_support.review
+    nodes.editor = Answers(
+        (story_editor_support.writer(first, first, [supplement]), {wire}),
+        (review(body="blocked", signal="blocked"), set()),
+        (story_editor_support.writer(body, signal), set()),
+        (review(body="blocked", signal="approved"), set()),
+    )
+    task = {
+        "id": "story-vote",
+        "candidate_ids": [must_know["id"]],
+        "question": "Synthetic election result",
+        "why": "Discovery marks it must-know.",
+        "priority": 1,
+        "evidence_context": "Confirm the result.",
+        "source_urls": [page],
+    }
+    result = await nodes.execute(
+        "story_brief", brief_context(task, pooled), tmp_path / "brief"
+    )
+    assert nodes.editor.calls[0]["packets_untrusted"] == [packet]
+    assert result["content"] is None and result["signal"] == signal
+    assert result["reason"] == "confirmed_signal"
+    publication.validate_result(result)
+    built = publication.assemble("researcher", DAY, [task], [result])
+    assert built["coverage"]["stories"][0]["disposition"] == "watch"
 
 
 async def test_the_pool_records_what_it_leaves_out_and_why(nodes, tmp_path):

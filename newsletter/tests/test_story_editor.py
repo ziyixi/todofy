@@ -2078,6 +2078,65 @@ async def test_a_body_citing_excerpts_still_needs_the_open(rig, excerpts):
     # A repair writes no new signal, so it only hears the must-open rule.
     rules = rig.calls[2]["prompt"]["feed_excerpt_rules"]
     assert "仍须本轮独立open" in rules and "据X、Y报道" not in rules
+    assert rig.calls[2]["schema"]["properties"]["signal"] == {"type": "null"}
+    publication.validate_result(result)
+
+
+@pytest.mark.parametrize("cites_page", [False, True])
+async def test_a_repair_may_rest_a_blocked_signal_on_the_excerpts_alone(
+    rig, excerpts, cites_page
+):
+    """The first signal rested on one page the review could not open.
+
+    With no approved signal, the repair may write one from two outlets'
+    frozen excerpts, and only from them: citing any other source is new
+    reporting a repair does not do.
+    """
+    packet_id = excerpts[0]["id"]
+    body = cited("虚构的自由党赢得议会多数。", 1, 3, packet_id=packet_id)
+    first = story_editor.story("据一家通讯社报道，虚构的自由党赢得议会多数。")
+    signal = cited(
+        "据Synthetic Wire、Synthetic Radio报道，虚构的自由党赢得议会多数。",
+        1,
+        3,
+        packet_id=packet_id,
+    )
+    if cites_page:
+        signal["paragraphs"][0]["citations"].append("packet/source")
+    rig.replies = [
+        story_editor.reply(story_editor.writer(body, first)),
+        story_editor.reply(
+            story_editor.review(body="blocked", signal="blocked"),
+            opened=set(),
+        ),
+        story_editor.reply(story_editor.writer(body, signal), opened=set()),
+        story_editor.reply(
+            story_editor.review(
+                body="blocked",
+                signal="not_present" if cites_page else "approved",
+            ),
+            opened=set(),
+        ),
+    ]
+    result = await rig.run(packets=[copy.deepcopy(rig.packet), *excerpts])
+    repair = rig.calls[2]
+    assert "anyOf" in repair["schema"]["properties"]["signal"]
+    assert "只能引用这些摘要" in repair["prompt"]["feed_excerpt_rules"]
+    assert result["content"] is None
+    if cites_page:
+        assert result["signal"] is None and result["reason"] == "withheld"
+        assert rig.calls[3]["prompt"]["signal_untrusted"] is None
+        assert any(
+            issue["reason"].endswith("repair_signal_cites_beyond_excerpts")
+            for issue in result["issues"]
+        )
+    else:
+        assert result["signal"] == signal
+        assert result["reason"] == "confirmed_signal"
+        *_, receipt = (
+            a for a in result["assessments"] if a["component"] == "signal"
+        )
+        assert receipt["round"] == "repair" and len(receipt["excerpts"]) == 2
     publication.validate_result(result)
 
 

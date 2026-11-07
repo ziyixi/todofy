@@ -1188,6 +1188,7 @@ pytest_test(
         "//newsletter/src/newsletter/workflow:feed_excerpts",
         "//newsletter/src/newsletter/workflow:nodes",
         "//newsletter/src/newsletter/workflow:pipeline",
+        "//newsletter/src/newsletter/workflow:publication",
         "//newsletter/src/newsletter/workflow:researcher",
         "//newsletter/src/newsletter/workflow:sources",
         "//newsletter/src/newsletter/workflow:state",
