@@ -1222,20 +1222,35 @@ async def test_a_supplement_date_the_contract_refuses_is_refused_by_schema(rig):
         contracts.validate_packet_body(supplement["content"])
     for value in ("2026-09", "2026", "Sep 2026", "2026-09-06 or later"):
         assert not re.fullmatch(pattern, value)
-    # Code still refuses an answer that got past the schema.
-    supplement["content"]["sources"][0]["published_at"] = "2026-09"
+
+
+@pytest.mark.parametrize("published_at", ["2026-11-31", "2026-09"])
+async def test_an_unreadable_supplement_date_is_dropped_not_the_answer(
+    rig, published_at
+):
+    """A date the contract cannot parse costs only the date.
+
+    A day the calendar lacks fits the schema's shape, yet the contract
+    refuses it. The date is only shown, so code drops it and keeps the
+    answer.
+    """
+    supplement = {
+        "id": "supplement-1",
+        "content": copy.deepcopy(rig.packet["content"]),
+    }
+    supplement["content"]["sources"][0]["published_at"] = published_at
     content = story_editor.story()
     content["paragraphs"][0]["citations"] = ["supplement-1/source"]
     rig.replies = [
         story_editor.reply(
             story_editor.writer(content, supplements=[supplement])
-        )
+        ),
+        story_editor.reply(story_editor.review()),
     ]
     result = await rig.run()
-    assert result["reason"] == "invalid_output" and len(rig.calls) == 1
-    assert result["issues"][-1]["reason"] == (
-        "writer:INVALID_ARGUMENT:Invalid source published_at"
-    )
+    assert result["reason"] == "approved" and len(rig.calls) == 2
+    assert result["packets"][-1]["content"]["sources"][0]["published_at"] == ""
+    publication.validate_result(result)
 
 
 async def test_exact_duplicate_references_removed_preserves_any_prose(

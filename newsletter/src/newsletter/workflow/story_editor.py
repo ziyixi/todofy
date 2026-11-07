@@ -217,8 +217,8 @@ def _bounded_packet_schema() -> types.Payload:
     )
     source["url"].update(minLength=1, maxLength=2048)
     source["excerpt"].update(maxLength=20000)
-    # The packet contract refuses a date it cannot parse, such as a month
-    # alone, and with it the writer's whole answer; the schema says so first.
+    # The shape the packet contract parses; _drop_unreadable_dates blanks a
+    # date that still fails, such as 2026-11-31, rather than lose the answer.
     source["published_at"].update(
         maxLength=10,
         pattern=r"^(?:[0-9]{4}-[0-9]{2}-[0-9]{2})?$",
@@ -516,6 +516,25 @@ def _rewrite_citations(content: types.Payload, remap: dict[str, str]) -> None:
             )
 
 
+def _drop_unreadable_dates(body: object) -> None:
+    """Blank source dates the packet contract cannot parse, e.g. 2026-11-31.
+
+    A supplement's date is only displayed; the contract refusing one would
+    discard the writer's whole answer, content and signal alike.
+    """
+    sources = body.get("sources") if isinstance(body, dict) else None
+    for source in sources if isinstance(sources, list) else []:
+        if isinstance(source, dict) and isinstance(
+            source.get("published_at"), str
+        ):
+            try:
+                datetime.datetime.fromisoformat(
+                    source["published_at"].replace("Z", "+00:00")
+                )
+            except ValueError:
+                source["published_at"] = ""
+
+
 def _supplements(
     values: object,
     packets: list[types.Payload],
@@ -541,6 +560,7 @@ def _supplements(
             raise StoryOutputError("supplemental_packet_id_invalid")
         seen.add(old_id)
         body = supplement["content"]
+        _drop_unreadable_dates(body)
         contracts.validate_packet_body(body)
         if any(
             parse.urldefrag(source["url"])[0] not in opened
