@@ -59,10 +59,13 @@ jobs:
           ssh-key: ${{ secrets.private_ssh_key }}
           history: commit
       - uses: ./.github/actions/setup-bazel
+        if: ${{ inputs.operation != 'k3s-check' && inputs.operation != 'k3s-plan' && inputs.operation != 'k3s-apply' }}
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        if: ${{ inputs.operation != 'k3s-check' && inputs.operation != 'k3s-plan' && inputs.operation != 'k3s-apply' }}
         with:
           node-version-file: .node-version
       - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        if: ${{ inputs.operation != 'k3s-check' && inputs.operation != 'k3s-plan' && inputs.operation != 'k3s-apply' }}
         with:
           tofu_version_file: .opentofu-version
           tofu_wrapper: false

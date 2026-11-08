@@ -14,6 +14,13 @@ Two read-only design consultations informed Pod filtering, budget preservation a
 wire behavior were independently checked. Pending: complete branch gate, same-source main publication and
 reconciliation, then a fresh real inventory/resource report. Private operating evidence stays in its handoff.
 
+Follow-up branch `codex/native-cluster-tools` removes build-tool setup from the three native cluster operations.
+The first main access step stopped before cluster writes when its unnecessary Bazel download returned HTTP 504;
+the underlying download-service cause remains unconfirmed. Native entrypoint imports were verified with site
+packages, subprocesses and network calls disabled. The fix retains required native tools, source/green gates
+and all non-cluster preparation, with workflow regressions and a read-only design review. Roll forward through
+new branch/main gates; do not treat the earlier partial publication as completed VPS discovery.
+
 Private application work and publication evidence are tracked only in `private/HANDOFF.md`.
 
 The test suite consolidation landed on main. Its CI gate stopped at the Links backup export CPU check, which

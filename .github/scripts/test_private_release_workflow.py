@@ -150,6 +150,24 @@ class PrivateReleaseWorkflow(unittest.TestCase):
         self.assertTrue(self.condition("dashboard-deploy"))
         self.assertEqual(self.condition("dashboard-deploy", artifact), "checked-branch-run")
 
+    def test_native_cluster_operations_skip_unrelated_tool_setup(self):
+        publisher = workflow_data(ROOT / ".github/workflows/private-release.yml")
+        steps = publisher["jobs"]["release"]["steps"]
+        setup = [step for step in steps if step.get("uses", "").startswith((
+            "./.github/actions/setup-bazel", "actions/setup-node@", "opentofu/setup-opentofu@",
+        ))]
+        self.assertEqual(len(setup), 3)
+        for operation in ("k3s-check", "k3s-plan", "k3s-apply", "release", "publish",
+                          "finish-worker", "verify", "infra-plan", "infra-apply", "data-check", "k3s-future"):
+            self.context["inputs.operation"] = operation
+            with self.subTest(operation=operation):
+                selected = [self.condition("observer-access", step["if"]) if step.get("if") else True
+                            for step in setup]
+                self.assertEqual(selected, [operation not in {"k3s-check", "k3s-plan", "k3s-apply"}] * 3)
+        entry = steps[-1]
+        self.assertNotIn("if", entry)
+        self.assertIn('python3 private/ci/release.py --operation "$PRIVATE_RELEASE_OPERATION"', entry["run"])
+
     def test_branch_and_document_only_changes_do_not_publish(self):
         self.context["github.ref"] = "refs/heads/codex/synthetic-review"
         self.assertTrue(self.condition("private-home-artifact"))
