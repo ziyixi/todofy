@@ -10,6 +10,14 @@ load("//tools/bazel/python:container_test.bzl", "container_image_test")
 
 package(default_visibility = ["//visibility:public"])
 
+exports_files(
+    [
+        "k3s/newsletter/codex-gateway.yaml",
+        "k3s/newsletter/kustomization.yaml",
+    ],
+    visibility = ["//tools/vps-release:__pkg__"],
+)
+
 filegroup(
     name = "release",
     srcs = [

@@ -15,6 +15,7 @@ filegroup(
         "//.github/actions:build-codex-gateway/action.yml",
         "//.github/actions:publish-image/action.yml",
         "//tools/container-release:release_inputs",
+        "//tools/vps-release:gateway_deployment_inputs",
     ],
     tags = [
         "artifact://codex-gateway:codex-gateway",

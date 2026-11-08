@@ -20,6 +20,12 @@ the underlying download-service cause remains unconfirmed. Native entrypoint imp
 packages, subprocesses and network calls disabled. The fix retains required native tools, source/green gates
 and all non-cluster preparation, with workflow regressions and a read-only design review. Roll forward through
 new branch/main gates; do not treat the earlier partial publication as completed VPS discovery.
+It also connects the independent gateway release to its actual deployment declaration/renderer through the
+deployment tools, and orders its update after a selected paired VPS rollout. This fills existing declaration
+labels through normal publishing instead of a separate registration step or temporary Pod migration.
+The same build-tool URL later returned HTTP 504 in the required planning path. Necessary Bazel setup now uses
+the official distribution endpoint with the unchanged version/SHA and bounded curl recovery; real HTTP fixtures
+verify transient recovery, persistent bounded failure and corruption rejection before atomic installation.
 
 Private application work and publication evidence are tracked only in `private/HANDOFF.md`.
 

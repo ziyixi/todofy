@@ -150,6 +150,25 @@ class PrivateReleaseWorkflow(unittest.TestCase):
         self.assertTrue(self.condition("dashboard-deploy"))
         self.assertEqual(self.condition("dashboard-deploy", artifact), "checked-branch-run")
 
+    def test_gateway_uses_the_new_renderer_after_a_selected_vps_rollout(self):
+        gateway = self.jobs["codex-gateway-deploy"]
+        self.assertIn("vps-deploy", gateway["needs"])
+        self.assertIn("!cancelled()", gateway["if"])
+        self.context.update({
+            "needs.changes.outputs.codex_gateway_deploy": "true",
+            "needs.codex-gateway-image.result": "success",
+            "needs.changes.outputs.platform_deploy": "true",
+            "needs.vps-deploy.result": "success",
+        })
+        self.assertTrue(self.condition("codex-gateway-deploy"))
+        for state in ("failure", "cancelled", "skipped"):
+            self.context["needs.vps-deploy.result"] = state
+            self.assertFalse(self.condition("codex-gateway-deploy"), state)
+        self.context["needs.changes.outputs.platform_deploy"] = "false"
+        self.context["needs.vps-deploy.result"] = "skipped"
+        self.assertTrue(self.condition("codex-gateway-deploy"))
+        self.assertFalse(self.condition("codex-gateway-deploy", cancelled=True))
+
     def test_native_cluster_operations_skip_unrelated_tool_setup(self):
         publisher = workflow_data(ROOT / ".github/workflows/private-release.yml")
         steps = publisher["jobs"]["release"]["steps"]
