@@ -86,6 +86,7 @@ filegroup(
         "//packages/edge-auth:source_audit_files",
         "//packages/model-router-client:source_audit_files",
         "//packages/planning-ui:source_audit_files",
+        "//packages/research-datasets:source_audit_files",
         "//packages/task-dates:source_audit_files",
         "//personal-mcp:source_audit_files",
         "//platform:source_audit_files",

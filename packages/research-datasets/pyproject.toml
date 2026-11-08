@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "todofy-research-datasets"
+version = "1.2.0"
+description = "Pandas readers and point-in-time panels for frozen research datasets"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.26", "pandas>=2.2", "pyarrow>=17"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+research_datasets = ["py.typed"]

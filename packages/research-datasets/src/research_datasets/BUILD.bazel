@@ -1,0 +1,49 @@
+load("@rules_python//python:defs.bzl", "py_library")
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+
+package(default_visibility = ["//packages/research-datasets:__subpackages__"])
+
+py_library(
+    name = "library",
+    srcs = [
+        "__init__.py",
+        "client.py",
+        "constants.py",
+        "panels.py",
+    ],
+    data = ["py.typed"],
+    imports = [".."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@python_deps//numpy",
+        "@python_deps//pandas",
+        "@python_deps//pyarrow",
+    ],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

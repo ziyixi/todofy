@@ -1,0 +1,283 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+import pandas as pd
+
+import research_datasets
+from tests import test_sdk as fixture
+
+
+class PanelRegressionTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.objects, _ = fixture._build_synthetic_bundle()
+
+    def test_combiners_keep_filtered_reversed_and_duplicate_index_rows(self) -> None:
+        with (
+            fixture.SyntheticDatasetServer(self.objects) as server,
+            tempfile.TemporaryDirectory() as tmp,
+        ):
+            ds = research_datasets.load(
+                fixture.DATASET_ID,
+                key=fixture.TOKEN,
+                base_url=server.base_url,
+                cache_dir=tmp,
+            )
+            candidates = ds.candidates(
+                ["AAPL", "GOOG"], start=ds.calendar[6], end=ds.calendar[12]
+            )
+            selected = candidates.iloc[[2, 4, 8]]
+            variants = (
+                selected,
+                selected.iloc[::-1],
+                selected.set_axis([7, 7, 7]),
+            )
+            # A frozen recipe can predate the panel APIs. The installed package owns them.
+            with mock.patch.object(ds, "recipe_source", side_effect=AssertionError):
+                for samples in variants:
+                    expected_keys = samples[research_datasets.KEYS].reset_index(
+                        drop=True
+                    )
+                    with self.subTest(index=samples.index.tolist()):
+                        labels = ds.forward_returns(samples, horizons=(1, 5))
+                        pd.testing.assert_frame_equal(
+                            labels[research_datasets.KEYS], expected_keys
+                        )
+                        for row in labels.itertuples(index=False):
+                            day_index = ds.calendar.index(str(row.signal_session))
+                            base = 100.0 if row.asset_id == fixture.ASSET_A else 150.0
+                            for horizon in (1, 5):
+                                asset_return = (base + (day_index + horizon) * 1.25) / (
+                                    base + (day_index + 1) * 1.25 - 0.5
+                                ) - 1
+                                benchmark_return = (
+                                    500.0 + (day_index + horizon) * 1.25
+                                ) / (500.0 + (day_index + 1) * 1.25 - 0.5) - 1
+                                self.assertAlmostEqual(
+                                    getattr(row, f"forward_excess_return_{horizon}d"),
+                                    asset_return - benchmark_return,
+                                    places=12,
+                                )
+                        for builder in (ds.fundamental_features, ds.fundamental_ratios):
+                            frame = builder(
+                                samples,
+                                period_kind=("quarter", "annual"),
+                                time_policy="public_reconstructed",
+                            )
+                            pd.testing.assert_frame_equal(
+                                frame[research_datasets.KEYS], expected_keys
+                            )
+
+    def test_candidates_use_winter_and_summer_new_york_offsets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            client = research_datasets.connect(
+                fixture.TOKEN,
+                base_url="https://dataset.example.test/read/v1",
+                cache_dir=tmp,
+            )
+            ds = research_datasets.Dataset(
+                client,
+                {
+                    "dataset_id": fixture.DATASET_ID,
+                    "universe": [{"asset_id": fixture.ASSET_A, "symbol": "AAA"}],
+                    "calendar": [
+                        "2026-01-05",
+                        "2026-01-06",
+                        "2026-07-01",
+                        "2026-07-02",
+                    ],
+                },
+            )
+            winter = ds.candidates("AAA", start="2026-01-05", end="2026-01-05")
+            summer = ds.candidates("AAA", start="2026-07-01", end="2026-07-01")
+            self.assertEqual(
+                winter.iloc[0]["decision_at"], pd.Timestamp("2026-01-06T14:00:00Z")
+            )
+            self.assertEqual(
+                summer.iloc[0]["decision_at"], pd.Timestamp("2026-07-02T13:00:00Z")
+            )
+
+    def test_fact_revisions_are_available_strictly_before_decision(self) -> None:
+        clocks = [
+            "2026-07-02T12:59:59Z",
+            "2026-07-02T13:00:00Z",
+            "2026-07-02T13:00:01Z",
+        ]
+        facts = pd.DataFrame(
+            [
+                {
+                    "fact_id": "synthetic-revenue",
+                    "cik": fixture.CIK_A,
+                    "metric": "revenue",
+                    "unit": "USD",
+                    "period_kind": "quarter",
+                    "period_end": "2026-06-30",
+                    "public_at": clock,
+                    "public_time_precision": "second",
+                    "observed_at": clock,
+                    "observation_sequence": index + 1,
+                    "is_retracted": False,
+                    "value": str((index + 1) * 100),
+                }
+                for index, clock in enumerate(clocks)
+            ]
+        )
+        samples = pd.DataFrame(
+            {
+                "asset_id": [fixture.ASSET_A] * 3,
+                "signal_session": ["2026-07-01"] * 3,
+                "decision_at": [*clocks[1:], "2026-07-02T13:00:02Z"],
+            }
+        )
+        material = {
+            "manifest": {},
+            "universe": [
+                {
+                    "asset_id": fixture.ASSET_A,
+                    "cik": fixture.CIK_A,
+                    "issuer_mapping_status": "verified",
+                }
+            ],
+            "fundamentals": facts,
+        }
+        for policy in ("observed_content", "public_reconstructed"):
+            with self.subTest(policy=policy):
+                result = research_datasets.prepare_fundamental_features(
+                    material,
+                    samples,
+                    metrics={"revenue": "USD"},
+                    time_policy=policy,
+                )
+                self.assertEqual(
+                    result["revenue_value"].tolist(), [100.0, 200.0, 300.0]
+                )
+
+
+class TransportRegressionTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.objects, _ = fixture._build_synthetic_bundle()
+
+    def test_redirect_is_refused_without_contacting_target(self) -> None:
+        with (
+            fixture.SyntheticDatasetServer(self.objects) as server,
+            tempfile.TemporaryDirectory() as tmp,
+        ):
+            client = research_datasets.connect(
+                fixture.TOKEN, base_url=server.base_url + "/", cache_dir=tmp
+            )
+            with self.assertRaises(research_datasets.DatasetError) as caught:
+                client._request("redirect")
+            self.assertEqual(caught.exception.reason, "REDIRECT_REFUSED")
+            self.assertEqual(server.request_paths, ["/read/v1/redirect"])
+
+    def test_session_budget_refuses_an_extra_artifact_request(self) -> None:
+        with (
+            fixture.SyntheticDatasetServer(self.objects) as server,
+            tempfile.TemporaryDirectory() as tmp,
+        ):
+            ds = research_datasets.load(
+                fixture.DATASET_ID,
+                key=fixture.TOKEN,
+                base_url=server.base_url,
+                cache_dir=tmp,
+                max_requests=1,
+            )
+            with self.assertRaises(research_datasets.DatasetError) as caught:
+                ds.prices("AAPL")
+            self.assertEqual(caught.exception.reason, "SESSION_BUDGET")
+            self.assertEqual(server.request_count, 1)
+
+    def test_new_session_replaces_a_corrupt_cached_part(self) -> None:
+        with (
+            fixture.SyntheticDatasetServer(self.objects) as server,
+            tempfile.TemporaryDirectory() as tmp,
+        ):
+            args = {"key": fixture.TOKEN, "base_url": server.base_url, "cache_dir": tmp}
+            ds = research_datasets.load(fixture.DATASET_ID, **args)
+            expected = ds.prices("AAPL")
+            item = ds._parts("all")[0]
+            path = Path(tmp) / f"{item['sha256']}.parquet"
+            contents = path.read_bytes()
+            path.write_bytes(bytes([contents[0] ^ 0xFF]) + contents[1:])
+            before = server.request_count
+            restored = research_datasets.load(fixture.DATASET_ID, **args).prices("AAPL")
+            pd.testing.assert_frame_equal(restored, expected)
+            self.assertEqual(server.request_count - before, 2)
+
+    def test_returned_family_objects_and_attrs_cannot_mutate_cached_data(self) -> None:
+        with (
+            fixture.SyntheticDatasetServer(self.objects) as server,
+            tempfile.TemporaryDirectory() as tmp,
+        ):
+            ds = research_datasets.load(
+                fixture.DATASET_ID,
+                key=fixture.TOKEN,
+                base_url=server.base_url,
+                cache_dir=tmp,
+            )
+            observations = ds.event_observations()
+            original_clock = observations.at[0, "asset_first_seen_at"][fixture.ASSET_A]
+            observations.at[0, "asset_first_seen_at"][fixture.ASSET_A] = (
+                "1900-01-01T00:00:00Z"
+            )
+            observations.at[0, "asset_ids"][0] = fixture.ASSET_G1
+            facts = ds.fundamentals(["AAPL", "SPY"])
+            facts.attrs["unmapped_asset_ids"].clear()
+            prices = ds.prices("AAPL")
+            original_close = prices.at[0, "close"]
+            original_dtypes = prices.dtypes
+            prices.at[0, "close"] = -1.0
+            requests = server.request_count
+
+            with mock.patch(
+                "research_datasets.client.pads.dataset", side_effect=AssertionError
+            ):
+                for _ in range(2):
+                    fresh = ds.event_observations()
+                    self.assertEqual(
+                        fresh.at[0, "asset_first_seen_at"][fixture.ASSET_A],
+                        original_clock,
+                    )
+                    self.assertEqual(
+                        fresh.at[0, "asset_ids"].tolist(), [fixture.ASSET_A]
+                    )
+                    fresh.at[0, "asset_first_seen_at"][fixture.ASSET_A] = "changed"
+                    fresh_facts = ds.fundamentals(["AAPL", "SPY"])
+                    self.assertEqual(
+                        fresh_facts.attrs["unmapped_asset_ids"], [fixture.BENCH_SPY]
+                    )
+                    fresh_facts.attrs["unmapped_asset_ids"].clear()
+                    fresh_prices = ds.prices("AAPL")
+                    self.assertEqual(fresh_prices.at[0, "close"], original_close)
+                    pd.testing.assert_series_equal(fresh_prices.dtypes, original_dtypes)
+            self.assertEqual(server.request_count, requests)
+
+    def test_invalid_endpoint_or_missing_key_is_rejected_before_requests(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            for base_url in (
+                "http://dataset.example.test/read/v1",
+                "https://user:password@dataset.example.test/read/v1",
+                "https://dataset.example.test/read/v1?key=value",
+                "https://dataset.example.test/read/v1#fragment",
+            ):
+                with (
+                    self.subTest(base_url=base_url),
+                    self.assertRaises(research_datasets.DatasetError) as caught,
+                ):
+                    research_datasets.connect(
+                        fixture.TOKEN, base_url=base_url, cache_dir=tmp
+                    )
+                self.assertEqual(caught.exception.reason, "BASE_URL_INVALID")
+            with self.assertRaises(TypeError):
+                research_datasets.connect(
+                    base_url="https://dataset.example.test/read/v1"
+                )
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,68 @@
+load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
+load("//tools/bazel/python:tests.bzl", "unittest_test")
+
+package(default_visibility = ["//packages/research-datasets:__subpackages__"])
+
+unittest_test(
+    name = "test_regressions",
+    size = "small",
+    srcs = ["test_regressions.py", "test_sdk.py"],
+    imports = [".", "..", "../src"],
+    modules = ["tests.test_regressions"],
+    deps = [
+        "//packages/research-datasets/src/research_datasets:library",
+        "@python_deps//numpy",
+        "@python_deps//pandas",
+        "@python_deps//pyarrow",
+    ],
+)
+
+unittest_test(
+    name = "test_sdk",
+    size = "small",
+    srcs = ["test_sdk.py"],
+    imports = [
+        ".",
+        "..",
+        "../src",
+    ],
+    modules = ["tests.test_sdk"],
+    deps = [
+        "//packages/research-datasets/src/research_datasets:library",
+        "@python_deps//numpy",
+        "@python_deps//pandas",
+        "@python_deps//pyarrow",
+    ],
+)
+
+test_suite(
+    name = "tests",
+    tests = [":test_sdk", ":test_regressions"],
+)
+
+filegroup(
+    name = "python_sources",
+    srcs = glob(
+        ["**/*.py"],
+        allow_empty = True,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "source_audit_files",
+    srcs = glob(
+        ["**"],
+        allow_empty = True,
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(
+    glob(
+        ["**"],
+        exclude = SOURCE_AUDIT_EXCLUDES,
+    ),
+    visibility = ["//visibility:public"],
+)

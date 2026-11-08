@@ -1,0 +1,79 @@
+load("//tools/bazel/audit:sources.bzl", "source_audit_files")
+load("//tools/bazel/python:tests.bzl", "ruff_test")
+
+package(default_visibility = ["//packages/research-datasets:__subpackages__"])
+
+exports_files(
+    [
+        "README.md",
+        "ruff.toml",
+        "pyproject.toml",
+    ],
+    visibility = ["//packages/research-datasets:__subpackages__"],
+)
+
+alias(
+    name = "research-datasets",
+    actual = "//packages/research-datasets/src/research_datasets:library",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "library",
+    actual = "//packages/research-datasets/src/research_datasets:library",
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "python_lint_inputs",
+    srcs = [
+        "ruff.toml",
+        "pyproject.toml",
+        "//packages/research-datasets/src/research_datasets:python_sources",
+        "//packages/research-datasets/tests:python_sources",
+    ],
+)
+
+ruff_test(
+    name = "ruff_check_test",
+    command = "check",
+    config = "ruff.toml",
+    data = [":python_lint_inputs"],
+    paths = [
+        "src",
+        "tests",
+    ],
+)
+
+ruff_test(
+    name = "ruff_format_test",
+    command = "format",
+    config = "ruff.toml",
+    data = [":python_lint_inputs"],
+    paths = [
+        "src",
+        "tests",
+    ],
+)
+
+test_suite(
+    name = "check",
+    tests = [
+        ":ruff_check_test",
+        ":ruff_format_test",
+        "//packages/research-datasets/tests",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+source_audit_files(
+    patterns = [
+        "*",
+        "src/**",
+        "tests/**",
+    ],
+    deps = [
+        "//packages/research-datasets/src/research_datasets:source_audit_files",
+        "//packages/research-datasets/tests:source_audit_files",
+    ],
+)

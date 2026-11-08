@@ -38,7 +38,7 @@ constraint-dependencies = [
 build-constraint-dependencies = ["setuptools==84.0.0"]
 
 [tool.uv.workspace]
-members = ["newsletter", "codex-gateway", "platform", "todofy", "proto/python", "packages/model-router-client/python"]
+members = ["newsletter", "codex-gateway", "platform", "todofy", "proto/python", "packages/model-router-client/python", "packages/research-datasets"]
 
 [tool.uv.sources]
 # Workers vendor real package files, rather than an editable .pth reference.

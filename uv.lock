@@ -8,6 +8,7 @@ members = [
     "personal-newsletter",
     "todofy",
     "todofy-personal-cloud",
+    "todofy-research-datasets",
     "todofy-workspace",
     "ziyixi-model-router-client",
     "ziyixi-proto",
@@ -1583,6 +1584,23 @@ dev = [
     { name = "pyyaml" },
     { name = "ruff" },
     { name = "ziyixi-model-router-client", directory = "packages/model-router-client/python" },
+]
+
+[[package]]
+name = "todofy-research-datasets"
+version = "1.2.0"
+source = { editable = "packages/research-datasets" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "pyarrow" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy", specifier = ">=1.26" },
+    { name = "pandas", specifier = ">=2.2" },
+    { name = "pyarrow", specifier = ">=17" },
 ]
 
 [[package]]

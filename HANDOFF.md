@@ -5,6 +5,12 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
+Branch `codex/dataset-client-review` adds a generic research dataset Python package with explicit endpoint/key
+inputs and archive installation. DataFrame index, PIT, successful increment checks and nested-cache isolation
+regressions passed with the package's Bazel/lint and installation checks. Independent review found two defects;
+both are fixed and re-reviewed. Pending: pin this reviewed package source in its documentation/private consumer,
+complete integrated gates, then publish through normal main Actions. Private operating evidence stays private.
+
 Branch `codex/workload-discovery` adds bounded Fleet discovery from deployment-generated metadata, with an
 independent readiness inventory and cross-namespace resource usage. Old reports and release provenance stay
 compatible. New workloads need no Fleet list edit. Normal main publication waits for the protected observer
