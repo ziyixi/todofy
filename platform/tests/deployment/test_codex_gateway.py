@@ -7,10 +7,11 @@ from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from deploy import verified_snapshot
 from fastapi.testclient import TestClient
 from personal_cloud.deployment.controller import Controller
 from personal_cloud.deployment.kubernetes import DependencyUnavailable
-from personal_cloud.deployment.resources import Renderer
+from personal_cloud.deployment.resources import DISCOVERY_LABEL, Renderer
 from personal_cloud.status_daemon.config import Workload
 from personal_cloud.status_daemon.server import Cache, Service, create_app
 from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb
@@ -222,6 +223,163 @@ class GatewayRelease(Fixture, unittest.TestCase):
             },
             {SHA, GATEWAY_SHA},
         )
+
+    def test_new_pair_finishes_before_reconcile_labels_the_older_gateway(self):
+        patch = self.kube.patch
+
+        def merge_patch(kind, name, change):
+            previous = deepcopy(self.resource_state.get((kind, name), {}))
+            patch(kind, name, change)
+            for field, value in change.items():
+                self.resource_state[(kind, name)][field] = {
+                    **previous.get(field, {}),
+                    **value,
+                }
+
+        self.kube.patch = merge_patch
+        self.create_gateway()
+        self.complete_gateway()
+        gateway = self.resource_state[("Deployment", GATEWAY.deployment)]
+        # This accepted independent declaration predates the discovery labels.
+        gateway["metadata"]["labels"].pop(DISCOVERY_LABEL)
+        gateway["spec"]["template"]["metadata"]["labels"].pop(DISCOVERY_LABEL)
+        old_gateway = deepcopy(gateway)
+        pair_id = "2af73d3c-28db-41a1-b54c-9a99d8b2250e"
+        pair_sha = "f" * 40
+        pair = tuple(
+            replace(
+                target,
+                source_sha=pair_sha,
+                image_digest="sha256:" + str(index + 1) * 64,
+                request_id=pair_id,
+            )
+            for index, target in enumerate(TARGETS)
+        )
+        observed = (*pair, TARGET)
+
+        def snapshot():
+            accepting = self.admission.state == "active"
+            stamp = self.at.isoformat().replace("+00:00", "Z")
+            return pb.NodeStatus(
+                name="nodeStatus",
+                node_key="vps",
+                state="ready" if accepting else "degraded",
+                observed_at=stamp,
+                workloads=tuple(
+                    pb.WorkloadStatus(
+                        name="workloads/" + target.workload_key,
+                        workload_key=target.workload_key,
+                        process_state="running",
+                        health_state="healthy",
+                        admission_state=("accepting" if accepting else "frozen")
+                        if target.workload_key == "newsletter"
+                        else "unsupported",
+                        unknown_count=0
+                        if target.workload_key == "newsletter"
+                        else None,
+                        observed_at=stamp,
+                        release=pb.ReleaseStatus(
+                            state="ready" if accepting else "pending",
+                            desired=target,
+                            actual=replace(target, generation=3),
+                            observed_generation=3,
+                            observed_at=stamp,
+                        ),
+                    )
+                    for target in observed
+                ),
+            )
+
+        self.reads.snapshot = snapshot
+        self.controller.source_sha = lambda: pair_sha
+        self.controller.planner.source_sha = self.controller.source_sha
+        self.kube.get = Mock(
+            side_effect=lambda kind, name, **_: deepcopy(
+                self.resource_state[(kind, name)]
+            )
+        )
+        self.kube.dry_run = Mock(side_effect=lambda item, **_: deepcopy(item))
+        admission_call = self.admission.call
+        self.admission.call = lambda action, key, **_: admission_call(action, key)
+        self.at += timedelta(seconds=1)
+        self.controller.create(
+            api.CreateReleaseRequest(
+                release_id=pair_id,
+                request_id=pair_id,
+                release=pb.Release(targets=pair),
+            )
+        )
+        for _ in range(25):
+            record = self.store.get(pair_id)
+            if record.phase == "ready":
+                break
+            if record.checkpoint == "install_self":
+                self.controller.process_request_id = pair_id
+            self.assertTrue(self.controller.step(), self.store.get(pair_id))
+        self.assertEqual(self.store.get(pair_id).phase, "ready")
+        self.assertEqual(
+            self.resource_state[("Deployment", GATEWAY.deployment)], old_gateway
+        )
+        service = Service(
+            Cache(SimpleNamespace(collect=snapshot)), tuple(self.controller.keys)
+        )
+        service.summary = self.controller.summary
+        service.plan = lambda: self.controller.plan(fresh=True)
+        node = service.get("/api/v1/nodeStatus")
+        plan = node.reconcile_plan
+        self.assertEqual(
+            (plan.state, plan.base_release), ("repairable", "releases/" + pair_id)
+        )
+        self.assertEqual(
+            {change.resource_key for change in plan.changes}, {GATEWAY.key}
+        )
+        # Actual Actions verification accepts the requested pair despite the older gateway's drift.
+        self.assertTrue(verified_snapshot(node, pair, "releases/" + pair_id, self.at))
+        repaired = self.controller.reconcile(
+            api.ReconcileReleaseRequest(
+                name=plan.base_release,
+                etag=plan.base_etag,
+                fingerprint=plan.fingerprint,
+                request_id="aab2ba6c-3031-4d3b-963a-4714b93fb2eb",
+            )
+        )
+        frozen = {
+            target.workload_key: (target.source_sha, target.image_digest)
+            for target in observed
+        }
+        self.assertEqual(
+            {
+                target.workload_key: (target.source_sha, target.image_digest)
+                for target in repaired.targets
+            },
+            frozen,
+        )
+        self.assertEqual(repaired.source_release, "releases/" + pair_id)
+        observed = repaired.targets
+        identity = repaired.name.split("/")[1]
+        for _ in range(25):
+            record = self.store.get(identity)
+            if record.phase == "ready":
+                break
+            if record.checkpoint == "install_self":
+                self.controller.process_request_id = repaired.request_id
+            self.assertTrue(self.controller.step(), self.store.get(identity))
+        self.assertEqual(self.store.get(identity).phase, "ready")
+        for workload in CONFIGURATION.workloads:
+            deployment = self.resource_state[("Deployment", workload.deployment)]
+            pod = deployment["spec"]["template"]
+            self.assertEqual(
+                deployment["metadata"]["labels"][DISCOVERY_LABEL], workload.key
+            )
+            self.assertEqual(pod["metadata"]["labels"][DISCOVERY_LABEL], workload.key)
+            source, digest = frozen[workload.key]
+            self.assertEqual(
+                pod["metadata"]["annotations"]["personal-cloud/source-sha"], source
+            )
+            self.assertTrue(
+                pod["spec"]["containers"][0]["image"].endswith("@" + digest)
+            )
+        self.assertEqual(self.controller.plan(fresh=True).state, "clean")
 
     def test_missing_gateway_mount_reports_repairable_drift_through_node_status(self):
         self.create_gateway()

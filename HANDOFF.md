@@ -21,8 +21,9 @@ packages, subprocesses and network calls disabled. The fix retains required nati
 and all non-cluster preparation, with workflow regressions and a read-only design review. Roll forward through
 new branch/main gates; do not treat the earlier partial publication as completed VPS discovery.
 It also connects the independent gateway release to its actual deployment declaration/renderer through the
-deployment tools, and orders its update after a selected paired VPS rollout. This fills existing declaration
-labels through normal publishing instead of a separate registration step or temporary Pod migration.
+deployment tools. Preserve the existing backend/Router/VPS order; a whole-workflow dependency check prevents
+transitive cycles. The existing post-publication runtime reconciliation applies current declarations to all
+accepted independent workloads while retaining their source/image identities, including discovery labels.
 The same build-tool URL later returned HTTP 504 in the required planning path. Necessary Bazel setup now uses
 the official distribution endpoint with the unchanged version/SHA and bounded curl recovery; real HTTP fixtures
 verify transient recovery, persistent bounded failure and corruption rejection before atomic installation.

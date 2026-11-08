@@ -528,7 +528,7 @@ jobs:
 
   codex-gateway-deploy:
     name: Codex gateway deploy
-    needs: [changes, codex-gateway-image, fleet-deploy, vps-deploy, gate]
+    needs: [changes, codex-gateway-image, fleet-deploy, gate]
     if: >-
       ${{ !cancelled() && needs.changes.result == 'success'
       && ((github.event_name == 'workflow_dispatch' && inputs.resume_vps_release
@@ -536,7 +536,6 @@ jobs:
         || (!(github.event_name == 'workflow_dispatch' && inputs.resume_vps_release)
           && needs.codex-gateway-image.result == 'success'))
       && (needs.fleet-deploy.result == 'success' || needs.fleet-deploy.result == 'skipped')
-      && (needs.vps-deploy.result == 'success' || needs.changes.outputs.platform_deploy != 'true')
       && needs.gate.result == 'success' && github.ref == 'refs/heads/main'
       && needs.changes.outputs.codex_gateway_deploy == 'true'
       && vars.VPS_DEPLOY_ENABLED == 'true' }}

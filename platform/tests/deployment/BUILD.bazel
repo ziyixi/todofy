@@ -43,6 +43,7 @@ py_library(
         "//platform/src/personal_cloud/status_daemon:server",
         "//proto:python_runtime",
         "//proto/platform/runtime/v1:python",
+        "//tools/vps-release:deploy",
         "@python_deps//fastapi",
     ],
 )
@@ -92,6 +93,7 @@ unittest_test(
         "//platform/src/personal_cloud/status_daemon:server",
         "//proto:python_runtime",
         "//proto/platform/runtime/v1:python",
+        "//tools/vps-release:deploy",
         "@python_deps//fastapi",
     ],
 )

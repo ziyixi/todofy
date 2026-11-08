@@ -1,6 +1,7 @@
 """The native graph selects work; the original production locks and ordering still gate writes."""
 
 import hashlib
+from graphlib import TopologicalSorter
 import os
 import re
 import subprocess
@@ -17,6 +18,14 @@ class BazelCI(unittest.TestCase):
     def setUp(self):
         self.workflow = workflow_data(ROOT / ".github/workflows/ci.yml")
         self.jobs = self.workflow["jobs"]
+
+    def test_all_job_dependencies_are_declared_and_acyclic(self):
+        graph = {}
+        for name, job in self.jobs.items():
+            needs = job.get("needs", [])
+            graph[name] = [needs] if isinstance(needs, str) else needs
+            self.assertTrue(set(graph[name]) <= set(self.jobs), name)
+        self.assertEqual(set(TopologicalSorter(graph).static_order()), set(self.jobs))
 
     def test_checks_are_one_affected_leaf_matrix(self):
         self.assertEqual(self.jobs["checks"]["needs"], "changes")
