@@ -1,11 +1,11 @@
 # Handoff
 
-Updated 2026-11-07 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
+Updated 2026-11-08 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
 Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-Private application acceptance, its checked correction and publication work are tracked only in `private/HANDOFF.md`.
+Private application work and publication evidence are tracked only in `private/HANDOFF.md`.
 
 The test suite consolidation landed on main. Its CI gate stopped at the Links backup export CPU check, which
 measured a 5.20 ms warm median against a 5 ms assertion. The backup implementation, fixture and CPU meter match
@@ -54,7 +54,7 @@ codes generically. It changes no source, so it publishes no service and no priva
 
 ## Latest verified release
 
-Main `d1a2db52` passed its complete automatic publication: the selected private application, then Home. The
+Main `c6d46806` passed its complete automatic publication: the selected private application, then Home. The
 matching publication-triggered Personal cloud reconcile passed VPS runtime, complete resource registration,
 infrastructure comparison/routine repair and resolved drift. Private implementation and live-source evidence
 are kept only in `private/HANDOFF.md`. The [November 7 archive](docs/history/handoff-2026-11-07.md) records this
