@@ -109,6 +109,7 @@ jobs:
               ;;
           esac
           # Only reviewed generic terminal codes may leave the private output boundary.
+          http=$(sed -n -E 's/^\{"event": "private_dependency_http_error", "dependency": "(github|registry|cloudflare|collector|worker|other)", "method": "(GET|POST|other)", "status": ([1-5][0-9]{2}), "response": "(json|html|other)", "cf_challenge": (true|false)(, "cf_error_code": (1[0-9]{3}))?([,}].*)$/\1,\2,\3,\7/p' "$log" | tail -n 1)
           cause=$(tail -n 1 "$log")
           case "$cause" in
             private_release_failed_bazel_build|private_release_failed_bazel_cquery|private_release_failed_bazel_run|private_release_failed_docker_login|private_release_failed_command|private_worker_bundle_over_budget|private_worker_configuration_mismatch|private_image_visibility_required|private_package_bootstrap_required)
@@ -120,6 +121,7 @@ jobs:
           if [ "$status" = 0 ]; then
             echo "::notice::${outcome}_COMPLETE"
           else
+            if [ -n "$http" ]; then echo "::error::PRIVATE_HTTP=$http"; fi
             if [ -n "$diagnostic" ]; then echo "::error::PRIVATE_CAUSE=$diagnostic"; fi
             echo "::error::${outcome}_FAILED"
             exit "$status"

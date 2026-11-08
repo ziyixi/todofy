@@ -1,5 +1,6 @@
 """Exercise the actual publication conditions with synthetic Actions job results."""
 
+import json
 import os
 import re
 import subprocess
@@ -343,6 +344,35 @@ class PrivateReleaseWorkflow(unittest.TestCase):
                     expected += "::error::PRIVATE_PUBLICATION_FAILED\n"
                     self.assertEqual((result.returncode, result.stdout + result.stderr), (7, expected))
                     self.assertEqual((captured, left), (True, False))
+
+    def test_failed_operation_projects_only_bounded_http_metadata(self):
+        metadata = {
+            "event": "private_dependency_http_error", "dependency": "collector", "method": "GET",
+            "status": 530, "response": "html", "cf_challenge": False, "cf_error_code": 1033,
+            "message": "synthetic-private-token and https://synthetic-private.invalid",
+        }
+        cases = (
+            ({}, "collector,GET,530,1033"),
+            ({"dependency": "worker", "method": "POST", "cf_error_code": 1016}, "worker,POST,530,1016"),
+            ({"dependency": "synthetic-private"}, None),
+            ({"method": "synthetic-private"}, None),
+            ({"status": "530 synthetic-private"}, None),
+            ({"cf_challenge": "synthetic-private"}, None),
+            ({"cf_error_code": 10330}, "collector,GET,530,"),
+            ({"cf_error_code": "1033 synthetic-private"}, "collector,GET,530,"),
+            ({"status": 403, "cf_error_code": None}, "collector,GET,403,"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            for changes, projection in cases:
+                with self.subTest(changes=changes):
+                    event = {key: value for key, value in {**metadata, **changes}.items() if value is not None}
+                    output = json.dumps(event) + "\nprivate_release_not_observed\n"
+                    for status in (0, 7):
+                        result, captured, left = self.operate(directory, "release", status, output)
+                        expected = (f"::error::PRIVATE_HTTP={projection}\n" if status and projection else "")
+                        expected += ("::error::PRIVATE_PUBLICATION_FAILED\n" if status else "::notice::PRIVATE_PUBLICATION_COMPLETE\n")
+                        self.assertEqual((result.returncode, result.stdout + result.stderr), (status, expected))
+                        self.assertEqual((captured, left), (True, False))
 
     def test_private_history_fetches_only_pinned_ancestries_and_imports_a_divergent_base(self):
         check = workflow_data(ROOT / ".github/workflows/private-check.yml")["jobs"]["check"]
