@@ -96,9 +96,14 @@ class DependencyWorkspaces(unittest.TestCase):
         sources = {name.lower().replace("_", "-") for name in uv["sources"]}
         for member in uv["workspace"]["members"]:
             data = tomllib.loads((ROOT / member / "pyproject.toml").read_text())
-            self.assertTrue(
-                data["project"]["requires-python"].startswith(">=3.14"), member
-            )
+            notebook_sdk = member == "packages/research-datasets"
+            if notebook_sdk:
+                # This installable consumer library supports notebook Python; CI still uses the root toolchain.
+                self.assertEqual(data["project"]["requires-python"], ">=3.11")
+            else:
+                self.assertTrue(
+                    data["project"]["requires-python"].startswith(">=3.14"), member
+                )
             dependencies = [*data["project"]["dependencies"]]
             for extra in data["project"].get("optional-dependencies", {}).values():
                 dependencies.extend(extra)
@@ -108,7 +113,14 @@ class DependencyWorkspaces(unittest.TestCase):
                 )
             for dependency in dependencies:
                 with self.subTest(member=member, dependency=dependency):
-                    self.assertRegex(dependency, r"^[\w-]+(?:\[[\w,-]+\])?$")
+                    if notebook_sdk:
+                        # Compatibility floors belong in the wheel; root constraints select workspace versions.
+                        self.assertRegex(
+                            dependency, r"^[\w-]+(?:\[[\w,-]+\])?>=[0-9]+(?:\.[0-9]+)*$"
+                        )
+                        dependency = dependency.split(">=", 1)[0]
+                    else:
+                        self.assertRegex(dependency, r"^[\w-]+(?:\[[\w,-]+\])?$")
                     name = dependency.split("[", 1)[0].lower().replace("_", "-")
                     self.assertTrue(name in sources or name in pins)
         versions = defaultdict(set)

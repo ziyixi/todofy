@@ -22,9 +22,12 @@ constraints = [
     { name = "jsonschema", specifier = "==4.26.0" },
     { name = "kubernetes", specifier = "==36.0.3" },
     { name = "mypy", specifier = "==2.3.1" },
+    { name = "numpy", specifier = "==2.5.4" },
     { name = "openai-codex", specifier = "==0.163.0" },
+    { name = "pandas", specifier = "==2.3.3" },
     { name = "pillow", specifier = "==12.3.0" },
     { name = "protobuf", specifier = "==7.36.1" },
+    { name = "pyarrow", specifier = "==22.0.0" },
     { name = "pyjwt", specifier = "==2.15.1" },
     { name = "pytest", specifier = "==9.1.1" },
     { name = "pytest-asyncio", specifier = "==1.4.0" },
@@ -1626,8 +1629,8 @@ research = [
 ci = [{ name = "pyyaml" }]
 private = [{ name = "duckdb", specifier = "==2.0.0" }]
 research = [
-    { name = "pandas", specifier = "==2.3.3" },
-    { name = "pyarrow", specifier = "==22.0.0" },
+    { name = "pandas" },
+    { name = "pyarrow" },
 ]
 
 [[package]]

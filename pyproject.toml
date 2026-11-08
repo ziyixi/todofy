@@ -6,7 +6,7 @@ requires-python = ">=3.14,<3.15"
 [dependency-groups]
 ci = ["pyyaml"]
 private = ["duckdb==2.0.0"]
-research = ["pandas==2.3.3", "pyarrow==22.0.0"]
+research = ["pandas", "pyarrow"]
 
 [tool.uv]
 package = false
@@ -20,9 +20,12 @@ constraint-dependencies = [
   "jsonschema==4.26.0",
   "kubernetes==36.0.3",
   "mypy==2.3.1",
+  "numpy==2.5.4",
   "openai-codex==0.163.0",
+  "pandas==2.3.3",
   "pillow==12.3.0",
   "protobuf==7.36.1",
+  "pyarrow==22.0.0",
   "pytest==9.1.1",
   "pytest-asyncio==1.4.0",
   "pytest-xdist==3.8.0",

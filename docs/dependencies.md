@@ -14,6 +14,10 @@ Node members use `catalog:` for external packages and `workspace:*` for shared r
 declare only the dependencies/extras they need. Do not add member lock files. The Python Worker retains its existing
 `pylock.toml` runtime SDK contract; the VPS executor alone owns the subscribed Codex runtime.
 
+The installable `packages/research-datasets` library supports notebook consumers on Python 3.11 and later.
+Its package metadata declares minimum compatible dependency versions; repository builds and tests still use
+Python 3.14 and the root constraints/lock. Other workspace members retain their Python 3.14 requirement.
+
 Go packages share the root module `github.com/ziyixi/todofy`. Each package's BUILD declares its libraries, binaries
 and tests; the root Bazel module imports the shared dependency manifest with `go_deps.from_file`.
 
