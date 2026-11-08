@@ -22,10 +22,25 @@ py_test(
 test_suite(
     name = "check",
     tests = [
+        ":private_diagnostics_test",
         ":release_tests",
         ":tests",
     ],
     visibility = ["//visibility:public"],
+)
+
+py_library(
+    name = "private_diagnostics",
+    srcs = ["private_diagnostics.py"],
+    imports = ["."],
+)
+
+py_test(
+    name = "private_diagnostics_test",
+    srcs = ["test_private_diagnostics.py"],
+    legacy_create_init = False,
+    main = "test_private_diagnostics.py",
+    deps = [":private_diagnostics"],
 )
 
 py_test(

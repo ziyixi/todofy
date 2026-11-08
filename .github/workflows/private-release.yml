@@ -85,9 +85,10 @@ jobs:
           INFRA_TFVARS: ${{ secrets.INFRA_TFVARS }}
         # On the command line, an operation the pinned entry point does not know is refused before any action.
         # Every operation's output names private resources, so it stays in a runner file; the public log shows fixed
-        # codes, the exit status and only the plan results an operator acts on, accepted in their fixed shapes.
+        # codes, the exit status, fixed runtime diagnostics and bounded plan results in their reviewed shapes.
         run: |
           log="$RUNNER_TEMP/private-operation.log"
+          trap 'rm -f "$log"' EXIT
           case "$PRIVATE_RELEASE_OPERATION" in
             release|publish|finish-worker) outcome=PRIVATE_PUBLICATION ;;
             *) outcome=PRIVATE_OPERATION ;;
@@ -117,7 +118,10 @@ jobs:
             release_dependency_http_[0-9][0-9][0-9]) diagnostic="$cause" ;;
             *) diagnostic='' ;;
           esac
-          rm -f "$log"
+          # Historical pre-rollout evidence keeps its phase even when this operation later succeeds.
+          if ! python3 tools/bazel/ci/private_diagnostics.py "$log" 2>/dev/null; then
+            echo "::notice::PRIVATE_DIAGNOSTIC_UNAVAILABLE"
+          fi
           if [ "$status" = 0 ]; then
             echo "::notice::${outcome}_COMPLETE"
           else

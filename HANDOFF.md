@@ -5,8 +5,7 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-Private application work and publication evidence are tracked only in `private/HANDOFF.md`.
-Branch `codex/private-runtime-fix` carries the next private runtime correction; its scope and verification stay there.
+Private work on `codex/private-runtime-recovery` is tracked in `private/HANDOFF.md`.
 
 The test suite consolidation landed on main. Its CI gate stopped at the Links backup export CPU check, which
 measured a 5.20 ms warm median against a 5 ms assertion. The backup implementation, fixture and CPU meter match

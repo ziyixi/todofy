@@ -412,13 +412,17 @@ class BazelCI(unittest.TestCase):
         )
         publisher = workflow_data(ROOT / ".github/workflows/private-release.yml")
         entry = publisher["jobs"]["release"]["steps"][-1]
-        # Every operation, including finish-worker, runs through the pinned private entry point only, once, with its
-        # output kept in a runner file. It is passed as an argument: an entry point pinned before an operation
-        # existed refuses it rather than defaulting.
-        self.assertEqual(entry["run"].count("python3 "), 1)
-        self.assertEqual(entry["run"].count(
-            'python3 private/ci/release.py --operation "$PRIVATE_RELEASE_OPERATION" > "$log" 2>&1 || status=$?'
-        ), 1)
+        # Every operation runs the pinned entry point once, passing the operation as an argument and keeping its
+        # output in the runner file. The only other Python command is the fixed public projection of that file;
+        # exact lines reject extra invocations, inline programs and appended shell commands.
+        self.assertEqual(
+            [line.strip() for line in entry["run"].splitlines()
+             if re.search(r"\bpython(?:3(?:\.[0-9]+)?)?\b", line)],
+            [
+                'python3 private/ci/release.py --operation "$PRIVATE_RELEASE_OPERATION" > "$log" 2>&1 || status=$?',
+                'if ! python3 tools/bazel/ci/private_diagnostics.py "$log" 2>/dev/null; then',
+            ],
+        )
         self.assertEqual(
             entry["env"]["PRIVATE_RELEASE_OPERATION"], "${{ inputs.operation }}"
         )

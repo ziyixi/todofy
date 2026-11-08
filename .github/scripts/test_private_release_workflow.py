@@ -230,7 +230,7 @@ class PrivateReleaseWorkflow(unittest.TestCase):
         self.context["vars.VPS_DEPLOY_ENABLED"] = "true"
         self.assertFalse(self.condition("private-deploy"))
 
-    def operate(self, directory, operation, status, output):
+    def operate(self, directory, operation, status, output, *, diagnostic_failure=False):
         """Run the publisher's real step with a stand-in entry point that prints `output` and exits `status`.
 
         Returns the step's result, whether the entry point's stdout and stderr were the runner file, and whether
@@ -242,6 +242,10 @@ class PrivateReleaseWorkflow(unittest.TestCase):
         python = temporary / "python3"
         python.write_text(
             "#!/bin/sh\n"
+            'if [ "$1" = tools/bazel/ci/private_diagnostics.py ]; then\n'
+            '  if [ "$SYNTHETIC_DIAGNOSTIC_FAILURE" = true ]; then echo synthetic-private-helper-error >&2; exit 9; fi\n'
+            '  exec "$SYNTHETIC_PYTHON" "$@"\n'
+            'fi\n'
             '[ "$1" = private/ci/release.py ] && [ "$2" = --operation ] && '
             '[ "$3" = "$PRIVATE_RELEASE_OPERATION" ] || exit 99\n'
             'echo "synthetic-private-runtime" >&2\n'
@@ -262,6 +266,7 @@ class PrivateReleaseWorkflow(unittest.TestCase):
                 "RUNNER_TEMP": str(temporary),
                 "PRIVATE_RELEASE_OPERATION": operation,
                 "SYNTHETIC_STATUS": str(status),
+                "SYNTHETIC_DIAGNOSTIC_FAILURE": str(diagnostic_failure).lower(),
                 "SYNTHETIC_PYTHON": sys.executable,
                 "SYNTHETIC_CAPTURED": (
                     "import os; log = os.stat(os.environ['RUNNER_TEMP'] + '/private-operation.log'); "
@@ -373,6 +378,38 @@ class PrivateReleaseWorkflow(unittest.TestCase):
                         expected += ("::error::PRIVATE_PUBLICATION_FAILED\n" if status else "::notice::PRIVATE_PUBLICATION_COMPLETE\n")
                         self.assertEqual((result.returncode, result.stdout + result.stderr), (status, expected))
                         self.assertEqual((captured, left), (True, False))
+
+    def test_runtime_diagnostics_survive_the_boundary_without_private_values_or_counts(self):
+        tail = {
+            "available": True, "line_count": 9, "codes": {"STORAGE_RECOVERY_REQUIRED": 2},
+            "exception_classes": {"duckdb_memory": 1},
+            "durable_failures": {"causes": {}}, "traceback_count": 1,
+            "raw": "synthetic-private-token https://synthetic-private.invalid SELECT secret",
+        }
+        event = {"event": "private_ingress_collector_logs_probe", "phase": "before_rollout",
+                 "available": True, "current": tail, "previous": {"available": False}}
+        notices = "".join(
+            "::notice::PRIVATE_DIAGNOSTIC=BEFORE_ROLLOUT,ACTIVE_LOG," + code + "\n"
+            for code in ("DATABASE_MEMORY", "RECOVERY_REQUIRED", "TRACEBACK_PRESENT")
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            for status in (0, 7):
+                result, captured, left = self.operate(directory, "release", status, json.dumps(event) + "\n")
+                terminal = "::error::PRIVATE_PUBLICATION_FAILED\n" if status else "::notice::PRIVATE_PUBLICATION_COMPLETE\n"
+                self.assertEqual((result.returncode, result.stdout + result.stderr), (status, notices + terminal))
+                self.assertEqual((captured, left), (True, False))
+
+    def test_diagnostic_failure_preserves_publication_status_and_cleans_the_private_log(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for status in (0, 7):
+                with self.subTest(status=status):
+                    result, captured, left = self.operate(
+                        directory, "release", status, "synthetic-private-output\n", diagnostic_failure=True,
+                    )
+                    terminal = "::error::PRIVATE_PUBLICATION_FAILED\n" if status else "::notice::PRIVATE_PUBLICATION_COMPLETE\n"
+                    expected = "::notice::PRIVATE_DIAGNOSTIC_UNAVAILABLE\n" + terminal
+                    self.assertEqual((result.returncode, result.stdout + result.stderr), (status, expected))
+                    self.assertEqual((captured, left), (True, False))
 
     def test_private_history_fetches_only_pinned_ancestries_and_imports_a_divergent_base(self):
         check = workflow_data(ROOT / ".github/workflows/private-check.yml")["jobs"]["check"]
