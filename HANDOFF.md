@@ -5,7 +5,7 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-Private application work and publication evidence are tracked only in `private/HANDOFF.md`.
+Private application acceptance, its checked correction and publication work are tracked only in `private/HANDOFF.md`.
 
 The test suite consolidation landed on main. Its CI gate stopped at the Links backup export CPU check, which
 measured a 5.20 ms warm median against a 5 ms assertion. The backup implementation, fixture and CPU meter match
