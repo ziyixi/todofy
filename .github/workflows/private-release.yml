@@ -108,11 +108,19 @@ jobs:
               esac
               ;;
           esac
-          # Nothing later reads the captured output.
+          # Only reviewed generic terminal codes may leave the private output boundary.
+          cause=$(tail -n 1 "$log")
+          case "$cause" in
+            private_release_failed_bazel_build|private_release_failed_bazel_cquery|private_release_failed_bazel_run|private_release_failed_docker_login|private_release_failed_command|private_worker_bundle_over_budget|private_worker_configuration_mismatch|private_image_visibility_required|private_package_bootstrap_required)
+              diagnostic="$cause" ;;
+            release_dependency_http_[0-9][0-9][0-9]) diagnostic="$cause" ;;
+            *) diagnostic='' ;;
+          esac
           rm -f "$log"
           if [ "$status" = 0 ]; then
             echo "::notice::${outcome}_COMPLETE"
           else
+            if [ -n "$diagnostic" ]; then echo "::error::PRIVATE_CAUSE=$diagnostic"; fi
             echo "::error::${outcome}_FAILED"
             exit "$status"
           fi

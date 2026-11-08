@@ -243,8 +243,8 @@ class PrivateReleaseWorkflow(unittest.TestCase):
             "#!/bin/sh\n"
             '[ "$1" = private/ci/release.py ] && [ "$2" = --operation ] && '
             '[ "$3" = "$PRIVATE_RELEASE_OPERATION" ] || exit 99\n'
-            'cat "$RUNNER_TEMP/entry-output"\n'
             'echo "synthetic-private-runtime" >&2\n'
+            'cat "$RUNNER_TEMP/entry-output"\n'
             '"$SYNTHETIC_PYTHON" -c "$SYNTHETIC_CAPTURED"\n'
             'exit "$SYNTHETIC_STATUS"\n'
         )
@@ -316,6 +316,33 @@ class PrivateReleaseWorkflow(unittest.TestCase):
                     result, _, _ = self.operate(directory, operation, status, output)
                     self.assertEqual(result.returncode, status)
                     self.assertEqual(result.stdout + result.stderr, expected)
+
+    def test_failed_publication_exposes_only_reviewed_generic_causes(self):
+        cases = (
+            ("private_release_failed_bazel_build", True),
+            ("private_release_failed_bazel_cquery", True),
+            ("private_release_failed_bazel_run", True),
+            ("private_release_failed_docker_login", True),
+            ("private_release_failed_command", True),
+            ("private_worker_bundle_over_budget", True),
+            ("private_worker_configuration_mismatch", True),
+            ("private_image_visibility_required", True),
+            ("private_package_bootstrap_required", True),
+            ("release_dependency_http_403", True),
+            ("private_synthetic_resource", False),
+            ("private_release_failed_bazel_build synthetic-secret", False),
+            ("private_release_failed_bazel_build\x1b[0m", False),
+            ("release_dependency_http_403 synthetic-secret", False),
+            ("release_dependency_http_4033", False),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            for code, exposed in cases:
+                with self.subTest(code=code):
+                    result, captured, left = self.operate(directory, "release", 7, code + "\n")
+                    expected = (f"::error::PRIVATE_CAUSE={code}\n" if exposed else "")
+                    expected += "::error::PRIVATE_PUBLICATION_FAILED\n"
+                    self.assertEqual((result.returncode, result.stdout + result.stderr), (7, expected))
+                    self.assertEqual((captured, left), (True, False))
 
     def test_private_history_fetches_only_pinned_ancestries_and_imports_a_divergent_base(self):
         check = workflow_data(ROOT / ".github/workflows/private-check.yml")["jobs"]["check"]

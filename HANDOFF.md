@@ -28,6 +28,11 @@ The same build-tool URL later returned HTTP 504 in the required planning path. N
 the official distribution endpoint with the unchanged version/SHA and bounded curl recovery; real HTTP fixtures
 verify transient recovery, persistent bounded failure and corruption rejection before atomic installation.
 
+Follow-up branch `codex/private-publish-diagnostics` retains a strict allowlist of generic terminal failure
+codes at the private publication boundary. Raw output is still captured and deleted; regression checks reject
+resource names, extra text and control sequences. The current publication failure remains unresolved until its
+safe stage is observed and its cause is checked. Continue through normal green branch/main gates.
+
 Private application work and publication evidence are tracked only in `private/HANDOFF.md`.
 
 The test suite consolidation landed on main. Its CI gate stopped at the Links backup export CPU check, which
