@@ -469,6 +469,72 @@ with patch.object(socket, "socket", side_effect=AssertionError("Network use is f
                     resource["spec"]["hostPath"]["path"].startswith("/srv/fresh/")
                 )
 
+    def test_bundle_includes_canonical_list_only_observer_discovery_grants(self):
+        directory = ROOT / "platform/k3s/observer-discovery"
+        canonical = list(yaml.safe_load_all((directory / "rbac.yaml").read_text()))
+        self.assertEqual(
+            yaml.safe_load((directory / "kustomization.yaml").read_text())["resources"],
+            ["rbac.yaml"],
+        )
+        bootstrap = yaml.safe_load(
+            (ROOT / "platform/k3s/bootstrap/kustomization.yaml").read_text()
+        )
+        self.assertIn("../observer-discovery", bootstrap["resources"])
+        bundled = config.read_json(self.bundle() / "foundation.json")["items"]
+        identities = [(item["kind"], item["metadata"]["name"]) for item in bundled]
+        self.assertEqual(len(identities), len(set(identities)))
+        names = {(item["kind"], item["metadata"]["name"]) for item in canonical}
+        grants = [
+            item
+            for item in bundled
+            if (item["kind"], item["metadata"]["name"]) in names
+        ]
+        self.assertEqual(grants, canonical)
+        role, binding = canonical
+        self.assertEqual(role["kind"], "ClusterRole")
+        self.assertEqual(
+            role["rules"],
+            [
+                {
+                    "apiGroups": ["apps"],
+                    "resources": ["deployments"],
+                    "verbs": ["list"],
+                },
+                {"apiGroups": [""], "resources": ["pods"], "verbs": ["list"]},
+                {
+                    "apiGroups": ["metrics.k8s.io"],
+                    "resources": ["pods"],
+                    "verbs": ["list"],
+                },
+            ],
+        )
+        self.assertEqual(binding["kind"], "ClusterRoleBinding")
+        self.assertEqual(
+            binding["roleRef"],
+            {
+                "apiGroup": "rbac.authorization.k8s.io",
+                "kind": "ClusterRole",
+                "name": role["metadata"]["name"],
+            },
+        )
+        self.assertEqual(
+            binding["subjects"],
+            [
+                {
+                    "kind": "ServiceAccount",
+                    "name": "platform-observer",
+                    "namespace": "personal-cloud",
+                }
+            ],
+        )
+        runtime = prepare.render(ROOT, SHA, IMAGES)["items"]
+        self.assertFalse(
+            any(
+                item["kind"] in {"ClusterRole", "ClusterRoleBinding"}
+                for item in runtime
+            )
+        )
+
     def test_credentials_are_owner_only_and_precisely_scoped(self):
         path, value = self.private()
         allowed = prepare.allowed_keys(ROOT)

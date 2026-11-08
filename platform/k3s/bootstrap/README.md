@@ -9,6 +9,7 @@ receive Kubernetes credentials or apply these RBAC, volume or Secret resources.
 | --- | --- | --- |
 | `platform-controller` | configured namespace | Deployments, CronJobs, Services and ConfigMaps get/list/create/patch/update; Pods get/list |
 | `platform-observer` | configured namespace | Deployments and Pods get/list; pod metrics (`metrics.k8s.io`) list |
+| `platform-observer` | all namespaces | Deployments, Pods and pod metrics (`metrics.k8s.io`) list only |
 | `platform-observer` | cluster | Nodes get/list only |
 
 Neither identity can read Secrets, create tokens, exec into Pods, change RBAC, delete resources,
@@ -17,6 +18,11 @@ alone do not prove a release. Namespace-scoped workload writes are powerful: the
 proto admission validates the configured resource names, images and safe Pod specification before
 using its controller identity. RBAC does not independently restrict the names of objects created.
 [Kubernetes RBAC](https://kubernetes.io/docs/reference/access-authn-authz/rbac/) documents this boundary.
+
+The cross-namespace discovery grant lives only in `../observer-discovery/`. Bootstrap includes those
+canonical resources. An existing cluster receives them through the protected native Actions plan/apply
+path; the runtime daemon does not apply foundation RBAC. Its separate role grants no Secrets, logs,
+exec, watch or writes and leaves the existing namespace and node permissions unchanged.
 
 Daemon and observer each use their pod's rotating projected ServiceAccount token.
 No long-lived ServiceAccount Secret or host Kubernetes token is provisioned. The

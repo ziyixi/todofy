@@ -97,6 +97,44 @@ class PrivateReleaseWorkflow(unittest.TestCase):
         upload = self.jobs["private-home-artifact"]["steps"][-1]["with"]
         self.assertEqual(upload["name"], "worker-dashboard-${{ github.sha }}")
 
+    def test_observer_access_precedes_every_selected_vps_publication(self):
+        access = self.jobs["observer-access"]
+        self.assertEqual(set(access["needs"]), {"changes", "gate", "private"})
+        self.assertEqual(access["uses"], "./.github/workflows/private-release.yml")
+        self.assertEqual(access["with"], {
+            "revision": "${{ needs.changes.outputs.private_sha }}",
+            "operation": "k3s-apply",
+            "manifests": "platform/k3s/observer-discovery",
+        })
+        publisher = workflow_data(ROOT / ".github/workflows/private-release.yml")
+        self.assertEqual(access["permissions"], publisher["permissions"])
+        self.assertEqual(publisher["concurrency"]["cancel-in-progress"], "false")
+        self.assertTrue({"fleet-deploy", "observer-access"} <= set(self.jobs["vps-deploy"]["needs"]))
+        self.context.update({
+            "needs.changes.outputs.platform_deploy": "true",
+            "needs.newsletter-deploy.result": "success",
+            "needs.platform-image.result": "success",
+            "needs.vps-bootstrap-bundle.result": "success",
+        })
+        self.assertTrue(self.condition("observer-access"))
+        for status in ("failure", "cancelled", "skipped"):
+            self.context["needs.observer-access.result"] = status
+            self.assertFalse(self.condition("vps-deploy"), status)
+        self.context["needs.observer-access.result"] = "success"
+        self.assertTrue(self.condition("vps-deploy"))
+        for prerequisite in ("changes", "gate", "private"):
+            self.context[f"needs.{prerequisite}.result"] = "failure"
+            self.assertFalse(self.condition("observer-access"), prerequisite)
+            self.context[f"needs.{prerequisite}.result"] = "success"
+        for field, value in (("github.ref", "refs/heads/codex/synthetic"),
+                             ("github.repository", "synthetic/fork"),
+                             ("vars.VPS_DEPLOY_ENABLED", "false"),
+                             ("needs.changes.outputs.platform_deploy", "false")):
+            original = self.context[field]
+            self.context[field] = value
+            self.assertFalse(self.condition("observer-access"), field)
+            self.context[field] = original
+
     def test_existing_home_selection_keeps_its_checked_artifact(self):
         self.context["needs.changes.outputs.dashboard_deploy"] = "true"
         self.context["needs.private.outputs.release_required"] = "false"
@@ -140,6 +178,7 @@ class PrivateReleaseWorkflow(unittest.TestCase):
 
     def test_failed_cancelled_or_skipped_selected_publication_blocks_private(self):
         selected = {
+            "observer-access": "platform_deploy",
             "newsletter-deploy": "newsletter_deploy",
             "platform-image": "platform_publish",
             "codex-gateway-image": "codex_gateway_deploy",

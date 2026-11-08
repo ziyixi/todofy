@@ -69,6 +69,7 @@ def foundation(root, profile):
     for name in (
         "namespace.yaml",
         "rbac.yaml",
+        "../observer-discovery/rbac.yaml",
         "storage.yaml",
     ):
         items.extend(

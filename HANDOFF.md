@@ -5,6 +5,15 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
+Branch `codex/workload-discovery` adds bounded Fleet discovery from deployment-generated metadata, with an
+independent readiness inventory and cross-namespace resource usage. Old reports and release provenance stay
+compatible. New workloads need no Fleet list edit. Normal main publication waits for the protected observer
+access job and the Fleet consumer before rolling out the observer. Local Fleet, observer, declaration,
+contract and repository checks passed; independent integration review found no actionable P1/P2 issue.
+Two read-only design consultations informed Pod filtering, budget preservation and access ordering; source and
+wire behavior were independently checked. Pending: complete branch gate, same-source main publication and
+reconciliation, then a fresh real inventory/resource report. Private operating evidence stays in its handoff.
+
 Private application work and publication evidence are tracked only in `private/HANDOFF.md`.
 
 The test suite consolidation landed on main. Its CI gate stopped at the Links backup export CPU check, which

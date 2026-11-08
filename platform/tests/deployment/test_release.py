@@ -16,7 +16,7 @@ from personal_cloud.deployment.admission import (
     AdmissionUnavailable,
 )
 from personal_cloud.deployment.admission import Client as Admission
-from personal_cloud.deployment.resources import Renderer, image
+from personal_cloud.deployment.resources import DISCOVERY_LABEL, Renderer, image
 from personal_cloud.deployment.router import Router
 from personal_cloud.deployment.store import Store
 from personal_cloud.status_daemon.server import Cache, Service, create_app
@@ -515,6 +515,55 @@ class Reconciliation(Fixture, unittest.TestCase):
 
 
 class Rendering(unittest.TestCase):
+    def test_declared_workloads_label_deployments_cronjobs_and_their_pods(self):
+        source = asset()
+        for item in source["items"]:
+            kind = item["kind"]
+            if kind not in {"Deployment", "CronJob"}:
+                continue
+            with self.subTest(kind=kind, name=item["metadata"]["name"]):
+                alias = item["metadata"]["labels"][DISCOVERY_LABEL]
+                self.assertEqual(alias, item["metadata"]["name"])
+                self.assertRegex(alias, r"^[A-Za-z0-9_-]{1,32}$")
+                spec = item["spec"]
+                if kind == "CronJob":
+                    spec = spec["jobTemplate"]["spec"]
+                self.assertEqual(
+                    spec["template"]["metadata"]["labels"][DISCOVERY_LABEL], alias
+                )
+
+        renamed = replace(
+            CONFIG.workloads[0], key="daily-engine", deployment="alternate-newsletter"
+        )
+        config = replace(CONFIG, workloads=(renamed, CONFIG.workloads[1]))
+        targets = (
+            pb.ReleaseTarget(
+                workload_key=renamed.key,
+                source_sha=SHA,
+                image_digest=TARGETS[0].image_digest,
+                request_id=REQUEST,
+            ),
+            TARGETS[1],
+        )
+        rendered = Renderer(config, asset=source).render(targets, IDENTITY)
+        for item in rendered:
+            kind, name = item["kind"], item["metadata"]["name"]
+            if kind not in {"Deployment", "CronJob"}:
+                continue
+            with self.subTest(rendered=name):
+                alias = renamed.key if name == renamed.deployment else name
+                self.assertEqual(item["metadata"]["labels"][DISCOVERY_LABEL], alias)
+                spec = item["spec"]
+                if kind == "CronJob":
+                    spec = spec["jobTemplate"]["spec"]
+                pod = spec["template"]
+                self.assertEqual(pod["metadata"]["labels"][DISCOVERY_LABEL], alias)
+                if kind == "Deployment":
+                    self.assertNotIn(DISCOVERY_LABEL, spec["selector"]["matchLabels"])
+                self.assertEqual(
+                    pod["metadata"]["annotations"]["personal-cloud/source-sha"], SHA
+                )
+
     def test_operational_fields_are_separate_and_bootstrap_defaults_are_preserved(self):
         source = asset()
         rendered = Renderer(CONFIG, asset=source).render(TARGETS, IDENTITY)

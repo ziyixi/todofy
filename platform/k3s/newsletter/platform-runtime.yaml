@@ -2,6 +2,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: platform-runtime
+  labels:
+    fleet.ziyixi.science/workload: platform-runtime
 spec:
   replicas: 1
   strategy:
@@ -13,6 +15,7 @@ spec:
     metadata:
       labels:
         app: platform-runtime
+        fleet.ziyixi.science/workload: platform-runtime
     spec:
       serviceAccountName: platform-controller
       securityContext:

@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it, vi } from 'vitest';
 import type { NewsletterConfigSync } from '@ziyixi/proto/fleet/telemetry/v1/host_report_wire';
 import fixture from '../../../contracts/fleet-report-v1/fixtures/healthy.json';
+import inventoryFixture from '../../../contracts/fleet-report-v1/fixtures/workload_inventory.json';
 import type { Env } from '../src/env.ts';
 import { statusSnapshot } from '../src/health.ts';
 import { handleRequest } from '../src/http.ts';
@@ -206,6 +207,58 @@ describe('metadata report boundary', () => {
   it('rejects duplicate runtime workload aliases', () => {
     const report = { ...fixture, runtime: { ...fixture.runtime, workloads: [...fixture.runtime.workloads, ...fixture.runtime.workloads] } };
     expect(() => read(report)).toThrow('invalid_report');
+  });
+});
+
+describe('independent workload inventory', () => {
+  it('accepts discovered aliases and preserves unknown counts and false probe declarations', () => {
+    const report = read(inventoryFixture);
+    expect(report.workload_inventory).toEqual(inventoryFixture.workload_inventory);
+    expect(reportCodes(report)).toEqual(reportCodes(read()));
+    expect(read().workload_inventory).toBeUndefined();
+  });
+  it('does not change release readiness or alert codes when discovered readiness changes', () => {
+    const inventory = inventoryFixture.workload_inventory;
+    for (const state of ['ready', 'starting', 'stopped', 'degraded', 'unknown']) {
+      const workloads = inventory.workloads.map((item) => ({ ...item, state }));
+      expect(reportCodes(read({ ...inventoryFixture, workload_inventory: { ...inventory, workloads } }))).toEqual([]);
+    }
+    expect(reportCodes(read({ ...inventoryFixture, runtime: null }))).toContain('deployment_pending');
+  });
+  it.each(['observed', 'unavailable', 'truncated'])('accepts an empty %s inventory without inventing rows', (state) => {
+    expect(read({ ...fixture, workload_inventory: { state } }).workload_inventory).toEqual({ state });
+  });
+  it('refuses duplicate and unsorted discovered aliases', () => {
+    const inventory = inventoryFixture.workload_inventory;
+    for (const workloads of [[...inventory.workloads].reverse(), [...inventory.workloads, ...inventory.workloads]]) {
+      expect(() => read({ ...inventoryFixture, workload_inventory: { ...inventory, workloads } })).toThrow('invalid_report');
+    }
+  });
+  it('refuses unsafe aliases, invalid states, missing probe evidence and invalid counts', () => {
+    const observation = inventoryFixture.workload_inventory.workloads[0];
+    if (!observation) throw new Error('missing fixture observation');
+    const invalid = [
+      { ...observation, workload_key: 'namespace/object' },
+      { ...observation, workload_key: 'a'.repeat(33) },
+      { ...observation, state: 'healthy' },
+      { ...observation, readiness_probe: undefined },
+      { ...observation, desired_count: -1 },
+      { ...observation, ready_count: 0.5 },
+      { ...observation, restart_count: 2 ** 31 },
+      { ...observation, namespace: 'not-permitted' },
+    ];
+    for (const item of invalid) {
+      expect(() => read({ ...fixture, workload_inventory: { state: 'observed', workloads: [item] } })).toThrow('invalid_report');
+    }
+    expect(() => read({ ...fixture, workload_inventory: { workloads: [] } })).toThrow('invalid_report');
+    expect(() => read({ ...fixture, workload_inventory: { state: 'healthy' } })).toThrow('invalid_report');
+  });
+  it('accepts sixteen discovered aliases and refuses a seventeenth', () => {
+    const workloads = Array.from({ length: 17 }, (_, index) => ({
+      workload_key: `sample-${String(index).padStart(2, '0')}`, state: 'unknown', readiness_probe: false,
+    }));
+    expect(read({ ...fixture, workload_inventory: { state: 'truncated', workloads: workloads.slice(0, 16) } }).workload_inventory?.workloads).toHaveLength(16);
+    expect(() => read({ ...fixture, workload_inventory: { state: 'truncated', workloads } })).toThrow('invalid_report');
   });
 });
 

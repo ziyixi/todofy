@@ -8,6 +8,8 @@ from ziyixi_proto.platform.runtime.v1 import runtime_pb as pb
 
 from ..status_daemon.config import Configuration
 
+DISCOVERY_LABEL = "fleet.ziyixi.science/workload"
+
 NAMES = {
     ("Deployment", "codex-gateway"),
     ("Service", "codex-gateway"),
@@ -279,6 +281,15 @@ class Renderer:
                 template = item["spec"]
                 if kind == "CronJob":
                     template = template["jobTemplate"]["spec"]
+                alias = (
+                    workload.key
+                    if kind == "Deployment" and name != "newsletter-config-sync"
+                    else name
+                )
+                item["metadata"].setdefault("labels", {})[DISCOVERY_LABEL] = alias
+                template["template"].setdefault("metadata", {}).setdefault(
+                    "labels", {}
+                )[DISCOVERY_LABEL] = alias
                 template["template"].setdefault("metadata", {}).setdefault(
                     "annotations", {}
                 ).update(

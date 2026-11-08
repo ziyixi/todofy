@@ -63,3 +63,13 @@ Observer 的检查随 `//platform:check`；所有固定状态/遥测测试使用
 
 Fleet stores bounded VPS observations and release receipts. Its owner UI is read-only; its independent HMAC identity can only
 submit telemetry. Missing telemetry remains unknown, and process/readiness checks never claim mail or model success.
+
+## 工作负载就绪
+
+“工作负载就绪”独立显示部署声明的公开监控别名、Kubernetes 状态、就绪与期望副本数、重启次数，以及是否声明就绪探针。
+清单最多 16 项，按别名排序；新增声明由 observer 发现，Fleet 无需维护应用列表。报告只含别名、固定状态与数值，
+不含 namespace、Deployment 或 Pod 名称、探测地址及响应内容。
+
+旧报告未提供清单、发现不可用或清单截断时，页面会说明未知范围。缺少计数显示未知；没有声明探针时明确显示
+“未声明就绪探针”。这些观测使用报告时间，发布版本仍由独立的运行时与发布证据核验，既有提醒规则保持不变。
+Fleet 接收端先于新 observer 发布，旧报告继续有效。合同见 [fleet-report-v1](../contracts/fleet-report-v1/README.md)。

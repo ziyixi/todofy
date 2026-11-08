@@ -40,6 +40,7 @@ unittest_test(
     data = [
         "//contracts:fleet-report-v1/fixtures/healthy.json",
         "//contracts:fleet-report-v1/fixtures/node_metrics.json",
+        "//contracts:fleet-report-v1/fixtures/workload_inventory.json",
         "//contracts:fleet-report-v1/fleet-report-v1.schema.json",
     ],
     imports = ["."],

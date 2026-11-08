@@ -41,6 +41,12 @@ export function parseReport(text: string, host: string, epoch: string, now: numb
     report = toWire(HostReportSchema, decoded.message);
     if (!validNewsletter(report.newsletter)) throw new Error('invalid_newsletter_outcomes');
     if (report.metrics && !validMetrics(report.metrics)) throw new Error('invalid_metrics');
+    if (report.workload_inventory) {
+      const keys = (report.workload_inventory.workloads ?? []).map((item) => item.workload_key);
+      if (keys.some((key, index) => index > 0 && key <= (keys[index - 1] ?? ''))) {
+        throw new Error('invalid_workload_inventory');
+      }
+    }
     if (typeof input === 'object' && input !== null && 'configured_daemons' in input) {
       const daemons = report.configured_daemons;
       if (!daemons?.k3s || !daemons.ssh

@@ -2,6 +2,8 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: newsletter-daily
+  labels:
+    fleet.ziyixi.science/workload: newsletter-daily
 spec:
   schedule: 0 7 * * *
   timeZone: America/Los_Angeles
@@ -15,6 +17,9 @@ spec:
       backoffLimit: 0
       activeDeadlineSeconds: 7500
       template:
+        metadata:
+          labels:
+            fleet.ziyixi.science/workload: newsletter-daily
         spec:
           restartPolicy: Never
           automountServiceAccountToken: false

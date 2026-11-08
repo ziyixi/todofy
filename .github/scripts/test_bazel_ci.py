@@ -368,7 +368,7 @@ class BazelCI(unittest.TestCase):
         self.assertEqual(
             [name for name, job in self.jobs.items()
              if job.get("uses") == "./.github/workflows/private-release.yml"],
-            ["private-deploy"],
+            ["observer-access", "private-deploy"],
         )
 
         operations = workflow_data(ROOT / ".github/workflows/private-ops.yml")
@@ -452,10 +452,12 @@ class BazelCI(unittest.TestCase):
         self,
     ):
         for name, job in self.jobs.items():
-            if name == "private-deploy":
+            if name in {"observer-access", "private-deploy"}:
                 self.assertEqual(job["permissions"]["id-token"], "write")
                 self.assertEqual(job["uses"], "./.github/workflows/private-release.yml")
                 self.assertNotIn("steps", job)
+                self.assertIn("github.ref == 'refs/heads/main'", job["if"])
+                self.assertIn("needs.gate.result == 'success'", job["if"])
             else:
                 self.assertNotIn("id-token", job.get("permissions", {}), name)
         publisher = workflow_data(ROOT / ".github/workflows/private-release.yml")

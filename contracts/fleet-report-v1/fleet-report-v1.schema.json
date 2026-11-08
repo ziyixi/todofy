@@ -905,6 +905,74 @@
         }
       },
       "additionalProperties": false
+    },
+    "workload_inventory": {
+      "description": "Independently discovered Kubernetes readiness; absent from older observers, separate from release evidence.",
+      "type": "object",
+      "required": [
+        "state"
+      ],
+      "properties": {
+        "state": {
+          "description": "Whether discovery completed, was unavailable, or exceeded the bounded inventory.",
+          "enum": [
+            "observed",
+            "unavailable",
+            "truncated"
+          ]
+        },
+        "workloads": {
+          "description": "Unique public aliases in ascending order. Missing rows in an incomplete inventory remain unknown.",
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "required": [
+              "workload_key",
+              "state",
+              "readiness_probe"
+            ],
+            "properties": {
+              "workload_key": {
+                "description": "Explicit public alias from deployment metadata, never a namespace or Kubernetes object name.",
+                "type": "string",
+                "pattern": "^(?:[a-z][a-z0-9_-]{0,31})$(?!\\n)"
+              },
+              "state": {
+                "description": "Kubernetes readiness state, independent of provider or business success.",
+                "enum": [
+                  "ready",
+                  "starting",
+                  "stopped",
+                  "degraded",
+                  "unknown"
+                ]
+              },
+              "desired_count": {
+                "description": "Desired replica count; omitted when unreadable.",
+                "type": "integer",
+                "minimum": 0
+              },
+              "ready_count": {
+                "description": "Ready replica count; omitted when unreadable.",
+                "type": "integer",
+                "minimum": 0
+              },
+              "restart_count": {
+                "description": "Sum of observed container restarts; omitted when unreadable.",
+                "type": "integer",
+                "minimum": 0
+              },
+              "readiness_probe": {
+                "description": "Whether the workload declares readiness probes; false does not establish endpoint health.",
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

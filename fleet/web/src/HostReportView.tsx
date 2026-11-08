@@ -3,6 +3,7 @@ import { daemonLabel, label, time } from './format.ts';
 import { Mark } from './Mark.tsx';
 import { RuntimeView } from './RuntimeView.tsx';
 import { NewsletterConfigView } from './NewsletterConfigView.tsx';
+import { WorkloadInventoryView } from './WorkloadInventoryView.tsx';
 
 const CATEGORY_NAMES: Record<string, string> = {
   interrupted_activities: '运行中断', packets: '采编记录',
@@ -39,6 +40,10 @@ export function HostReportView({ report, now }: { report: HostReport; now: numbe
           </ul>
         </section>
       </div>
+      <section>
+        <h2>工作负载就绪</h2>
+        <WorkloadInventoryView inventory={report.workload_inventory} />
+      </section>
       <section>
         <h2>发布与运行时</h2>
         <RuntimeView runtime={report.runtime} />

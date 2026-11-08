@@ -309,6 +309,11 @@ class ObserverTests(unittest.TestCase):
             patch.object(collector, "node_metrics", return_value=None),
             patch.object(
                 collector,
+                "discover",
+                return_value=({"state": "observed", "workloads": []}, []),
+            ),
+            patch.object(
+                collector,
                 "systemd_snapshot",
                 return_value={
                     name: {"state": "active"}

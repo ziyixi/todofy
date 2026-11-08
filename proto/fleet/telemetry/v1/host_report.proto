@@ -136,8 +136,47 @@ message HostReport {
   }];
   // Node resource counters and gauges; absent from older observers and when the kernel files are unreadable.
   NodeMetrics metrics = 17;
+  // Independently discovered Kubernetes readiness; absent from older observers, separate from release evidence.
+  optional WorkloadInventory workload_inventory = 18;
   reserved 12, 13;
   reserved "desired_sha", "deployment_ready";
+}
+// Bounded readiness observation of workloads that opt into monitoring through deployment metadata.
+message WorkloadInventory {
+  // Whether discovery completed, was unavailable, or exceeded the bounded inventory.
+  string state = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).allowed = "observed",
+    (common.wire.v1.field).allowed = "unavailable",
+    (common.wire.v1.field).allowed = "truncated"
+  ];
+  // Unique public aliases in ascending order. Missing rows in an incomplete inventory remain unknown.
+  repeated WorkloadObservation workloads = 2 [(common.wire.v1.field).max_items = 16];
+}
+// Kubernetes process and readiness counts only; no release provenance or endpoint health claim.
+message WorkloadObservation {
+  // Explicit public alias from deployment metadata, never a namespace or Kubernetes object name.
+  string workload_key = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).format = "Code"
+  ];
+  // Kubernetes readiness state, independent of provider or business success.
+  string state = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).allowed = "ready",
+    (common.wire.v1.field).allowed = "starting",
+    (common.wire.v1.field).allowed = "stopped",
+    (common.wire.v1.field).allowed = "degraded",
+    (common.wire.v1.field).allowed = "unknown"
+  ];
+  // Desired replica count; omitted when unreadable.
+  optional int32 desired_count = 3 [(common.wire.v1.field).minimum = 0];
+  // Ready replica count; omitted when unreadable.
+  optional int32 ready_count = 4 [(common.wire.v1.field).minimum = 0];
+  // Sum of observed container restarts; omitted when unreadable.
+  optional int32 restart_count = 5 [(common.wire.v1.field).minimum = 0];
+  // Whether the workload declares readiness probes; false does not establish endpoint health.
+  bool readiness_probe = 6 [(google.api.field_behavior) = REQUIRED];
 }
 // Raw node readings. Cumulative counters are doubles because the wire profile has no 64-bit integers;
 // every integral value below 2^53 is exact. Fleet derives rates from two consecutive reports of one boot.

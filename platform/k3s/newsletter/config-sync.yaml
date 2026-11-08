@@ -2,6 +2,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: newsletter-config-sync
+  labels:
+    fleet.ziyixi.science/workload: newsletter-config-sync
 spec:
   replicas: 1
   strategy:
@@ -13,6 +15,7 @@ spec:
     metadata:
       labels:
         app: newsletter-config-sync
+        fleet.ziyixi.science/workload: newsletter-config-sync
     spec:
       automountServiceAccountToken: false
       securityContext:

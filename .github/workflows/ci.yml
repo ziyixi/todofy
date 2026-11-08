@@ -450,9 +450,40 @@ jobs:
           platform-image: ${{ needs.platform-image.outputs.image }}
           codex-gateway-image: ${{ needs.codex-gateway-image.outputs.image }}
 
+  observer-access:
+    name: Observer workload access
+    needs: [changes, gate, private]
+    if: >-
+      ${{ !cancelled()
+      && github.repository == 'ziyixi/todofy'
+      && github.ref == 'refs/heads/main'
+      && needs.changes.result == 'success'
+      && needs.gate.result == 'success'
+      && needs.private.result == 'success'
+      && needs.changes.outputs.platform_deploy == 'true'
+      && vars.VPS_DEPLOY_ENABLED == 'true' }}
+    permissions:
+      contents: read
+      checks: read
+      packages: write
+      deployments: write
+      id-token: write
+    uses: ./.github/workflows/private-release.yml
+    with:
+      revision: ${{ needs.changes.outputs.private_sha }}
+      operation: k3s-apply
+      manifests: platform/k3s/observer-discovery
+    secrets:
+      private_ssh_key: ${{ secrets.TODOFY_PRIVATE_SSH_KEY }}
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      INFRA_STATE_PASSPHRASE: ${{ secrets.INFRA_STATE_PASSPHRASE }}
+      INFRA_TFVARS: ${{ secrets.INFRA_TFVARS }}
+      PLATFORM_ACCESS_CLIENT_ID: ${{ secrets.PLATFORM_ACCESS_CLIENT_ID }}
+      PLATFORM_ACCESS_CLIENT_SECRET: ${{ secrets.PLATFORM_ACCESS_CLIENT_SECRET }}
+
   vps-deploy:
     name: VPS deploy
-    needs: [changes, newsletter-deploy, platform-image, vps-bootstrap-bundle, fleet-deploy, gate, model-router-deploy]
+    needs: [changes, newsletter-deploy, platform-image, vps-bootstrap-bundle, fleet-deploy, observer-access, gate, model-router-deploy]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
@@ -463,6 +494,7 @@ jobs:
           && needs.newsletter-deploy.result == 'success' && needs.platform-image.result == 'success'
           && needs.vps-bootstrap-bundle.result == 'success'))
       && (needs.fleet-deploy.result == 'success' || needs.fleet-deploy.result == 'skipped')
+      && needs.observer-access.result == 'success'
       && (needs.model-router-deploy.result == 'success' || needs.changes.outputs.model_router_deploy != 'true')
       && needs.gate.result == 'success'
       && github.ref == 'refs/heads/main'
@@ -576,7 +608,7 @@ jobs:
 
   private-deploy:
     name: Private deploy
-    needs: [changes, gate, private, newsletter-deploy, platform-image, codex-gateway-image, vps-bootstrap-bundle, vps-deploy, codex-gateway-deploy, todofy-deploy, mail-hero-deploy, links-deploy, tasks-deploy, watch-deploy, mailsort-deploy, recall-deploy, fleet-deploy, model-router-deploy, personal-mcp-deploy, newsletter-console-deploy, storage-deploy, website-deploy, website-relay-deploy]
+    needs: [changes, gate, private, observer-access, newsletter-deploy, platform-image, codex-gateway-image, vps-bootstrap-bundle, vps-deploy, codex-gateway-deploy, todofy-deploy, mail-hero-deploy, links-deploy, tasks-deploy, watch-deploy, mailsort-deploy, recall-deploy, fleet-deploy, model-router-deploy, personal-mcp-deploy, newsletter-console-deploy, storage-deploy, website-deploy, website-relay-deploy]
     if: >-
       ${{ !cancelled()
       && needs.changes.result == 'success'
@@ -584,6 +616,7 @@ jobs:
       && needs.private.result == 'success'
       && !contains(needs.*.result, 'failure')
       && !contains(needs.*.result, 'cancelled')
+      && (needs.observer-access.result == 'success' || needs.changes.outputs.platform_deploy != 'true' || vars.VPS_DEPLOY_ENABLED != 'true')
       && (needs.newsletter-deploy.result == 'success' || needs.changes.outputs.newsletter_deploy != 'true')
       && (needs.platform-image.result == 'success' || needs.changes.outputs.platform_publish != 'true')
       && (needs.codex-gateway-image.result == 'success' || needs.changes.outputs.codex_gateway_deploy != 'true')

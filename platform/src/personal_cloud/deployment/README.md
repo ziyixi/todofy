@@ -56,6 +56,13 @@ relinquishes it, preserving suspension throughout the first release. Each releas
 `phase=applying` immediately after its new manifest; activation uses the same operational manager.
 The observer's enabled state remains in its canonical manifest.
 
+Deployments and CronJobs declare their Fleet alias with `fleet.ziyixi.science/workload` on both
+the resource and its Pod template. Primary Deployments use the configured workload key; the config
+sync Deployment and CronJobs use their existing resource names. These aliases fit the 32-character
+safe-alias contract. Discovery reads these declarations across namespaces, so a newly declared
+service does not require a separate Fleet endpoint registry. Labels do not alter workload selectors
+or release provenance annotations.
+
 A lost resume response can mean the new service already accepts work. A late failure therefore
 tries to suspend further cron triggers, reports the actual admission state and remains held. It
 does not invent a closed gate, forcibly reopen a gate, or override another drain operation. Explicit

@@ -36,6 +36,18 @@ describe('Fleet owner page', () => {
     expect(screen.getByRole('button', { name: '刷新状态' })).toBeVisible();
     expect(screen.queryByText('进程健康')).toBeNull();
   });
+  it('shows discovered readiness before independent release evidence', async () => {
+    const inventory = { state: 'observed', workloads: [
+      { workload_key: 'sample-api', state: 'ready', desired_count: 1, ready_count: 1, restart_count: 0, readiness_probe: false },
+    ] };
+    show({ ...BASE, freshness: 'fresh', report: { ...fixture, workload_inventory: inventory, runtime: null }, receive_time: '2026-10-03T00:00:00Z' });
+    const heading = await screen.findByRole('heading', { name: '工作负载就绪' });
+    const section = heading.closest('section') as HTMLElement;
+    expect(within(section).getByRole('rowheader', { name: 'sample-api' })).toBeVisible();
+    expect(within(section).getByText('未声明就绪探针')).toBeVisible();
+    expect(section.nextElementSibling).toContainElement(screen.getByRole('heading', { name: '发布与运行时' }));
+    expect(section.nextElementSibling).toHaveTextContent('运行时核验：未知');
+  });
   it('marks old observations and shows desired and actual identities separately', async () => {
     const report = structuredClone(fixture);
     const workload = report.runtime.workloads[0];

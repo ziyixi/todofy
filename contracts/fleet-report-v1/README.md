@@ -31,6 +31,20 @@ Exactly k3s/cloudflared/ssh aliases are required; cloudflared_platform is option
 configured. Kubernetes state, readiness, daemon state and Newsletter process/drain state are distinct. None proves
 Codex, Notion or email success. `unknown_count` means provider outcomes need reconciliation, not a retry permission.
 
+Optional `workload_inventory` reports Kubernetes readiness for deployments that declare a public monitoring alias.
+It is independent of `runtime.workloads`: discovering a ready workload supplies no release identity, daemon ACK or
+business result and changes no release or alert calculation. The report's `observation_time` applies to this inventory.
+`state` is `observed` after a complete discovery, `unavailable` when it could not be read, or `truncated` when the bounded
+discovery is incomplete. A missing inventory from an older observer remains unknown. An empty `observed` inventory
+means no declared workload was found; `unavailable` and `truncated` never establish that an absent workload is healthy.
+
+Each of at most 16 rows has a unique public `workload_key`, sorted in ascending order and matching the existing
+32-character safe alias format. Rows carry `ready`, `starting`, `stopped`, `degraded` or `unknown`, optional nonnegative
+32-bit desired/ready/restart counts, and a required `readiness_probe` boolean. Missing counts remain unknown.
+`readiness_probe:false` means no readiness probe was declared; a ready Pod without a probe does not prove endpoint
+health. Namespace, deployment and Pod names, URLs, probe bodies and response content are never transmitted.
+`workload_inventory.json` is the new synthetic fixture; existing fixtures remain frozen.
+
 Optional `metrics` carries numbers only: cumulative CPU milliseconds from `/proc/stat`, load averages,
 memory and swap bytes (available memory includes the ZFS ARC above `c_min`), statvfs of fixed filesystem roles
 (`root`, `k3s`, `state`), summed byte counters of physical

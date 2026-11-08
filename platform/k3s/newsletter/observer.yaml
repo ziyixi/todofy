@@ -2,6 +2,8 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: platform-observer
+  labels:
+    fleet.ziyixi.science/workload: platform-observer
 spec:
   schedule: '*/5 * * * *'
   timeZone: Etc/UTC
@@ -19,6 +21,7 @@ spec:
         metadata:
           labels:
             app: platform-observer
+            fleet.ziyixi.science/workload: platform-observer
         spec:
           serviceAccountName: platform-observer
           automountServiceAccountToken: false

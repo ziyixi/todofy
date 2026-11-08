@@ -3,4 +3,5 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - rbac.yaml
+  - ../observer-discovery
   - storage.yaml

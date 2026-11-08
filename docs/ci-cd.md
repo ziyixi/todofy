@@ -91,6 +91,10 @@ bazel query 'tests(@private//:check)' 2>/dev/null | sed 's/^@*//' | while read -
   printf '%s %s\n' "$(printf '%s' "$label" | shasum -a 256 | cut -c1-10)" "$label"; done
 ```
 
+For each selected VPS publication, the observer access job first checks and applies the canonical read-only
+discovery grants through native Actions. The VPS rollout waits for both that job and the Fleet consumer, so a new
+observer does not arrive before its receiver or access is ready. A refused access plan preserves the running version.
+
 Normal private publication is part of the main workflow. The pinned private check uses the same Target Determinator
 and its release dependency graph to select it; documentation changes do not select publication. After the gate and
 selected public publications pass, [Private release](../.github/workflows/private-release.yml) runs, then Home

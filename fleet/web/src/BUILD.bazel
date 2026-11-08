@@ -66,6 +66,8 @@ copied_source_files(
         "RuntimeView.tsx",
         "TimeChart.test.tsx",
         "TimeChart.tsx",
+        "WorkloadInventoryView.test.tsx",
+        "WorkloadInventoryView.tsx",
         "api.ts",
         "chart.test.ts",
         "chart.ts",
@@ -156,12 +158,23 @@ ts_source_library(
 )
 
 ts_source_library(
+    name = "src__WorkloadInventoryView",
+    srcs = [":WorkloadInventoryView.tsx"],
+    deps = [
+        ":src__Mark",
+        "//fleet/web:node_modules/react",
+        "//proto/fleet/telemetry/v1:ts",
+    ],
+)
+
+ts_source_library(
     name = "src__HostReportView",
     srcs = [":HostReportView.tsx"],
     deps = [
         ":src__Mark",
         ":src__NewsletterConfigView",
         ":src__RuntimeView",
+        ":src__WorkloadInventoryView",
         ":src__format",
         "//fleet/web:node_modules/react",
         "//proto/fleet/telemetry/v1:ts",
@@ -260,6 +273,7 @@ js_library(
         ":src__ResourcesView",
         ":src__RuntimeView",
         ":src__TimeChart",
+        ":src__WorkloadInventoryView",
         ":src__api",
         ":src__chart",
         ":src__deployment",
@@ -299,6 +313,7 @@ proto_vitest_test(
         ":src__ResourcesView",
         ":src__RuntimeView",
         ":src__TimeChart",
+        ":src__WorkloadInventoryView",
         ":src__api",
         ":src__chart",
         ":src__deployment",
@@ -312,6 +327,25 @@ proto_vitest_test(
         "//fleet/web:node_modules/vitest",
         "//proto/fleet/ui/v1:ts",
         "//proto/ts:wire-json",
+    ],
+)
+
+proto_vitest_test(
+    name = "src__WorkloadInventoryView_test",
+    config = "//fleet/web:test_config",
+    data = COMMON_TEST_DATA,
+    project = "fleet/web",
+    runner = vitest.vitest_test,
+    tags = ["unit"],
+    tests = [":WorkloadInventoryView.test.tsx"],
+    deps = [
+        ":src__Mark",
+        ":src__WorkloadInventoryView",
+        ":src__format",
+        "//fleet/web:node_modules/@testing-library/jest-dom",
+        "//fleet/web:node_modules/@testing-library/react",
+        "//fleet/web:node_modules/vitest",
+        "//proto/fleet/telemetry/v1:ts",
     ],
 )
 

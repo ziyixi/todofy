@@ -60,3 +60,6 @@ The owner-authorized native Actions connection manages cluster-scoped Kubernetes
 resources. Its short-lived CI identity is separate from the namespace-scoped runtime daemon and business Pods.
 Existing Newsletter and gateway releases retain their drain and physical verification contracts. The private
 runbook owns the initial trust handoff and connection checks.
+
+Normal main publication applies the canonical observer discovery grants before the VPS rollout. Fleet's
+consumer publishes first; the observer then reports labelled workloads across namespaces using read-only lists.

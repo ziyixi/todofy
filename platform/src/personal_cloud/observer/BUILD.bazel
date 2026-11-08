@@ -31,6 +31,7 @@ py_library(
     srcs = ["collector.py"],
     imports = ["../.."],
     deps = [
+        ":discovery",
         ":metrics",
         ":newsletter_outcomes",
         ":package",
@@ -41,6 +42,19 @@ py_library(
         "//proto:python_runtime",
         "//proto/fleet/telemetry/v1:python",
         "//proto/platform/runtime/v1:python",
+    ],
+)
+
+py_library(
+    name = "discovery",
+    srcs = ["discovery.py"],
+    imports = ["../.."],
+    deps = [
+        ":metrics",
+        ":package",
+        "//platform/src/personal_cloud/deployment:kubernetes",
+        "@python_deps//kubernetes",
+        "@python_deps//urllib3",
     ],
 )
 
@@ -130,6 +144,7 @@ py_library(
     deps = [
         ":cli",
         ":collector",
+        ":discovery",
         ":metrics",
         ":newsletter_outcomes",
         ":package",

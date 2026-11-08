@@ -11,6 +11,47 @@ py_library(
 )
 
 unittest_test(
+    name = "observer_test_collector",
+    size = "small",
+    srcs = ["test_collector.py"],
+    data = [
+        "//:python_repository_test_data",
+        "//platform:pyproject.toml",
+    ],
+    imports = [
+        "..",
+        "../..",
+        "../../src",
+    ],
+    modules = ["tests.observer.test_collector"],
+    deps = [
+        ":package",
+        "//platform/src/personal_cloud/observer:collector",
+        "//platform/src/personal_cloud/observer:package",
+        "//proto:python_runtime",
+        "//proto/fleet/telemetry/v1:python",
+    ],
+)
+
+unittest_test(
+    name = "observer_test_discovery",
+    size = "small",
+    srcs = ["test_discovery.py"],
+    imports = [
+        "..",
+        "../..",
+        "../../src",
+    ],
+    modules = ["tests.observer.test_discovery"],
+    deps = [
+        ":package",
+        "//platform/src/personal_cloud/observer:discovery",
+        "//platform/src/personal_cloud/observer:metrics",
+        "//platform/src/personal_cloud/observer:package",
+    ],
+)
+
+unittest_test(
     name = "observer_test_cli",
     size = "small",
     srcs = ["test_cli.py"],
@@ -176,6 +217,8 @@ test_suite(
     name = "tests",
     tests = [
         ":observer_test_cli",
+        ":observer_test_collector",
+        ":observer_test_discovery",
         ":observer_test_metrics",
         ":observer_test_newsletter_outcomes",
         ":observer_test_observer",

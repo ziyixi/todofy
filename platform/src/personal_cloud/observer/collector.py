@@ -9,11 +9,16 @@ import re
 import urllib.parse
 import uuid
 
-from ziyixi_proto.fleet.telemetry.v1.host_report_pb import HostReport, NodeMetrics
+from ziyixi_proto.fleet.telemetry.v1.host_report_pb import (
+    HostReport,
+    NodeMetrics,
+    WorkloadInventory,
+)
 from ziyixi_proto.platform.runtime.v1.runtime_pb import NodeStatus
 from ziyixi_proto.wire_json import from_wire, to_wire
 
 from ..deployment.kubernetes import Client, DependencyUnavailable
+from .discovery import discover
 from .metrics import host_memory, node_metrics
 from .newsletter_outcomes import configuration, outcomes
 from .provenance import source_sha
@@ -223,10 +228,10 @@ def resource_percentages() -> tuple[float | None, float | None]:
     return disk, memory
 
 
-def telemetry(namespace: str) -> dict[str, object] | None:
+def telemetry(namespace: str, pods: object = None) -> dict[str, object] | None:
     """Node metrics that already meet the strict contract; any failure leaves the heartbeat without them."""
     try:
-        value = node_metrics(namespace)
+        value = node_metrics(namespace, pods)
         if value is not None:
             from_wire(NodeMetrics, value, strict=True)
         return value
@@ -235,7 +240,13 @@ def telemetry(namespace: str) -> dict[str, object] | None:
 
 
 def observe(env: dict[str, str], sequence: int) -> bytes:
+    namespace = env.get("FLEET_KUBE_NAMESPACE", "personal-cloud")
     cluster = kube(env)
+    try:
+        workload_inventory, pods = discover(namespace)
+        from_wire(WorkloadInventory, workload_inventory, strict=True)
+    except Exception:  # noqa: BLE001 — optional discovery never costs the heartbeat.
+        workload_inventory, pods = {"state": "unavailable", "workloads": []}, []
     disk, memory = resource_percentages()
     daemons = systemd_snapshot()
     selected = {
@@ -261,7 +272,8 @@ def observe(env: dict[str, str], sequence: int) -> bytes:
         "memory_used_percent": memory,
         "runtime": runtime_status(env),
         "observer_source_sha": source_sha(),
-        "metrics": telemetry(env.get("FLEET_KUBE_NAMESPACE", "personal-cloud")),
+        "metrics": telemetry(namespace, pods),
+        "workload_inventory": workload_inventory,
     }
     for key in ("disk_used_percent", "memory_used_percent", "metrics"):
         if value[key] is None:
@@ -271,7 +283,13 @@ def observe(env: dict[str, str], sequence: int) -> bytes:
             key: item for key, item in value[section].items() if item is not None
         }
     data = _encode(value)
-    # Telemetry never costs the heartbeat its size budget: workloads go first, then all metrics.
+    # Optional observations never cost the heartbeat its size budget.
+    if len(data) > 16_384:
+        value["workload_inventory"] = {"state": "truncated", "workloads": []}
+        data = _encode(value)
+        if len(data) > 16_384:
+            value.pop("workload_inventory")
+            data = _encode(value)
     if len(data) > 16_384 and "metrics" in value:
         value["metrics"].pop("workloads", None)
         data = _encode(value)

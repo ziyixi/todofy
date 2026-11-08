@@ -51,9 +51,14 @@ hdr_size                        4    50000000
 BOOT = "5f0c8a52-7d1e-4b8a-9c3f-2a6b1d4e8f70"
 
 
-def pod(labels, *containers):
+def pod(labels, *containers, namespace="personal-cloud", name=None):
     return {
-        "metadata": {"name": "private-pod-name-7f9c", "labels": labels},
+        "metadata": {
+            "name": name
+            or "private-pod-name-" + labels.get(metrics.WORKLOAD_LABEL, "other"),
+            "namespace": namespace,
+            "labels": labels,
+        },
         "containers": [
             {"name": "main", "usage": {"cpu": cpu, "memory": memory}}
             for cpu, memory in containers
@@ -172,14 +177,20 @@ class Workloads(unittest.TestCase):
     def test_usage_sums_by_workload_and_cronjob_without_pod_names(self):
         value = {
             "items": [
-                pod({"app": "newsletter"}, ("1000000n", "100Mi"), ("500000n", "28Mi")),
-                pod({"app": "newsletter"}, ("1m", "1Mi")),
                 pod(
-                    {"batch.kubernetes.io/job-name": "newsletter-daily-29885160"},
+                    {metrics.WORKLOAD_LABEL: "newsletter"},
+                    ("1000000n", "100Mi"),
+                    ("500000n", "28Mi"),
+                ),
+                pod(
+                    {metrics.WORKLOAD_LABEL: "newsletter"},
+                    ("1m", "1Mi"),
+                    name="another-private-pod",
+                ),
+                pod(
+                    {metrics.WORKLOAD_LABEL: "newsletter-daily"},
                     ("20m", "64Mi"),
                 ),
-                pod({"other": "x"}, ("5m", "1Mi")),
-                pod({"app": "Bad/Key"}, ("5m", "1Mi")),
             ]
         }
         usage = metrics.workload_usage(value)
@@ -203,7 +214,10 @@ class Workloads(unittest.TestCase):
     def test_usage_is_bounded_and_one_malformed_item_discards_the_reading(self):
         many = {
             "items": [
-                pod({"app": f"app-{index:02d}"}, ("1m", f"{index + 1}Mi"))
+                pod(
+                    {metrics.WORKLOAD_LABEL: f"app-{index:02d}"},
+                    ("1m", f"{index + 1}Mi"),
+                )
                 for index in range(20)
             ]
         }
@@ -212,29 +226,91 @@ class Workloads(unittest.TestCase):
         self.assertNotIn("app-00", [item["workload_key"] for item in usage])
         self.assertEqual(usage, sorted(usage, key=lambda item: item["workload_key"]))
         self.assertEqual(metrics.workload_usage({"items": [{"metadata": {}}]}), [])
-        broken = pod({"app": "newsletter"}, ("1m", "lots"))
+        broken = pod({metrics.WORKLOAD_LABEL: "newsletter"}, ("1m", "lots"))
         self.assertEqual(metrics.workload_usage({"items": [broken]}), [])
         self.assertEqual(metrics.workload_usage({"items": [{}] * 65}), [])
         self.assertEqual(metrics.workload_usage(None), [])
 
-    def test_metrics_api_is_namespaced_bounded_and_unavailable_is_empty(self):
+    def test_usage_joins_selected_pods_across_namespaces_and_refuses_alias_collisions(
+        self,
+    ):
+        selected = [
+            pod(
+                {metrics.WORKLOAD_LABEL: "new-service"},
+                ("10m", "2Mi"),
+                namespace="private-a",
+            ),
+            pod({metrics.WORKLOAD_LABEL: "newsletter"}, ("20m", "3Mi")),
+        ]
+        # PodMetrics need not repeat Pod labels. An unrelated Pod cannot invent a monitored row.
+        readings = json.loads(json.dumps(selected))
+        for reading in readings:
+            reading["metadata"].pop("labels")
+        readings.append(pod({metrics.WORKLOAD_LABEL: "unselected"}, ("1", "1Gi")))
+        usage = metrics.workload_usage({"items": readings}, selected)
+        self.assertEqual(
+            [row["workload_key"] for row in usage], ["new-service", "newsletter"]
+        )
+        self.assertNotIn("private-a", json.dumps(usage))
+        self.assertEqual(metrics.workload_usage(None, selected), [])
+        self.assertEqual(
+            metrics.workload_usage(
+                {"metadata": {"continue": "next"}, "items": readings}, selected
+            ),
+            [],
+        )
+        selected.append(
+            pod(
+                {metrics.WORKLOAD_LABEL: "new-service"},
+                ("1m", "1Mi"),
+                namespace="private-b",
+            )
+        )
+        self.assertEqual(metrics.workload_usage({"items": readings}, selected), [])
+
+    def test_terminating_and_terminal_selected_pods_cannot_contribute_usage(self):
+        current = pod({metrics.WORKLOAD_LABEL: "newsletter"}, ("10m", "2Mi"))
+        old = pod({metrics.WORKLOAD_LABEL: "newsletter"}, ("1", "1Gi"), name="old-pod")
+        old["metadata"]["deletionTimestamp"] = "2026-11-08T00:00:00Z"
+        completed = pod(
+            {metrics.WORKLOAD_LABEL: "newsletter"},
+            ("1", "1Gi"),
+            namespace="another-space",
+        )
+        completed["status"] = {"phase": "Succeeded"}
+        selected = [old, *[completed] * 64, current]
+        usage = metrics.workload_usage({"items": [old, completed, current]}, selected)
+        self.assertEqual(
+            usage,
+            [
+                {
+                    "workload_key": "newsletter",
+                    "cpu_cores": 0.01,
+                    "memory_bytes": 2 * 2**20,
+                }
+            ],
+        )
+
+    def test_metrics_api_is_labelled_across_namespaces_and_unavailable_is_empty(self):
         with (
             patch.object(metrics.sdk, "ApiClient") as api,
             patch.object(metrics.MetricsClient, "_configuration"),
         ):
             api.return_value.call_api.return_value = {"items": []}
-            self.assertEqual(metrics.workloads("personal-cloud"), [])
+            selected = [pod({metrics.WORKLOAD_LABEL: "newsletter"}, ("1m", "1Mi"))]
+            self.assertEqual(metrics.workloads("personal-cloud", selected), [])
             call = api.return_value.call_api.call_args
             self.assertEqual(
                 call.args,
-                ("/apis/metrics.k8s.io/v1beta1/namespaces/{namespace}/pods", "GET"),
+                ("/apis/metrics.k8s.io/v1beta1/pods", "GET"),
             )
+            self.assertNotIn("path_params", call.kwargs)
             self.assertEqual(
-                call.kwargs["path_params"], {"namespace": "personal-cloud"}
+                call.kwargs["query_params"],
+                [("labelSelector", metrics.WORKLOAD_LABEL), ("limit", 64)],
             )
-            self.assertEqual(call.kwargs["query_params"], [("limit", 64)])
             api.return_value.call_api.side_effect = metrics.ApiException(status=403)
-            self.assertEqual(metrics.workloads("personal-cloud"), [])
+            self.assertEqual(metrics.workloads("personal-cloud", selected), [])
             api.return_value.close.assert_called()
 
 
@@ -260,7 +336,7 @@ class NodeReport(unittest.TestCase):
             HOST_MEMINFO=root / "meminfo",
             HOST_NET_DEV=root / "net-dev",
             FILESYSTEMS={"state": root, "root": root / "absent"},
-            workloads=lambda namespace: [],
+            workloads=lambda namespace, pods: [],
         )
 
     def test_node_metrics_is_a_valid_strict_message_and_skips_unreadable_groups(self):
@@ -312,6 +388,11 @@ class NodeReport(unittest.TestCase):
             patch.object(collector, "runtime_status", return_value=None),
             patch.object(
                 collector,
+                "discover",
+                return_value=({"state": "observed", "workloads": []}, []),
+            ),
+            patch.object(
+                collector,
                 "systemd_snapshot",
                 return_value={
                     name: {"state": "active"}
@@ -321,7 +402,7 @@ class NodeReport(unittest.TestCase):
             patch.object(collector, "node_metrics", return_value=None) as read,
         ):
             self.assertNotIn("metrics", json.loads(collector.observe({}, 1)))
-            read.assert_called_once_with("personal-cloud")
+            read.assert_called_once_with("personal-cloud", [])
             fixture = json.loads(
                 (
                     Path(__file__).resolve().parents[3]
@@ -333,7 +414,7 @@ class NodeReport(unittest.TestCase):
                 collector.observe({"FLEET_KUBE_NAMESPACE": "another-cloud"}, 1)
             )
             self.assertEqual(report["metrics"], fixture)
-            read.assert_called_with("another-cloud")
+            read.assert_called_with("another-cloud", [])
 
             # A failed or out-of-contract reading leaves the report without metrics.
             for failure in (

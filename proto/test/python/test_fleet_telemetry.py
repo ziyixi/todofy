@@ -22,6 +22,31 @@ class FleetTelemetry(unittest.TestCase):
         partial["metrics"] = {key: partial["metrics"][key] for key in ("boot_id", "uptime_seconds")}
         self.assertEqual(to_wire(from_wire(HostReport, partial, strict=True).message), partial)
 
+    def test_workload_inventory_round_trip_and_legacy_omission(self):
+        report = self.fixture("workload_inventory")
+        self.assertEqual(to_wire(from_wire(HostReport, report, strict=True).message), report)
+        self.assertFalse(report["workload_inventory"]["workloads"][1]["readiness_probe"])
+        del report["workload_inventory"]
+        self.assertEqual(to_wire(from_wire(HostReport, report, strict=True).message), report)
+
+    def test_workload_inventory_bounds_states_aliases_and_probe_presence(self):
+        def invalid(change):
+            report = self.fixture("workload_inventory")
+            change(report["workload_inventory"])
+            with self.assertRaises(WireJsonError):
+                from_wire(HostReport, report, strict=True)
+
+        invalid(lambda inventory: inventory.pop("state"))
+        invalid(lambda inventory: inventory.update(state="healthy"))
+        invalid(lambda inventory: inventory.update(workloads=inventory["workloads"] * 9))
+        invalid(lambda inventory: inventory["workloads"][0].update(workload_key="namespace/object"))
+        invalid(lambda inventory: inventory["workloads"][0].update(workload_key="a" * 33))
+        invalid(lambda inventory: inventory["workloads"][0].update(state="healthy"))
+        invalid(lambda inventory: inventory["workloads"][0].pop("readiness_probe"))
+        invalid(lambda inventory: inventory["workloads"][0].update(desired_count=-1))
+        invalid(lambda inventory: inventory["workloads"][0].update(ready_count=0.5))
+        invalid(lambda inventory: inventory["workloads"][0].update(restart_count=2**31))
+
     def test_node_metrics_refuse_names_unbounded_lists_and_impossible_values(self):
         def invalid(change):
             report = self.fixture("node_metrics")

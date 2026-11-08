@@ -88,6 +88,7 @@ proto_vitest_test(
     tags = ["unit"],
     tests = [":report.test.ts"],
     deps = COMMON_TEST_DEPS + [
+        "//contracts:fleet-report-v1/fixtures/workload_inventory.json_data",
         "//fleet/worker/src:http",
         "//fleet/worker/src:metrics",
         "//fleet/worker/src:module_group_5",

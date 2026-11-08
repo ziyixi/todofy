@@ -2,6 +2,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: newsletter
+  labels:
+    fleet.ziyixi.science/workload: newsletter
 spec:
   replicas: 1
   strategy:
@@ -13,6 +15,7 @@ spec:
     metadata:
       labels:
         app: newsletter
+        fleet.ziyixi.science/workload: newsletter
     spec:
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 120

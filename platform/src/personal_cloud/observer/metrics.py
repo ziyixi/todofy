@@ -35,6 +35,7 @@ MAX_WORKLOADS = 16
 BOOT_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 PHYSICAL = re.compile(r"(?:en|eth|wl|ww)[a-z0-9]{0,13}")
 WORKLOAD_KEY = re.compile(r"[a-z][a-z0-9_-]{0,31}")
+WORKLOAD_LABEL = "fleet.ziyixi.science/workload"
 CPU_QUANTITY = re.compile(r"([0-9]{1,15})(n|u|m|)")
 MEMORY_QUANTITY = re.compile(r"([0-9]{1,18})(Ki|Mi|Gi|Ti|k|M|G|T|)")
 CPU_SCALE = {"n": 1e-9, "u": 1e-6, "m": 1e-3, "": 1.0}
@@ -219,28 +220,79 @@ def memory_bytes(quantity: object) -> int | None:
 
 
 def workload_key(labels: object) -> str | None:
-    """A Deployment's `app` label, or a CronJob's name from its Job; never the Pod's own name."""
+    """The explicit public discovery alias; never a resource name or an arbitrary app label."""
     if not isinstance(labels, dict):
         return None
-    key = labels.get("app")
-    if key is None:
-        job = labels.get("batch.kubernetes.io/job-name")
-        key = re.sub(r"-[0-9]{1,12}$", "", job) if isinstance(job, str) else None
+    key = labels.get(WORKLOAD_LABEL)
     return key if isinstance(key, str) and WORKLOAD_KEY.fullmatch(key) else None
 
 
-def workload_usage(value: object) -> list[dict[str, object]]:
+def current_pods(pods: list) -> list:
+    """Terminating Pods and completed Jobs no longer contribute current counts or usage."""
+    current = []
+    for pod in pods:
+        metadata = pod.get("metadata") if isinstance(pod, dict) else None
+        status = pod.get("status") if isinstance(pod, dict) else None
+        if isinstance(metadata, dict) and metadata.get("deletionTimestamp") is not None:
+            continue
+        if isinstance(status, dict) and status.get("phase") in {"Succeeded", "Failed"}:
+            continue
+        current.append(pod)
+    return current
+
+
+def pod_aliases(pods: object) -> dict[tuple[str, str], str] | None:
+    """Keep resource identities internal and refuse aliases shared by different namespaces."""
+    if not isinstance(pods, list):
+        return None
+    pods = current_pods(pods)
+    if len(pods) > 64:
+        return None
+    selected = {}
+    namespaces = {}
+    for pod in pods:
+        metadata = pod.get("metadata") if isinstance(pod, dict) else None
+        if not isinstance(metadata, dict):
+            return None
+        key = workload_key(metadata.get("labels"))
+        namespace, name = metadata.get("namespace"), metadata.get("name")
+        if key is None or not isinstance(namespace, str) or not isinstance(name, str):
+            return None
+        if not namespace or not name or (namespace, name) in selected:
+            return None
+        if key in namespaces and namespaces[key] != namespace:
+            return None
+        namespaces[key] = namespace
+        selected[namespace, name] = key
+    return selected
+
+
+def workload_usage(value: object, pods: object = None) -> list[dict[str, object]]:
     """Sum a metrics.k8s.io PodMetricsList by workload; one malformed item discards the reading."""
     items = value.get("items") if isinstance(value, dict) else None
     if not isinstance(items, list) or len(items) > 64:
         return []
+    list_metadata = value.get("metadata", {})
+    if not isinstance(list_metadata, dict) or list_metadata.get("continue"):
+        return []
+    selected = pod_aliases(items if pods is None else pods)
+    if selected is None:
+        return []
     usage: dict[str, list[float]] = {}
+    seen = set()
     for item in items:
         metadata = item.get("metadata") if isinstance(item, dict) else None
         containers = item.get("containers") if isinstance(item, dict) else None
         if not isinstance(metadata, dict) or not isinstance(containers, list):
             return []
-        key = workload_key(metadata.get("labels"))
+        namespace, name = metadata.get("namespace"), metadata.get("name")
+        if not isinstance(namespace, str) or not isinstance(name, str):
+            return []
+        identity = namespace, name
+        if identity in seen:
+            return []
+        seen.add(identity)
+        key = selected.get(identity)
         if key is None:
             continue
         if len(containers) > 16:
@@ -269,7 +321,7 @@ def workload_usage(value: object) -> list[dict[str, object]]:
 
 
 class MetricsClient(Client):
-    """The deployment client's identity and TLS settings, reading only pod metrics of its namespace."""
+    """The deployment client's identity and TLS settings, reading only labelled Pod metrics."""
 
     def pod_metrics(self, *, timeout: float = 8) -> object:
         try:
@@ -277,10 +329,9 @@ class MetricsClient(Client):
                 if self._api is None:
                     self._api = sdk.ApiClient(self._configuration())
                 return self._api.call_api(
-                    "/apis/metrics.k8s.io/v1beta1/namespaces/{namespace}/pods",
+                    "/apis/metrics.k8s.io/v1beta1/pods",
                     "GET",
-                    path_params={"namespace": self.namespace},
-                    query_params=[("limit", 64)],
+                    query_params=[("labelSelector", WORKLOAD_LABEL), ("limit", 64)],
                     header_params={"Accept": "application/json"},
                     response_types_map={200: "object"},
                     auth_settings=["BearerToken"],
@@ -291,20 +342,22 @@ class MetricsClient(Client):
             return None
 
 
-def workloads(namespace: str) -> list[dict[str, object]]:
-    """Empty without metrics-server or without the namespaced `pods.metrics.k8s.io` list grant."""
+def workloads(namespace: str, pods: object) -> list[dict[str, object]]:
+    """Empty without a complete Pod selection, metrics-server or its read-only list grant."""
+    if not pods:
+        return []
     metrics = MetricsClient(
         namespace,
         token_file="/var/run/secrets/kubernetes.io/serviceaccount/token",
         ca_file="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt",
     )
     try:
-        return workload_usage(metrics.pod_metrics())
+        return workload_usage(metrics.pod_metrics(), pods)
     finally:
         metrics.close()
 
 
-def node_metrics(namespace: str) -> dict[str, object] | None:
+def node_metrics(namespace: str, pods: object = None) -> dict[str, object] | None:
     """None when even the boot identity is unreadable; any other unreadable group is left out."""
     boot = (_read(PROC / "sys/kernel/random/boot_id") or "").strip()
     try:
@@ -328,7 +381,7 @@ def node_metrics(namespace: str) -> dict[str, object] | None:
     }
     if filesystems:
         value["filesystems"] = filesystems
-    usage = workloads(namespace)
+    usage = workloads(namespace, pods)
     if usage:
         value["workloads"] = usage
     return value
