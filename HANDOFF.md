@@ -5,17 +5,6 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-Branch `codex/dataset-client-review` adds a generic research dataset Python package with explicit endpoint/key
-inputs and fixed archive installation. DataFrame index, PIT, successful increment checks and nested-cache
-isolation regressions passed with package Bazel/lint and installation checks; two independent review findings
-are fixed and re-reviewed. Public source `6b3b98a0` is pinned in the documentation and private consumer.
-
-The same batch includes the private-output projection of reviewed HTTP dependency category, method, status and
-optional numeric edge code. It prints no response text, addresses or unknown values; successful operations emit
-no error metadata. Fleet's resource note describes automatic workload aggregation. Fourteen workflow boundary
-tests and repository/CI checks passed. Pending: integrated branch/main gates, publication, real notebook acceptance
-and same-source reconciliation. Private implementation and operating evidence stay in its handoff.
-
 Private application work and publication evidence are tracked only in `private/HANDOFF.md`.
 
 The test suite consolidation landed on main. Its CI gate stopped at the Links backup export CPU check, which
@@ -59,17 +48,18 @@ codes generically. It changes no source, so it publishes no service and no priva
 
 - Private source in public CI: every job fetches the pinned private commit through the quiet
   `.github/actions/private-checkout` action and keeps private operation output in a runner-side file, so public logs
-  show only fixed `PRIVATE_*` codes. The scheduled reconcile also compares the private application's live sources with
+  expose only reviewed `PRIVATE_*` codes and bounded fields. The scheduled reconcile also compares the private application's live sources with
   the pinned gitlink (or its newest settled release). Verify after landing: the release, Home and reconcile jobs print
   no checkout subject, and the next scheduled reconcile reports `PRIVATE_REVISION_MATCHES_PIN`.
 
 ## Latest verified release
 
-Main `618866a5` delivered automatic workload discovery, with fresh readiness and resource observations.
-Checked main completion published the remaining private component and Home. Its matching Personal cloud
-reconciliation passed complete resource registration, VPS runtime, infrastructure comparison/routine repair and
-resolved drift. The [November 8 archive](docs/history/handoff-2026-11-08.md) records this closure; private live-source
-and business continuity evidence stay in its own archive. Earlier releases remain in the dated archives.
+Main `0fd0b2d0` delivered the dataset reader, live workload discovery and the private publication correction.
+All selected main publications, the private component and Home succeeded; matching reconciliation passed
+registration, VPS runtime, infrastructure comparison/routine repair and resolved drift. Eleven SDK tests passed
+on an actual Colab CPU runtime with synthetic data, and the live consumer interface was checked. The
+[November 8 archive](docs/history/handoff-2026-11-08.md) records scope and verification; private operating evidence
+stays in its archive. Earlier releases remain in the dated archives.
 
 Shared Worker receipt recovery (`7ef001fe`) adds fixed failure stages, exact committed-result readback and a
 guarded receipt-only path without application redeployment. The old statusless Tasks receipt remains historical
