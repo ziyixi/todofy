@@ -3,10 +3,10 @@
 Install directly into Google Colab or any Python 3.11+ environment:
 
 ```bash
-pip install -q "https://github.com/ziyixi/todofy/archive/REVIEWED_SOURCE_SHA.zip#subdirectory=packages/research-datasets"
+pip install -q "https://github.com/ziyixi/todofy/archive/6b3b98a045d19af3bde99e795e9a63bde13f0177.zip#subdirectory=packages/research-datasets"
 ```
 
-Use the reviewed source commit in place of `REVIEWED_SOURCE_SHA`. The archive installation needs no GitHub login.
+This command pins the reviewed source commit. The archive installation needs no GitHub login.
 The client reads immutable datasets and verifies downloaded parts against their frozen manifest.
 
 Provide your complete read endpoint, dataset UUID and bearer key. The endpoint and UUID below are synthetic.
