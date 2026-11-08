@@ -119,7 +119,7 @@ function NodeCharts({ grid, range, node }: { grid: Grid; range: RangeName; node:
       </section>
       <section className="workloads" aria-labelledby="workloads-title">
         <h2 id="workloads-title">工作负载</h2>
-        <p className="scope-note">按 Pod 的 app 标签或 CronJob 汇总；同一指标共用纵轴，便于比较。</p>
+        <p className="scope-note">自动汇总各工作负载的用量；同一指标共用纵轴，便于比较。</p>
         {workloads.length ? (
           <>
             <Multiples title="CPU（核）" metric="workload_cpu_cores" unit="cores" grid={grid} range={range} labels={workloads} />

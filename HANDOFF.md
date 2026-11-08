@@ -5,33 +5,11 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-Branch `codex/workload-discovery` adds bounded Fleet discovery from deployment-generated metadata, with an
-independent readiness inventory and cross-namespace resource usage. Old reports and release provenance stay
-compatible. New workloads need no Fleet list edit. Normal main publication waits for the protected observer
-access job and the Fleet consumer before rolling out the observer. Local Fleet, observer, declaration,
-contract and repository checks passed; independent integration review found no actionable P1/P2 issue.
-Two read-only design consultations informed Pod filtering, budget preservation and access ordering; source and
-wire behavior were independently checked. Pending: complete branch gate, same-source main publication and
-reconciliation, then a fresh real inventory/resource report. Private operating evidence stays in its handoff.
-
-Follow-up branch `codex/native-cluster-tools` removes build-tool setup from the three native cluster operations.
-The first main access step stopped before cluster writes when its unnecessary Bazel download returned HTTP 504;
-the underlying download-service cause remains unconfirmed. Native entrypoint imports were verified with site
-packages, subprocesses and network calls disabled. The fix retains required native tools, source/green gates
-and all non-cluster preparation, with workflow regressions and a read-only design review. Roll forward through
-new branch/main gates; do not treat the earlier partial publication as completed VPS discovery.
-It also connects the independent gateway release to its actual deployment declaration/renderer through the
-deployment tools. Preserve the existing backend/Router/VPS order; a whole-workflow dependency check prevents
-transitive cycles. The existing post-publication runtime reconciliation applies current declarations to all
-accepted independent workloads while retaining their source/image identities, including discovery labels.
-The same build-tool URL later returned HTTP 504 in the required planning path. Necessary Bazel setup now uses
-the official distribution endpoint with the unchanged version/SHA and bounded curl recovery; real HTTP fixtures
-verify transient recovery, persistent bounded failure and corruption rejection before atomic installation.
-
-Follow-up branch `codex/private-publish-diagnostics` retains a strict allowlist of generic terminal failure
-codes at the private publication boundary. Raw output is still captured and deleted; regression checks reject
-resource names, extra text and control sequences. The current publication failure remains unresolved until its
-safe stage is observed and its cause is checked. Continue through normal green branch/main gates.
+Branch `codex/private-runtime-readiness` projects the last reviewed HTTP dependency category, method, status
+and optional numeric edge code at the private-output boundary. It prints no response text, addresses or unknown
+values; successful operations emit no error metadata. Fleet's resource note now describes automatic workload
+aggregation. Fourteen workflow boundary tests, repository/CI checks and independent review passed. Pending:
+private source/pin publication and same-source reconciliation. Private implementation stays in its handoff.
 
 Private application work and publication evidence are tracked only in `private/HANDOFF.md`.
 
@@ -82,11 +60,11 @@ codes generically. It changes no source, so it publishes no service and no priva
 
 ## Latest verified release
 
-Main `c6d46806` passed its complete automatic publication: the selected private application, then Home. The
-matching publication-triggered Personal cloud reconcile passed VPS runtime, complete resource registration,
-infrastructure comparison/routine repair and resolved drift. Private implementation and live-source evidence
-are kept only in `private/HANDOFF.md`. The [November 7 archive](docs/history/handoff-2026-11-07.md) records this
-closure; previous publication evidence remains in the dated archives.
+Main `618866a5` delivered automatic workload discovery, with fresh readiness and resource observations.
+Checked main completion published the remaining private component and Home. Its matching Personal cloud
+reconciliation passed complete resource registration, VPS runtime, infrastructure comparison/routine repair and
+resolved drift. The [November 8 archive](docs/history/handoff-2026-11-08.md) records this closure; private live-source
+and business continuity evidence stay in its own archive. Earlier releases remain in the dated archives.
 
 Shared Worker receipt recovery (`7ef001fe`) adds fixed failure stages, exact committed-result readback and a
 guarded receipt-only path without application redeployment. The old statusless Tasks receipt remains historical
