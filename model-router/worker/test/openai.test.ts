@@ -175,6 +175,17 @@ describe('Codex and API model identity', () => {
       'openai/gpt-6-astra', model, 'openai/gpt-6.1-terra', 'openai/gpt-6-luna',
     ]);
     expect(catalog.filter(item => item.provider === 'openai').every(item => item.configured)).toBe(true);
+    expect(Object.fromEntries(catalog.filter(item => item.provider === 'openai').map(item => [
+      item.id, [item.reservationInputMicrousdPerToken, item.reservationOutputMicrousdPerToken],
+    ]))).toEqual({
+      'openai/gpt-6-astra': [50, 75],
+      [model]: [10, 15],
+      'openai/gpt-6.1-terra': [5, 7.5],
+      'openai/gpt-6-luna': [0.5, 0.75],
+    });
+    expect(catalog.filter(item => item.provider !== 'openai').every(item =>
+      item.reservationInputMicrousdPerToken === undefined && item.reservationOutputMicrousdPerToken === undefined,
+    )).toBe(true);
     expect(routeFor('gpt-6.1-sol').provider).toBe('codex');
     expect(routeFor(model)).toMatchObject({ provider: 'openai', upstreamModel: 'gpt-6.1-sol' });
     expect(providerFor('gpt-6.1-sol')).toBe('codex');

@@ -43,15 +43,22 @@ interface Context {
   request: CreateConversationRequest;
   expireMs: number;
 }
-const knownApps = new Set(['console', 'mailsort', 'todofy', 'newsletter']);
-/** The external Newsletter token reaches only subscription Codex models; in-account bindings stay unrestricted. */
+export const PRIVATE_INFERENCE_APP = 'private-app';
+const knownApps = new Set(['console', 'mailsort', 'todofy', 'newsletter', PRIVATE_INFERENCE_APP]);
+const privateModels = new Set(['openai/gpt-6-luna', 'openai/gpt-6.1-terra', 'openai/gpt-6.1-sol']);
+
+/** The external Newsletter token reaches only subscription Codex models. */
 function allowModel(app: string, provider: string): void {
   if (app === 'newsletter' && provider !== 'codex')
     throw new RpcError(Code.PERMISSION_DENIED, 'MODEL_NOT_ALLOWED', 'This caller may use only Codex models.');
 }
 const modelApi = new HttpTranscoder(ModelService, {
-  listModels: (_req, ctx: ApiContext) =>
-    Promise.resolve(create(ListModelsResponseSchema, { models: modelCatalog(ctx.engine.environment) })),
+  listModels: async (_req, ctx: ApiContext) => {
+    const models = modelCatalog(ctx.engine.environment);
+    return create(ListModelsResponseSchema, {
+      models: ctx.app === PRIVATE_INFERENCE_APP ? models.filter((model) => privateModels.has(model.id)) : models,
+    });
+  },
   generate: (req, ctx) => ctx.engine.generate(req, ctx.app),
   embed: (req, ctx) => ctx.engine.embed(req, ctx.app),
   createConversation: (req, ctx) => ctx.engine.createConversation(req, ctx.app),
@@ -68,6 +75,14 @@ const consoleApi = new HttpTranscoder(ConsoleService, {
   },
 });
 
+function allowsPrivateRoute(request: Request): boolean {
+  const path = new URL(request.url).pathname;
+  return modelApi.routes().some((route) =>
+    (route.method.localName === 'listModels' || route.method.localName === 'generate') &&
+    route.httpMethod === request.method && route.template.source === path,
+  );
+}
+
 export class RouterEngine extends DurableObject<Env> {
   readonly store: Store;
   readonly environment: Env;
@@ -80,6 +95,8 @@ export class RouterEngine extends DurableObject<Env> {
   override async fetch(request: Request): Promise<Response> {
     const app = request.headers.get('x-router-app') ?? '';
     if (!knownApps.has(app)) return new Response(null, { status: 403 });
+    if (app === PRIVATE_INFERENCE_APP && !allowsPrivateRoute(request))
+      return modelApi.errorResponse(new RpcError(Code.PERMISSION_DENIED, 'METHOD_NOT_ALLOWED', 'This caller may only list models or generate text.'), crypto.randomUUID(), request.method === 'HEAD');
     const context = { engine: this, app, owner: request.headers.get('x-router-owner') === 'true' };
     const result =
       (await modelApi.handle(request, context, crypto.randomUUID())) ??
@@ -87,6 +104,12 @@ export class RouterEngine extends DurableObject<Env> {
     return result?.response ?? new Response(null, { status: 404 });
   }
   async generate(req: GenerateRequest, app: string): Promise<Generation> {
+    if (app === PRIVATE_INFERENCE_APP) {
+      if (req.conversation || req.allowFallback || !Number.isInteger(req.maxOutputTokens) || req.maxOutputTokens < 128 || req.maxOutputTokens > 8192)
+        invalid('INVALID_PARAMETER', 'Use one independent generation with an output token cap between 128 and 8192.');
+      if (!privateModels.has(req.model))
+        throw new RpcError(Code.PERMISSION_DENIED, 'MODEL_NOT_ALLOWED', 'This caller may use only its configured OpenAI models.');
+    }
     if (!req.input || new TextEncoder().encode(req.input).length > MAX_INPUT_BYTES)
       invalid('INVALID_INPUT', 'Input is empty or exceeds 2 MiB.');
     if (

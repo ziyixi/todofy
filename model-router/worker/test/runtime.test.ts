@@ -92,6 +92,39 @@ describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
     expect((await harness.caller('todofy', '/api/model/v1/requests')).status).toBe(403)
   })
 
+  it('restricts the private binding to an allowlisted catalog and bounded independent generation', async () => {
+    const app = 'private-app'
+    const client = harness.forCaller(app)
+    const models = (await client.listModels({})).models
+    expect(models.map((model) => model.id)).toEqual([api, 'openai/gpt-6.1-terra', 'openai/gpt-6-luna'])
+    expect(models[0]).toMatchObject({ configured: true, reservationInputMicrousdPerToken: 10, reservationOutputMicrousdPerToken: 15 })
+
+    const request = { model: api, input: 'Synthetic binding input', maxOutputTokens: 128 }
+    for (const model of [sol, gemini, 'openai/gpt-6-astra']) {
+      await expect(client.generate({ ...request, model })).rejects.toMatchObject({ status: { reason: 'MODEL_NOT_ALLOWED' } })
+    }
+    const conversation = `conversations/${crypto.randomUUID()}`
+    for (const override of [{ maxOutputTokens: 0 }, { maxOutputTokens: 127 }, { maxOutputTokens: 8193 }, { conversation }, { allowFallback: true }]) {
+      await expect(client.generate({ ...request, ...override })).rejects.toMatchObject({ status: { reason: 'INVALID_PARAMETER' } })
+    }
+    const forged = { 'x-router-app': 'console', 'x-router-owner': 'true' }
+    expect((await harness.caller(app, '/api/model/v1/requests', undefined, forged)).status).toBe(403)
+    expect((await harness.caller(app, '/api/model/v1/embeddings:embed', { model: bge, inputs: ['Synthetic'] }, forged)).status).toBe(403)
+    expect((await harness.caller(app, '/api/model/v1/conversations', { name: conversation, model: sol })).status).toBe(403)
+    expect((await harness.caller(app, `/api/model/v1/${conversation}:close`, {})).status).toBe(403)
+    const worker = await harness.mf.getWorker(`caller-${app}`)
+    expect((await worker.fetch(origin + '/api/model/v1/models', { method: 'HEAD' })).status).toBe(403)
+    expect((await worker.fetch(origin + generatePath, { method: 'OPTIONS' })).status).toBe(403)
+    expect(harness.calls).toHaveLength(0)
+    expect(await harness.db.prepare('SELECT count(*) AS n FROM requests').first('n')).toBe(0)
+
+    const answer = await client.generate(request)
+    expect(answer.error).toBeUndefined()
+    expect((await harness.owner.getRequest({ name: answer.name })).app).toBe(app)
+    expect((await client.generate({ ...request, maxOutputTokens: 8192 })).error).toBeUndefined()
+    expect(harness.calls.map((call) => call.body.max_output_tokens)).toEqual([128, 8192])
+  })
+
   it('limits the external Newsletter token to Codex models before registering a request', async () => {
     for (const refused of [
       () => harness.newsletter.generate({ model: gemini, input: 'Synthetic API-billed attempt' }),

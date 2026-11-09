@@ -76,6 +76,7 @@ ts_source_library(
     name = "module_group_2",
     srcs = [
         ":catalog.ts",
+        ":providers/pricing.ts",
         ":types.ts",
     ],
     deps = [
@@ -130,19 +131,15 @@ ts_source_library(
     ],
 )
 
-ts_source_library(
+alias(
     name = "providers_pricing",
-    srcs = [":providers/pricing.ts"],
-    deps = [":module_group_2"],
+    actual = ":module_group_2",
 )
 
 ts_source_library(
     name = "providers_usage",
     srcs = [":providers/usage.ts"],
-    deps = [
-        ":module_group_2",
-        ":providers_pricing",
-    ],
+    deps = [":module_group_2"],
 )
 
 ts_source_library(
@@ -210,7 +207,6 @@ ts_source_library(
         ":providers_common",
         ":providers_gemini",
         ":providers_openai",
-        ":providers_pricing",
         ":providers_workers-ai",
         ":schema",
         ":store",
@@ -274,7 +270,6 @@ js_library(
         ":providers_common",
         ":providers_gemini",
         ":providers_openai",
-        ":providers_pricing",
         ":providers_usage",
         ":providers_workers-ai",
         ":schema",

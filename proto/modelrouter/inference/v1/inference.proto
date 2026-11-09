@@ -91,6 +91,10 @@ message Model {
   repeated string efforts = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Estimated Workers AI quota units per input token.
   double reservation_quota_units_per_token = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Highest supported Standard text input rate, in millionths of USD per token.
+  optional double reservation_input_microusd_per_token = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Highest supported Standard text output rate, in millionths of USD per token.
+  optional double reservation_output_microusd_per_token = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
 }
 
 // Stable prompt block, with an optional provider cache hint.
