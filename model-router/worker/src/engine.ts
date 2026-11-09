@@ -53,11 +53,11 @@ function allowModel(app: string, provider: string): void {
     throw new RpcError(Code.PERMISSION_DENIED, 'MODEL_NOT_ALLOWED', 'This caller may use only Codex models.');
 }
 const modelApi = new HttpTranscoder(ModelService, {
-  listModels: async (_req, ctx: ApiContext) => {
+  listModels: (_req, ctx: ApiContext) => {
     const models = modelCatalog(ctx.engine.environment);
-    return create(ListModelsResponseSchema, {
+    return Promise.resolve(create(ListModelsResponseSchema, {
       models: ctx.app === PRIVATE_INFERENCE_APP ? models.filter((model) => privateModels.has(model.id)) : models,
-    });
+    }));
   },
   generate: (req, ctx) => ctx.engine.generate(req, ctx.app),
   embed: (req, ctx) => ctx.engine.embed(req, ctx.app),
