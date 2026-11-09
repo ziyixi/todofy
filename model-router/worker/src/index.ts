@@ -2,7 +2,7 @@ import { WorkerEntrypoint } from 'cloudflare:workers';
 import { forward, handleRequest, errorResponse } from './http.ts';
 import { Store } from './store.ts';
 import { Code, RpcError } from './errors.ts';
-import type { RouterEngine } from './engine.ts';
+import { PRIVATE_INFERENCE_APP, type RouterEngine } from './engine.ts';
 import type { Env } from './types.ts';
 export { RouterEngine } from './engine.ts';
 export { Ops } from './ops.ts';
@@ -11,7 +11,7 @@ export { Ops } from './ops.ts';
 export class Inference extends WorkerEntrypoint<Env, { app?: string }> {
   override async fetch(request: Request): Promise<Response> {
     const app = this.ctx.props.app;
-    if (!app || !['mailsort', 'todofy'].includes(app))
+    if (!app || !['mailsort', 'todofy', PRIVATE_INFERENCE_APP].includes(app))
       return errorResponse(
         new RpcError(Code.PERMISSION_DENIED, 'CALLER_NOT_CONFIGURED', 'Model client is not configured.'),
       );

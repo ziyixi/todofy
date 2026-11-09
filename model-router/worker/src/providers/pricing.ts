@@ -28,15 +28,30 @@ const openaiPrices: Record<string, readonly [number, number, number]> = {
 };
 
 // USD per million tokens equals micro-USD per token. No tool, storage or service-tier charges.
+function openaiTokenPrice(model: string, longContext: boolean) {
+  const rates = openaiPrices[model];
+  if (!rates) return undefined;
+  const [input, output, cachedInput] = rates;
+  const inputRate = input * (longContext ? 2 : 1);
+  return {
+    input: inputRate, output: output * (longContext ? 1.5 : 1),
+    cachedInput: cachedInput * (longContext ? 2 : 1), cacheWrite30m: inputRate * 1.25, cacheWrite12h: inputRate * 2.5,
+  };
+}
+
+export function openaiReservationRates(model: string) {
+  const rates = openaiTokenPrice(model, true);
+  if (!rates) return {};
+  return {
+    reservationInputMicrousdPerToken: Math.max(rates.input, rates.cachedInput, rates.cacheWrite30m, rates.cacheWrite12h),
+    reservationOutputMicrousdPerToken: rates.output,
+  };
+}
+
 function tokenPrice(model: string, inputTokens: number): TokenPrice | undefined {
   // API calls have one known context size; Codex's cumulative reference totals do not.
-  const openai = openaiPrices[model];
-  if (openai) {
-    const [input, output, cachedInput] = openai;
-    const long = inputTokens > 272_000;
-    return { input: input * (long ? 2 : 1), output: output * (long ? 1.5 : 1),
-      cachedInput: cachedInput * (long ? 2 : 1), cacheWrite30m: input * 1.25 * (long ? 2 : 1), cacheWrite12h: input * 2.5 * (long ? 2 : 1) };
-  }
+  const openai = openaiTokenPrice(model, inputTokens > 272_000);
+  if (openai) return openai;
   switch (model) {
     // Subscription usage totals can span several model calls. Value them at the Standard
     // reference rate; the aggregate does not reveal each call's context length or tool fees.

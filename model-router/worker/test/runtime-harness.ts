@@ -187,7 +187,7 @@ export async function startHarness({ ownerBypass = true, maintenance = false }: 
           script: `export default {async fetch(request,env){try{return Response.json(new URL(request.url).pathname==='/guard'?await env.OPS.setGuard(await request.json()):await env.OPS.status())}catch(error){return Response.json({error:error.message},{status:400})}}}`,
           serviceBindings: { OPS: { name: 'model-router', entrypoint: 'Ops' } },
         },
-        ...['todofy', 'mailsort', 'unknown'].map((app) => ({
+        ...['todofy', 'mailsort', 'private-app', 'unknown'].map((app) => ({
           name: `caller-${app}`,
           modules: true,
           compatibilityDate: '2026-09-08',

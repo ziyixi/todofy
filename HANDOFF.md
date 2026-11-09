@@ -7,6 +7,11 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 Private operating follow-ups are tracked in `private/HANDOFF.md`.
 
+Branch `codex/checked-source-rollout` adds Standard OpenAI reservation rates to the Router catalog and restricts
+a new private service caller to approved models and bounded text generation. Router type checks, pricing and native
+binding tests passed locally. Publish the Router before enabling its consumer binding. After publication, verify the
+restricted catalog and one bounded synthetic generation.
+
 The test suite consolidation landed on main. Its CI gate stopped at the Links backup export CPU check, which
 measured a 5.20 ms warm median against a 5 ms assertion. The backup implementation, fixture and CPU meter match
 the previous green revision. Branch `codex/links-backup-cpu` uses the existing 7 ms first-run ceiling for warm
