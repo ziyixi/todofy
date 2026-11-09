@@ -1,11 +1,11 @@
 # Handoff
 
-Updated 2026-11-08 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
+Updated 2026-11-09 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
 Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-Private work on `codex/private-runtime-recovery` is tracked in `private/HANDOFF.md`.
+Private operating follow-ups are tracked in `private/HANDOFF.md`.
 
 The test suite consolidation landed on main. Its CI gate stopped at the Links backup export CPU check, which
 measured a 5.20 ms warm median against a 5 ms assertion. The backup implementation, fixture and CPU meter match
@@ -54,12 +54,8 @@ codes generically. It changes no source, so it publishes no service and no priva
 
 ## Latest verified release
 
-Main `0fd0b2d0` delivered the dataset reader, live workload discovery and the private publication correction.
-All selected main publications, the private component and Home succeeded; matching reconciliation passed
-registration, VPS runtime, infrastructure comparison/routine repair and resolved drift. Eleven SDK tests passed
-on an actual Colab CPU runtime with synthetic data, and the live consumer interface was checked. The
-[November 8 archive](docs/history/handoff-2026-11-08.md) records scope and verification; private operating evidence
-stays in its archive. Earlier releases remain in the dated archives.
+Main `e213919a` published the checked private correction and Home; matching reconciliation passed. See the
+[November 8 archive](docs/history/handoff-2026-11-08.md#private-runtime-recovery).
 
 Shared Worker receipt recovery (`7ef001fe`) adds fixed failure stages, exact committed-result readback and a
 guarded receipt-only path without application redeployment. The old statusless Tasks receipt remains historical
