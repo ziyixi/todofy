@@ -389,6 +389,82 @@ class FundamentalFeaturesTest(unittest.TestCase):
                 )
                 self.assertEqual(result.revenue_period_end.iloc[0], "2025-12-31")
 
+        # The latest available period (06-30) is above the limit and the largest stored
+        # period at or below it (03-31) is still empty at the decision: the result
+        # comes from scanning lower, to 12-31.
+        later = [
+            fact(),
+            fact(
+                fact_id="q2",
+                value="500",
+                period_start="2026-04-01",
+                period_end="2026-06-30",
+                public_at="2026-03-09T09:00:00Z",
+                observed_at="2026-03-09T09:00:00Z",
+                content_first_seen_at="2026-03-09T09:00:00Z",
+                accession="0000000001-26-000004",
+            ),
+            fact(
+                fact_id="q1",
+                value="300",
+                period_start="2026-01-01",
+                period_end="2026-03-31",
+                public_at="2026-03-11T12:00:00Z",
+                observed_at="2026-03-11T12:00:00Z",
+                content_first_seen_at="2026-03-11T12:00:00Z",
+                accession="0000000001-26-000003",
+            ),
+        ]
+        limited = pd.DataFrame(
+            {
+                "asset_id": [CLASS_A] * 3,
+                # A late signal session, so only report_period_end limits the period.
+                "signal_session": ["2026-07-01"] * 3,
+                "decision_at": [
+                    "2026-03-10T10:00:00Z",
+                    "2026-03-10T10:00:00Z",
+                    "2026-03-12T10:00:00Z",
+                ],
+                "report_period_end": ["2026-03-31", "2026-06-30", "2026-03-31"],
+            }
+        )
+        scans = []
+        original = fundamentals.FactEngine._scan_lower
+
+        def counted(engine, *args):
+            scans.append(args)
+            return original(engine, *args)
+
+        for policy in ("public_reconstructed", "observed_content"):
+            with self.subTest(policy=policy, case="empty stored period"):
+                scans.clear()
+                with mock.patch.object(
+                    fundamentals.FactEngine,
+                    "_scan_lower",
+                    autospec=True,
+                    side_effect=counted,
+                ):
+                    result = self.prepare(material(later), limited, time_policy=policy)
+                self.assertEqual(result.revenue_status.tolist(), ["ok"] * 3)
+                # A limit at 06-30 takes the latest period; once 03-31 is public it wins.
+                self.assertEqual(
+                    result.revenue_raw_value.tolist(), ["100", "500", "300"]
+                )
+                self.assertEqual(
+                    result.revenue_period_end.tolist(),
+                    ["2025-12-31", "2026-06-30", "2026-03-31"],
+                )
+                self.assertEqual(len(scans), 1)
+                assert_frame_equal(
+                    result,
+                    reference.reference_fundamental_features(
+                        material(later),
+                        limited,
+                        metrics={"revenue": "USD"},
+                        time_policy=policy,
+                    ),
+                )
+
     def test_provenance_false_keeps_value_and_categorical_status(self):
         full = self.prepare(candidates=samples((CLASS_A, UNMAPPED)))
         lean = self.prepare(candidates=samples((CLASS_A, UNMAPPED)), provenance=False)
