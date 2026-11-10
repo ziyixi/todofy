@@ -65,6 +65,7 @@ LIMITATIONS = [
     "Under public_reconstructed, event links come from each event's latest saved version and coverage comes from saved check windows regardless of when they ran.",
     "Unverified-identity, not-listed and truncated check windows stay missing, never 0; source coverage describes saved checks, not publication completeness.",
     "sec counts keep the 8-K, 10-K, 10-Q, 6-K and 20-F forms; sources without a publication clock produce no count features.",
+    "21-session event ranks are percentiles over the universe's non-benchmark securities and stay missing unless the selection holds all of them.",
     "Quarterly cash-flow facts are year-to-date in 10-Q filings, so default quarterly columns omit operating cash flow, capex and free cash flow.",
 ]
 
@@ -223,7 +224,6 @@ class _EventIndex:
         _field(default_factory=dict)
     )
     first_known: dict[tuple[str, str, Any], pd.Timestamp] = _field(default_factory=dict)
-    duplicates: set[tuple[str, str, Any]] = _field(default_factory=set)
     skipped: dict[str, int] = _field(default_factory=dict)
     undatable: dict[str, int] = _field(default_factory=dict)
 
@@ -327,10 +327,12 @@ def _event_index(
         contract = SOURCE_CONTRACTS[source]
         latest = versions[-1]["row"]
         if contract.count_forms is not None and "form" in latest:
-            form = latest.get("form")
-            if (
-                not isinstance(form, str)
-                or form.removesuffix("/A") not in contract.count_forms
+            _mark_count_forms(versions, contract.count_forms)
+            # Reconstruction reads the latest saved form; observed_content the selected one.
+            if not (
+                versions[-1]["counts"]
+                if policy == "public_reconstructed"
+                else any(version["counts"] for version in versions)
             ):
                 continue
         story = _story(latest, source, stories)
@@ -343,17 +345,17 @@ def _event_index(
             _place_observed(index, (source, event_uid), versions, asset_ids, story)
     for key, entries in placed.items():
         index.placed[key] = [instant for instant, _ in _first_of_story(entries)]
-    for (asset, source), events in index.histories.items():
-        entries = [
-            (index.first_known[(asset, source, uid)], story, uid)
-            for uid, _, story in events
-            if (asset, source, uid) in index.first_known
-        ]
-        counted = {uid for _, uid in _first_of_story(entries)}
-        index.duplicates.update(
-            (asset, source, uid) for _, _, uid in entries if uid not in counted
-        )
     return index
+
+
+def _mark_count_forms(versions: list[dict[str, Any]], forms: frozenset[str]) -> None:
+    """Each version counts by its form, or by the latest earlier form when it has none."""
+    form = None
+    for version in versions:
+        value = version["row"].get("form")
+        if isinstance(value, str) and value:
+            form = value
+        version["counts"] = form is not None and form.removesuffix("/A") in forms
 
 
 def _place_reconstructed(
@@ -432,6 +434,7 @@ def _place_observed(
                 "recorded": recorded,
                 "assets": assets,
                 "public_missing": public is None,
+                "counts": version.get("counts", True),
             }
         )
     for version in history:
@@ -466,8 +469,11 @@ def _window_events(
             for start, end in index.missing.get(key, [])
         )
         return count, clock_missing, False
-    count, clock_missing, public_missing = 0, False, False
-    for event_uid, versions, _ in index.histories.get(key, []):
+    clock_missing = False
+    # Articles linked to the security at this decision; stories dedupe among them only.
+    linked: list[tuple[pd.Timestamp, str | None, Any]] = []
+    missing_public: dict[Any, bool] = {}
+    for event_uid, versions, story in index.histories.get(key, []):
         selected = next(
             (
                 version
@@ -486,16 +492,25 @@ def _window_events(
             )
             for version in versions
         )
-        if selected is None or asset_id not in selected["assets"]:
+        if (
+            selected is None
+            or not selected["counts"]
+            or asset_id not in selected["assets"]
+        ):
             continue
         available = selected["assets"][asset_id]
         if available is None:
             clock_missing = True
             continue
-        if available > decision or (asset_id, source, event_uid) in index.duplicates:
+        if available > decision:
             continue
-        public_missing |= selected["public_missing"]
-        initial = index.first_known[(asset_id, source, event_uid)]
+        linked.append(
+            (index.first_known[(asset_id, source, event_uid)], story, event_uid)
+        )
+        missing_public[event_uid] = selected["public_missing"]
+    count, public_missing = 0, False
+    for initial, event_uid in _first_of_story(linked):
+        public_missing |= missing_public[event_uid]
         count += previous < initial <= decision
     return int(count), bool(clock_missing), bool(public_missing)
 
@@ -667,17 +682,20 @@ def _news_versions(version: Any) -> pd.DataFrame | None:
     )
 
 
-def _benchmark_ids(universe: Any) -> frozenset[str]:
+def _rank_population(universe: Any, benchmark_ids: Iterable[str]) -> frozenset[str]:
+    """Universe members ranked against each other: not flagged or passed as benchmarks."""
     records = (
         universe.to_dict("records") if isinstance(universe, pd.DataFrame) else universe
     )
-    return frozenset(
-        str(row["asset_id"])
-        for row in records or []
-        if isinstance(row, Mapping)
-        and isinstance(row.get("is_benchmark"), (bool, np.bool_))
-        and bool(row["is_benchmark"])
-    )
+    members, flagged = set(), set(map(str, benchmark_ids))
+    for row in records or []:
+        if not isinstance(row, Mapping) or not row.get("asset_id"):
+            continue
+        members.add(str(row["asset_id"]))
+        flag = row.get("is_benchmark")
+        if isinstance(flag, (bool, np.bool_)) and bool(flag):
+            flagged.add(str(row["asset_id"]))
+    return frozenset(members - flagged)
 
 
 def material_from_version(
@@ -718,7 +736,7 @@ def _feature_rows(
     policy: str,
     zones: Mapping[str, str],
     news_versions: pd.DataFrame | None = None,
-    benchmarks: frozenset[str] = frozenset(),
+    population: frozenset[str] = frozenset(),
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Daily features for contiguous signal sessions and the event reduction summary."""
     index = _event_index(
@@ -798,6 +816,9 @@ def _feature_rows(
             result.append(feature)
     frame = pd.DataFrame(result)
     owners = frame["asset_id"].to_numpy()
+    # A rank is a percentile over the whole non-benchmark universe, so it exists only
+    # when the selection holds every member; otherwise it would depend on the selection.
+    ranked = bool(population) and population.issubset(asset_ids)
     for source in COUNT_SOURCES:
         column = f"{source}_new_event_count"
         frame[column] = frame[column].astype("Int64")
@@ -812,14 +833,22 @@ def _feature_rows(
         )
         frame[f"{source}_events_21d"] = total
         frame[f"{source}_events_rank_21d"] = (
-            total.where(~frame["asset_id"].isin(benchmarks))
+            total.where(frame["asset_id"].isin(population))
             .groupby(frame["signal_session"])
             .rank(pct=True)
+            if ranked
+            else np.nan
         )
     frame = frame[frame["signal_session"] >= signals[0]].reset_index(drop=True)
     summary = {
         "skipped_sources": dict(sorted(index.skipped.items())),
         "undatable_events": dict(sorted(index.undatable.items())),
+        "rank_population": {
+            "basis": "universe_non_benchmark",
+            "members": len(population),
+            "selected": len(population.intersection(asset_ids)),
+            "ranked": ranked,
+        },
     }
     return frame, summary
 
@@ -852,6 +881,7 @@ def _feature_provenance(
         "source_coverage": _coverage_summary(features),
         "skipped_sources": dict(events["skipped_sources"]),
         "undatable_events": dict(events["undatable_events"]),
+        "rank_population": dict(events["rank_population"]),
     }
 
 
@@ -861,6 +891,7 @@ def _coverage_summary(features: pd.DataFrame) -> dict[str, Any]:
     for source in COUNT_SOURCES:
         basis = features[f"{source}_coverage_basis"]
         covered = features.loc[basis != "", "signal_session"]
+        assets = features.loc[basis != "", "asset_id"]
         summary[source] = {
             "states": {
                 str(key): int(value)
@@ -871,6 +902,7 @@ def _coverage_summary(features: pd.DataFrame) -> dict[str, Any]:
                 for key, value in basis[basis != ""].value_counts().items()
             },
             "first_covered_session": str(covered.min()) if len(covered) else None,
+            "assets_with_coverage": int(assets.nunique()),
         }
     return summary
 
@@ -1071,7 +1103,7 @@ def prepare(
         time_policy,
         zones,
         material.get("news_versions"),
-        _benchmark_ids(universe),
+        _rank_population(universe, [benchmark_id]),
     )
     labels = _label_rows(
         features,
@@ -1728,10 +1760,16 @@ def daily_features(
     time_policy: str,
     start: str | date | None = None,
     end: str | date | None = None,
+    benchmark: str | None = None,
 ) -> pd.DataFrame:
-    """Return daily price/volume/event-count PIT features as a ``pd.DataFrame`` (no split boundaries needed)."""
+    """Return daily price/volume/event-count PIT features as a ``pd.DataFrame`` (no split boundaries needed).
+
+    ``{source}_events_rank_21d`` ranks the universe's non-benchmark securities (flagged
+    ones and ``benchmark``); it stays missing unless the selection holds all of them.
+    """
     _policy(time_policy)
     asset_ids = version.resolve(symbols)
+    benchmark_ids = version.resolve(benchmark) if benchmark is not None else []
     calendar = list(map(_day, version.calendar))
     start_d = _day(start) if start is not None else calendar[0]
     end_d = _day(end) if end is not None else calendar[-1]
@@ -1756,7 +1794,7 @@ def daily_features(
         time_policy,
         zones,
         _news_versions(version),
-        _benchmark_ids(version.universe),
+        _rank_population(version.universe, benchmark_ids),
     )
     features.attrs["provenance"] = {
         "dataset_id": str(version.id),
@@ -1766,6 +1804,7 @@ def daily_features(
             "asset_ids": asset_ids,
             "start": str(start_d),
             "end": str(end_d),
+            "benchmark_ids": benchmark_ids,
             **_time_parameters(time_policy),
         },
         "counts": {"candidates": len(features)},
@@ -1988,6 +2027,7 @@ def panel(
         start=start,
         end=end,
         time_policy=time_policy,
+        benchmark=benchmark,
     )
     univ = version.universe
     if isinstance(univ, pd.DataFrame) and "symbol" in univ.columns:
@@ -2055,7 +2095,12 @@ def panel(
         "columns": len(combined.columns),
         **{
             name: daily_provenance.get(name, {})
-            for name in ("source_coverage", "skipped_sources", "undatable_events")
+            for name in (
+                "source_coverage",
+                "skipped_sources",
+                "undatable_events",
+                "rank_population",
+            )
         },
         "limitations": LIMITATIONS + list(version.manifest.get("limitations", [])),
     }

@@ -104,6 +104,33 @@ def event(uid: str = "one", **changes: Any) -> dict[str, Any]:
     return values
 
 
+def article(uid: str, public: str, assets: list[str], **changes: Any) -> dict[str, Any]:
+    return event(
+        uid,
+        source="alpaca_news",
+        form=None,
+        filing_date=None,
+        public_at=public,
+        asset_ids=assets,
+        asset_first_seen_at={asset: public for asset in assets},
+        **changes,
+    )
+
+
+def stories(pairs: list[tuple[str, str]]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "event_id": uid,
+                "source": "alpaca_news",
+                "story_key": story,
+                "provider_updated_at": "2026-03-06T15:00:00Z",
+            }
+            for uid, story in pairs
+        ]
+    )
+
+
 def run(
     material: dict[str, Any], events: list[dict[str, Any]] = (), **changes: Any
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
@@ -334,38 +361,14 @@ class CoverageTest(unittest.TestCase):
 
 class CountSpecTest(unittest.TestCase):
     def test_story_key_dedupes_counts(self) -> None:
-        def article(uid: str, public: str, assets: list[str]) -> dict[str, Any]:
-            return event(
-                uid,
-                source="alpaca_news",
-                form=None,
-                filing_date=None,
-                public_at=public,
-                asset_ids=assets,
-                asset_first_seen_at={asset: public for asset in assets},
-            )
-
         articles = [
             article("n1", "2026-03-06T15:00:00Z", [ASSET]),
             article("n2", "2026-03-06T18:00:00Z", [ASSET, OTHER]),
             article("n3", "2026-03-10T15:00:00Z", [ASSET]),
             article("n4", "2026-03-06T16:00:00Z", [ASSET]),
         ]
-        versions = pd.DataFrame(
-            [
-                {
-                    "event_id": uid,
-                    "source": "alpaca_news",
-                    "story_key": story,
-                    "provider_updated_at": "2026-03-06T15:00:00Z",
-                }
-                for uid, story in (
-                    ("n1", "story-a"),
-                    ("n2", "story-a"),
-                    ("n3", "story-a"),
-                    ("n4", "story-b"),
-                )
-            ]
+        versions = stories(
+            [("n1", "story-a"), ("n2", "story-a"), ("n3", "story-a"), ("n4", "story-b")]
         )
         material = fixture()
         undeduped, _ = run(material, articles)
@@ -385,6 +388,57 @@ class CountSpecTest(unittest.TestCase):
                 self.assertEqual(
                     row(features, asset=OTHER).alpaca_news_new_event_count, 1
                 )
+
+    def test_story_dedupe_ignores_an_anchor_no_longer_linked(self) -> None:
+        # x first linked ASSET, then a later version dropped the link; y of the
+        # same story stays linked, so the story still counts once for ASSET.
+        articles = [
+            article("x", "2026-03-06T15:00:00Z", [ASSET]),
+            article(
+                "x",
+                "2026-03-06T15:00:00Z",
+                [],
+                observation_sequence=2,
+                observation_recorded_at="2026-03-06T16:00:00Z",
+            ),
+            article("y", "2026-03-06T17:00:00Z", [ASSET]),
+        ]
+        material = {**fixture(), "news_versions": stories([("x", "s"), ("y", "s")])}
+        for policy in ("public_reconstructed", "observed_content"):
+            with self.subTest(policy=policy):
+                features, _ = run(material, articles, time_policy=policy)
+                self.assertEqual(row(features).alpaca_news_new_event_count, 1)
+
+    def test_sec_form_filter_falls_back_to_the_latest_named_form(self) -> None:
+        unnamed = [
+            event("s1"),
+            event(
+                "s1",
+                observation_sequence=2,
+                form=None,
+                observation_recorded_at="2026-03-07T12:00:00Z",
+            ),
+        ]
+        # A later non-legacy form: reconstruction uses it, observed_content uses
+        # the version selected at the decision.
+        renamed = [
+            event("s2"),
+            event(
+                "s2",
+                observation_sequence=2,
+                form="DEF 14A",
+                observation_recorded_at="2026-03-20T12:00:00Z",
+            ),
+        ]
+        for events, policy, expected in (
+            (unnamed, "public_reconstructed", 1),
+            (unnamed, "observed_content", 1),
+            (renamed, "public_reconstructed", 0),
+            (renamed, "observed_content", 1),
+        ):
+            with self.subTest(event=events[0]["event_uid"], policy=policy):
+                features, _ = run(fixture(), events, time_policy=policy)
+                self.assertEqual(row(features).sec_new_event_count, expected)
 
     def test_sec_counts_keep_legacy_forms(self) -> None:
         forms = ["8-K", "10-K/A", "6-K", "4", "SC 13D", "25-NSE", "DEF 14A", None]
@@ -432,18 +486,54 @@ class CountSpecTest(unittest.TestCase):
             ),
         ]
         checks = [check(asset) for asset in (ASSET, OTHER, BENCHMARK)]
-        features, _ = run(fixture(checks), events, asset_ids=[ASSET, OTHER, BENCHMARK])
+        features, record = run(
+            fixture(checks), events, asset_ids=[ASSET, OTHER, BENCHMARK]
+        )
         first = "2026-03-02"
         self.assertEqual(row(features, first).sec_events_21d, 1)
         self.assertEqual(row(features, first, BENCHMARK).sec_events_21d, 2)
         self.assertEqual(row(features, first).sec_events_rank_21d, 1.0)
         self.assertEqual(row(features, first, OTHER).sec_events_rank_21d, 0.5)
         self.assertTrue(pd.isna(row(features, first, BENCHMARK).sec_events_rank_21d))
+        self.assertEqual(record["source_coverage"]["sec"]["assets_with_coverage"], 3)
         # One uncovered day inside the 21 windows leaves the rolling count missing.
         checks[0] = check(checked_start="2026-02-04")
         features, _ = run(fixture(checks), events, asset_ids=[ASSET, OTHER])
         self.assertTrue(pd.isna(row(features, first).sec_events_21d))
         self.assertEqual(row(features, "2026-03-04").sec_events_21d, 1)
+
+    def test_rank_population_is_the_non_benchmark_universe(self) -> None:
+        events = [event("a", public_at="2026-02-10T15:00:00Z")]
+        checks = [check(asset) for asset in (ASSET, OTHER, BENCHMARK)]
+        first = "2026-03-02"
+        material = fixture(checks)
+        # Without is_benchmark flags the explicit benchmark still leaves the population.
+        unflagged = {**material, "universe": material["universe"][["asset_id"]]}
+        for name, base, selection in (
+            ("flagged", material, [ASSET, OTHER]),
+            ("flagged", material, [ASSET, OTHER, BENCHMARK]),
+            ("explicit", unflagged, [ASSET, OTHER, BENCHMARK]),
+        ):
+            with self.subTest(name=name, selection=len(selection)):
+                features, record = run(base, events, asset_ids=selection)
+                self.assertEqual(row(features, first).sec_events_rank_21d, 1.0)
+                self.assertEqual(row(features, first, OTHER).sec_events_rank_21d, 0.5)
+                self.assertEqual(
+                    record["rank_population"],
+                    {
+                        "basis": "universe_non_benchmark",
+                        "members": 2,
+                        "selected": 2,
+                        "ranked": True,
+                    },
+                )
+        # A partial selection cannot rank against the universe: missing, not 1.0.
+        features, record = run(material, events, asset_ids=[ASSET])
+        self.assertTrue(features["sec_events_rank_21d"].isna().all())
+        self.assertEqual(row(features, first).sec_events_21d, 1)
+        self.assertEqual(record["rank_population"]["selected"], 1)
+        self.assertFalse(record["rank_population"]["ranked"])
+        self.assertEqual(record["source_coverage"]["sec"]["assets_with_coverage"], 1)
 
 
 class UnknownSourceTest(unittest.TestCase):

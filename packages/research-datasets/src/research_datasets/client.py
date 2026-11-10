@@ -1031,7 +1031,10 @@ class Dataset:
         scalar_filters: list[tuple[str, Sequence[Any]]] = []
         asset_ids_wanted = None
         if identities is not None:
-            if family == "event_observations" and "asset_ids" in names:
+            # Families that link events to securities carry an asset_ids list instead.
+            if "asset_ids" in names and (
+                family == "event_observations" or identity_column not in names
+            ):
                 asset_ids_wanted = set(identities)
             elif identity_column in names:
                 scalar_filters.append((identity_column, identities))
@@ -1245,8 +1248,20 @@ class Dataset:
         """
         if name in {"raw", "all"}:
             raise DatasetError("BAD_REQUEST", "价格请用 prices()。")
-        if name == "events" and columns is None:
-            return self.events(symbols, start, end)
+        if name == "events":
+            # events keeps its own reader: list links, legacy layouts and date fallback.
+            frame = self.events(symbols, start, end)
+            if columns is None or frame.columns.empty:
+                return frame
+            columns = list(dict.fromkeys(columns))
+            if not columns or any(not isinstance(column, str) for column in columns):
+                raise DatasetError("BAD_REQUEST", "columns 需要非空的列名列表。")
+            missing = sorted(set(columns) - set(frame.columns))
+            if missing:
+                raise DatasetError("BAD_REQUEST", f"events 没有这些列：{missing}。")
+            selected = frame[columns].copy()
+            selected.attrs.update(frame.attrs)
+            return selected
         return self._read_family(
             name, symbols=symbols, start=start, end=end, columns=columns
         )
@@ -1558,6 +1573,7 @@ class Dataset:
         time_policy: str,
         start: str | date | None = None,
         end: str | date | None = None,
+        benchmark: str | None = None,
     ) -> pd.DataFrame:
         """Return daily price/volume/event-count PIT features as a ``pd.DataFrame``."""
         return _daily_features(
@@ -1566,6 +1582,7 @@ class Dataset:
             start=start,
             end=end,
             time_policy=time_policy,
+            benchmark=benchmark,
         )
 
     def fundamental_features(

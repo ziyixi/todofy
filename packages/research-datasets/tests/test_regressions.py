@@ -344,6 +344,43 @@ class ContractRegressionTest(unittest.TestCase):
                 self.assertEqual(caught.exception.reason, reason)
             self.assertFalse(ds.events("AAPL").empty)
 
+    def test_family_reader_filters_list_linked_families_by_security(self) -> None:
+        linked = [
+            {"event_uid": "a", "asset_ids": [fixture.ASSET_A]},
+            {"event_uid": "g", "asset_ids": [fixture.ASSET_G1, fixture.ASSET_G2]},
+        ]
+        objects, _ = fixture._build_synthetic_bundle(
+            extra_families={"linked_family": linked}
+        )
+        spec = research_datasets.FamilySpec("asset_id", None, frozenset({1}))
+        with (
+            fixture.SyntheticDatasetServer(objects) as server,
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.dict(research_datasets.FAMILY_SPECS, linked_family=spec),
+        ):
+            ds = _load(server, tmp)
+            day = ds.calendar[10]
+            # events keeps its list links and event_date fallback when columns are given.
+            events = ds.family("events", ["AAPL"], columns=["event_uid"])
+            self.assertEqual(events.columns.tolist(), ["event_uid"])
+            self.assertEqual(events["event_uid"].tolist(), ["evt-sec-1"])
+            self.assertEqual(
+                len(ds.family("events", ["AAPL"], day, day, columns=["event_uid"])), 1
+            )
+            for symbols, start in ((["GOOG"], None), (["AAPL"], ds.calendar[11])):
+                with self.subTest(symbols=symbols, start=start):
+                    self.assertTrue(
+                        ds.family("events", symbols, start, columns=["event_uid"]).empty
+                    )
+            with self.assertRaises(research_datasets.DatasetError) as caught:
+                ds.family("events", ["AAPL"], columns=["nope"])
+            self.assertEqual(caught.exception.reason, "BAD_REQUEST")
+            # A registered family linking securities through asset_ids filters the same way.
+            for symbols, expected in ((["GOOGL"], ["g"]), (["AAPL"], ["a"])):
+                with self.subTest(symbols=symbols):
+                    frame = ds.family("linked_family", symbols, columns=["event_uid"])
+                    self.assertEqual(frame["event_uid"].tolist(), expected)
+
 
 class TransportRegressionTest(unittest.TestCase):
     @classmethod
