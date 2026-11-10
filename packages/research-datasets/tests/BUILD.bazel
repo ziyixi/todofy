@@ -141,7 +141,8 @@ unittest_test(
 
 unittest_test(
     name = "test_fundamental_ratios",
-    size = "small",
+    # About 20 s locally (320 reference runs); medium keeps headroom on shared runners.
+    size = "medium",
     srcs = [
         "reference.py",
         "test_fundamental_features.py",
