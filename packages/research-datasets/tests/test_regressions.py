@@ -444,6 +444,25 @@ class ProvenanceAndAsofTest(unittest.TestCase):
             samples, table, by="asset_id", columns=["value"], inclusive=False
         )
         np.testing.assert_array_equal(strict["value"], [1.0, np.nan, np.nan, np.nan])
+        # Categorical keys match plain or categorical keys on the other side.
+        categorical = samples.assign(asset_id=pd.Categorical(samples["asset_id"]))
+        for right in (table, table.assign(asset_id=pd.Categorical(table["asset_id"]))):
+            with self.subTest(right=str(right["asset_id"].dtype)):
+                keyed = research_datasets.asof_join(
+                    categorical, right, by="asset_id", columns=["value"]
+                )
+                np.testing.assert_array_equal(keyed["value"], joined["value"])
+        # Clocks without an offset are not instants: such rows and samples are unclocked.
+        decisions = ["2026-03-09T10:00:00", *samples["decision_at"].tolist()[1:]]
+        clocks = ["2026-03-06T11:00:00", *table["available_at"].tolist()[1:]]
+        naive = research_datasets.asof_join(
+            samples.assign(decision_at=decisions),
+            table.assign(available_at=clocks),
+            by="asset_id",
+            columns=["value"],
+        )
+        np.testing.assert_array_equal(naive["value"], [np.nan, np.nan, np.nan, np.nan])
+        self.assertEqual(naive.attrs["unclocked_rows"], 2)
         spec = research_datasets.FamilySpec("none", None, frozenset({1}), True)
         with mock.patch.dict(research_datasets.FAMILY_SPECS, {"factor_returns": spec}):
             with self.assertRaisesRegex(ValueError, "EVALUATION_ONLY"):

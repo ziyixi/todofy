@@ -416,6 +416,12 @@ class Calendar:
         value = self.decisions[position] if position < len(self.decisions) else NAT
         return pd.NaT if value == NAT else pd.Timestamp(int(value), tz="UTC")
 
+    def capture_deadline(self, position: int) -> pd.Timestamp:
+        """09:00 New York on session ``position``: the latest capture observed_content
+        accepts for that decision (NaT past the known sessions)."""
+        decision = self.decision_at(position)
+        return decision if pd.isna(decision) else decision + CAPTURE_GRACE
+
     def open_at(self, position: int) -> pd.Timestamp:
         return at(self.days[position], LABEL_OPEN_TIME.hour, LABEL_OPEN_TIME.minute)
 

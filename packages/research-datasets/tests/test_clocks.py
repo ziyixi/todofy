@@ -67,6 +67,15 @@ class ClockTest(unittest.TestCase):
         ]
         self.assertEqual(counts(calendar, rows).tolist(), [0, 1, 2])
         self.assertEqual(calendar.open_at(3), pd.Timestamp("2026-03-09T13:30Z"))
+        # observed_content accepts captures until 09:00 New York on the entry session.
+        self.assertEqual(
+            calendar.capture_deadline(1), pd.Timestamp("2026-01-05T14:00Z")
+        )
+        self.assertEqual(
+            calendar.capture_deadline(3), pd.Timestamp("2026-03-09T13:00Z")
+        )
+        self.assertTrue(pd.isna(calendar.capture_deadline(4)))
+        self.assertEqual(live.capture_deadline(4), pd.Timestamp("2026-03-10T13:00Z"))
         closes = clocks.Calendar(calendar.days, closes={"2026-03-09": "13:00"})
         self.assertEqual(closes.close_at(3), pd.Timestamp("2026-03-09T17:00Z"))
         self.assertEqual(closes.close_at(2), pd.Timestamp("2026-03-06T21:00Z"))

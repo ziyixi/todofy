@@ -7,6 +7,7 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 
+from . import clocks
 from .constants import FAMILY_SPECS
 
 
@@ -24,11 +25,13 @@ def asof_join(
     """For each sample, ``columns`` of the latest ``table`` row of the same ``by`` key
     whose ``table_time`` is at or before (``inclusive``) the sample's time.
 
-    The result keeps the samples' order and index. Rows without a table clock are
-    dropped and counted in ``attrs["unclocked_rows"]``; samples without a time get
-    missing values. Families registered as evaluation-only (e.g. factor returns) are
-    refused: they describe outcomes, not information available at a decision. Among
-    rows with the same key and clock, the last in table order wins.
+    The result keeps the samples' order and index. Times follow the SDK clock rule:
+    only offset-bearing values are instants. Table rows without one are dropped and
+    counted in ``attrs["unclocked_rows"]``; samples without one get missing values. Keys
+    are compared as plain values, so categorical and object keys match. Families
+    registered as evaluation-only (e.g. factor returns) are refused: they describe
+    outcomes, not information available at a decision. Among rows with the same key
+    and clock, the last in table order wins.
     """
     name = family if family is not None else table.attrs.get("family")
     spec = FAMILY_SPECS.get(name) if isinstance(name, str) else None
@@ -36,17 +39,19 @@ def asof_join(
         raise ValueError(f"EVALUATION_ONLY: {name} cannot be joined as a feature")
     keys = [by] if isinstance(by, str) else list(by)
     columns = list(columns)
-    right = table[[*keys, table_time, *columns]].copy()
-    right[table_time] = pd.to_datetime(right[table_time], utc=True)
-    clocked = right[table_time].notna()
-    right = right[clocked].sort_values(table_time, kind="stable")
-    left = pd.DataFrame({key: samples[key].to_numpy() for key in keys})
-    left["_time"] = pd.to_datetime(samples[sample_time], utc=True).array
+    right = table[columns].reset_index(drop=True)
+    for key in keys:
+        right[key] = table[key].to_numpy(dtype=object)
+    right["_table_time"] = clocks.instants(table[table_time])
+    clocked = right["_table_time"].to_numpy() != clocks.NAT
+    right = right[clocked].sort_values("_table_time", kind="stable")
+    left = pd.DataFrame({key: samples[key].to_numpy(dtype=object) for key in keys})
+    left["_time"] = clocks.instants(samples[sample_time])
     left["_position"] = np.arange(len(samples))
-    timed = left[left["_time"].notna()].sort_values("_time", kind="stable")
+    timed = left[left["_time"] != clocks.NAT].sort_values("_time", kind="stable")
     joined = pd.merge_asof(
         timed,
-        right.rename(columns={table_time: "_table_time"}),
+        right,
         left_on="_time",
         right_on="_table_time",
         by=keys,

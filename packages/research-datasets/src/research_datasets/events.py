@@ -53,13 +53,42 @@ class EventSpec:
     ``where`` maps a column to its allowed values (``form`` ignores an "/A" suffix) and
     ``items_any`` keeps filings listing any of these SEC items. A version without a value
     inherits its chain's latest earlier value. public_reconstructed filters by the latest
-    version, observed_content by the version selected at each decision.
+    version, observed_content by the version selected at each decision. Observations
+    that lack a filtered column are refused (CAPABILITY_MISSING), except by the default
+    ``sec`` form filter, which counts every filing of bundles saved before ``form``.
     """
 
     name: str
     source: str
     where: Mapping[str, frozenset[str]] = field(default_factory=dict)
     items_any: frozenset[str] = frozenset()
+
+    def __post_init__(self) -> None:
+        def values(allowed: Any) -> frozenset[str]:
+            if isinstance(allowed, str) or not all(
+                isinstance(value, str) for value in allowed
+            ):
+                raise ValueError(f"{self.name}: filters need collections of strings")
+            return frozenset(allowed)
+
+        if not (isinstance(self.name, str) and self.name):
+            raise ValueError("EventSpec needs a name")
+        where = {str(column): values(allowed) for column, allowed in self.where.items()}
+        object.__setattr__(self, "where", where)
+        object.__setattr__(self, "items_any", values(self.items_any))
+
+    def columns(self) -> list[str]:
+        """Observation columns the filters read."""
+        return [*self.where, *(["items"] if self.items_any else [])]
+
+    def record(self) -> dict[str, Any]:
+        """JSON form for run records."""
+        return {
+            "name": self.name,
+            "source": self.source,
+            "where": {column: sorted(values) for column, values in self.where.items()},
+            "items_any": sorted(self.items_any),
+        }
 
 
 def default_specs() -> tuple[EventSpec, ...]:
@@ -301,6 +330,12 @@ def _carried(frame: pd.DataFrame, column: str, chain: np.ndarray) -> pd.Series:
 def _passes(frame: pd.DataFrame, chain: np.ndarray, spec: EventSpec) -> np.ndarray:
     """Whether each version matches the specification's attribute filters."""
     result = np.ones(len(frame), dtype=bool)
+    absent = [column for column in spec.columns() if column not in frame.columns]
+    if absent and spec not in default_specs():
+        raise ValueError(
+            f"CAPABILITY_MISSING: {spec.name} filters on {absent}, "
+            "which these observations lack"
+        )
     for column, allowed in spec.where.items():
         if column in frame.columns:
             values = _carried(frame, column, chain)
@@ -399,8 +434,12 @@ def _reconstructed(
     b: np.ndarray,
     shape: tuple[int, int],
     zone: ZoneInfo,
+    selected: int,
 ) -> EventMatrices:
-    """Links of each chain's latest version, placed at its earliest public clock."""
+    """Links of each chain's latest version, placed at its earliest public clock.
+
+    Undatable chains (no clock, no date) are counted when they link a selected asset.
+    """
     low, high = span
     chain = rows.chain[low:high]
     starts = np.flatnonzero(np.r_[True, chain[1:] != chain[:-1]])
@@ -435,7 +474,8 @@ def _reconstructed(
         ordinal[chains] = clocks.date_ordinals(
             rows.frame.iloc[low + latest[chains]], ("event_date", "filing_date")
         )
-        undatable = int((ordinal[chains] == 0).sum())
+        lost = ~timed & (ordinal[owner] == 0) & (asset < selected)
+        undatable = len(np.unique(owner[lost]))
         untimed = ~timed & (ordinal[owner] != 0)
         days = ordinal[owner[untimed]]
         start = clocks.map_unique(days, lambda value: _midnight(int(value), zone))
@@ -642,13 +682,19 @@ def event_matrices(
     zones: Mapping[str, str],
     news_versions: pd.DataFrame | None = None,
     specs: Sequence[EventSpec] | None = None,
+    selected: int | None = None,
 ) -> tuple[dict[str, EventMatrices], dict[str, int]]:
     """Per specification, counts and clock flags of each (asset, decided window).
 
     ``boundaries`` are the finite decision instants b[0..W]; window j is (b[j], b[j+1]].
     Rows of sources the SDK does not read are skipped and counted, never fatal.
+    Undatable events count only those linked to the first ``selected`` assets (all
+    by default).
     """
     specs = default_specs() if specs is None else tuple(specs)
+    selected = len(assets) if selected is None else selected
+    if len({spec.name for spec in specs}) != len(specs):
+        raise ValueError("EventSpec names must be unique")
     for spec in specs:
         contract = SOURCE_CONTRACTS.get(spec.source)
         if contract is None or not contract.counts:
@@ -678,7 +724,7 @@ def event_matrices(
         if policy == "public_reconstructed":
             zone = clocks.source_zone(spec.source, zones)
             result[spec.name] = _reconstructed(
-                rows, span, passes, boundaries, shape, zone
+                rows, span, passes, boundaries, shape, zone, selected
             )
         else:
             result[spec.name] = _observed(rows, span, passes, boundaries, shape)
@@ -815,7 +861,8 @@ def _parse_checks(
 def _cells(
     parsed: _Checks, order: np.ndarray, first: int, days: int
 ) -> tuple[np.ndarray, np.ndarray]:
-    """(cell key, check) for every day of bounded checks inside the day domain."""
+    """(cell key, check) for every day of bounded checks inside the day domain; a
+    window ending before it starts covers no day, so the check is ignored."""
     order = order[parsed.start[order] != 0]
     low = np.maximum(parsed.start[order], first) - first
     high = np.minimum(parsed.end[order], first + days - 1) - first
@@ -1058,6 +1105,7 @@ def event_features(
         zones=zones,
         news_versions=news_versions,
         specs=specs,
+        selected=selected,
     )
     coverage, vocabulary = coverage_matrices(
         checks,
@@ -1127,7 +1175,13 @@ def event_features(
             ),
         )
     )
+    # Coverage belongs to a source: its first spec's columns describe it.
+    coverage_columns: dict[str, str] = {}
+    for spec in specs:
+        coverage_columns.setdefault(spec.source, spec.name)
     summary = {
+        "coverage_columns": coverage_columns,
+        "specs": [spec.record() for spec in specs],
         "skipped_sources": skipped,
         "undatable_events": {
             spec.name: matrices[spec.name].undatable

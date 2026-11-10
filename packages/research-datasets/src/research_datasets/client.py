@@ -38,6 +38,7 @@ from .constants import (
     FamilySpec,
     __version__,
 )
+from .events import EventSpec
 from .panels import (
     build_candidates,
 )
@@ -1585,6 +1586,7 @@ class Dataset:
         start: str | date | None = None,
         end: str | date | None = None,
         benchmark: str | None = None,
+        specs: Sequence[EventSpec] | None = None,
     ) -> pd.DataFrame:
         """Return daily price/volume/event-count PIT features as a ``pd.DataFrame``."""
         return _daily_features(
@@ -1594,6 +1596,7 @@ class Dataset:
             end=end,
             time_policy=time_policy,
             benchmark=benchmark,
+            specs=specs,
         )
 
     def fundamental_features(

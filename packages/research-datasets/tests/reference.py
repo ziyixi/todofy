@@ -16,12 +16,12 @@ import pandas as pd
 from research_datasets import clocks
 from research_datasets.constants import (
     CAPTURE_GRACE,
-    COUNT_SOURCES,
     NOT_LISTED_CODES,
     SOURCE_CONTRACTS,
     STORY_WINDOW,
     VETO_CODES,
 )
+from research_datasets.events import EventSpec, default_specs
 
 
 def story_keys(news_versions: pd.DataFrame | None) -> dict[tuple[str, str], str]:
@@ -65,15 +65,26 @@ def first_of_story(entries: list[tuple[Any, Any, Any]]) -> list[tuple[Any, Any]]
     return kept
 
 
-def _counts(versions: list[dict[str, Any]]) -> None:
-    """Each version counts by its form, or by the latest earlier form when it has none."""
-    form = None
+def _counts(versions: list[dict[str, Any]], spec: EventSpec) -> None:
+    """Each version passes the spec by its own values, or by its chain's latest earlier
+    value of a filtered column it lacks; a column absent from the rows is not filtered."""
+    current: dict[str, str] = {}
     for version in versions:
-        value = version["row"].get("form")
-        if isinstance(value, str) and value:
-            form = value
-        forms = SOURCE_CONTRACTS["sec"].count_forms
-        version["counts"] = form is not None and form.removesuffix("/A") in forms
+        row = version["row"]
+        for column in spec.columns():
+            value = row.get(column)
+            if isinstance(value, str) and value:
+                current[column] = value
+        counts = True
+        for column, allowed in spec.where.items():
+            value = current.get(column)
+            if column == "form" and value is not None:
+                value = value.removesuffix("/A")
+            counts &= column not in row or value in allowed
+        if spec.items_any and "items" in row:
+            items = current.get("items", "")
+            counts &= any(item.strip() in spec.items_any for item in items.split(","))
+        version["counts"] = counts
 
 
 class EventIndex:
@@ -83,11 +94,14 @@ class EventIndex:
         self,
         observations: pd.DataFrame,
         assets: set[str],
+        selected: set[str],
         policy: str,
         zones: Mapping[str, str],
         stories: Mapping[tuple[str, str], str],
+        specs: Sequence[EventSpec],
     ) -> None:
         self.policy = policy
+        self.selected = selected
         self.placed: dict[tuple[str, str], list[Any]] = {}
         self.missing: dict[tuple[str, str], list[tuple[Any, Any]]] = {}
         self.histories: dict[tuple[str, str], list[Any]] = {}
@@ -114,27 +128,31 @@ class EventIndex:
                 }
             )
         placed: dict[tuple[str, str], list[Any]] = {}
-        for (source, uid), versions in chains.items():
-            versions.sort(key=lambda version: version["sequence"])
-            latest = versions[-1]["row"]
-            if SOURCE_CONTRACTS[source].count_forms is not None and "form" in latest:
-                _counts(versions)
+        for spec in specs:
+            for (source, uid), versions in chains.items():
+                if source != spec.source:
+                    continue
+                versions.sort(key=lambda version: version["sequence"])
+                _counts(versions, spec)
                 if not (
                     versions[-1]["counts"]
                     if policy == "public_reconstructed"
                     else any(version["counts"] for version in versions)
                 ):
                     continue
-            story = _story(latest, stories)
-            if policy == "public_reconstructed":
-                zone = clocks.source_zone(source, zones)
-                self._reconstruct(placed, source, uid, versions, assets, story, zone)
-            else:
-                self._observe(source, uid, versions, assets, story)
+                story = _story(versions[-1]["row"], stories)
+                if policy == "public_reconstructed":
+                    zone = clocks.source_zone(source, zones)
+                    self._reconstruct(
+                        placed, spec.name, uid, versions, assets, story, zone
+                    )
+                else:
+                    self._observe(spec.name, uid, versions, assets, story)
         for key, entries in placed.items():
             self.placed[key] = [instant for instant, _ in first_of_story(entries)]
 
     def _reconstruct(self, placed, source, uid, versions, assets, story, zone) -> None:
+        """``source`` is the spec name the counts are kept under."""
         links = [
             asset for asset in dict.fromkeys(versions[-1]["links"]) if asset in assets
         ]
@@ -151,7 +169,8 @@ class EventIndex:
             return
         day = clocks.date_field(versions[-1]["row"], "event_date", "filing_date")
         if day is None:
-            self.undatable[source] = self.undatable.get(source, 0) + 1
+            if self.selected.intersection(links):
+                self.undatable[source] = self.undatable.get(source, 0) + 1
             return
         start = pd.Timestamp(datetime.combine(day, time(), zone)).tz_convert("UTC")
         end = pd.Timestamp(
@@ -298,7 +317,8 @@ def parse_checks(rows: Iterable[Mapping[str, Any]]) -> list[tuple]:
                 clocks.day(row["checked_start"]),
                 clocks.day(row["checked_end"]),
             )
-            parsed.append((checked, start, end, status, code))
+            if start <= end:  # an inverted window is malformed and ignored
+                parsed.append((checked, start, end, status, code))
     parsed.sort(key=lambda item: item[0])
     return parsed
 
@@ -382,17 +402,22 @@ def features(
     start: str,
     end: str,
     policy: str,
+    specs: Sequence[EventSpec] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Event columns of (asset, signal) rows plus skipped and undatable counts."""
+    specs = list(default_specs() if specs is None else specs)
+    sources = list(dict.fromkeys(spec.source for spec in specs))
     calendar = [clocks.day(value) for value in material["calendar"]]
     zones = material["manifest"].get("source_timezones", {})
     computed = list(dict.fromkeys([*asset_ids, *population]))
     index = EventIndex(
         material["event_observations"],
         set(computed),
+        set(asset_ids),
         policy,
         zones,
         story_keys(material.get("news_versions")),
+        specs,
     )
     grouped: dict[tuple[str, str], list] = {}
     for row in material["source_checks"].to_dict("records"):
@@ -401,7 +426,7 @@ def features(
     last = calendar.index(clocks.day(end))
     rows = []
     for asset in computed:
-        for position in range(max(0, first - 20), last + 1):
+        for position in range(max(0, first - 62), last + 1):
             previous = clocks.decision_at(calendar[position])
             decision = (
                 clocks.decision_at(calendar[position + 1])
@@ -412,33 +437,54 @@ def features(
                 "asset_id": asset,
                 "signal_session": calendar[position],
             }
-            for source in COUNT_SOURCES:
-                zone = clocks.source_zone(source, zones)
+            covered = {
+                source: coverage(
+                    parse_checks(grouped.get((asset, source), [])),
+                    source,
+                    previous,
+                    decision,
+                    clocks.source_zone(source, zones),
+                    policy,
+                )
+                for source in sources
+            }
+            for spec in specs:
+                name = spec.name
                 count, clock_missing, public_missing = index.window(
-                    asset, source, previous, decision
+                    asset, name, previous, decision
                 )
-                checks = parse_checks(grouped.get((asset, source), []))
-                label, basis = coverage(
-                    checks, source, previous, decision, zone, policy
-                )
+                label, basis = covered[spec.source]
                 complete = basis and not clock_missing
-                row[f"{source}_events_1d"] = count if complete else pd.NA
-                row[f"{source}_observed_events_1d"] = count
-                row[f"{source}_coverage"] = label
-                row[f"{source}_coverage_basis"] = basis
-                row[f"{source}_clock_missing"] = clock_missing
-                row[f"{source}_public_clock_missing"] = public_missing
+                row[f"{name}_events_1d"] = count if complete else pd.NA
+                row[f"{name}_observed_events_1d"] = count
+                row[f"{name}_coverage"] = label
+                row[f"{name}_coverage_basis"] = basis
+                row[f"{name}_clock_missing"] = clock_missing
+                row[f"{name}_public_clock_missing"] = public_missing
+            bases = {basis for _, basis in covered.values()}
+            row["info_regime"] = (
+                "mixed"
+                if {"observed", "reconstructed"} <= bases
+                else "observed"
+                if "observed" in bases
+                else "reconstructed"
+                if "reconstructed" in bases
+                else ""
+            )
             rows.append(row)
     frame = pd.DataFrame(rows)
-    for source in COUNT_SOURCES:
-        values = frame[f"{source}_events_1d"].astype("Float64").astype("float64")
-        frame[f"{source}_events_1d"] = frame[f"{source}_events_1d"].astype("Int64")
-        total = values.groupby(frame["asset_id"], sort=False).transform(
-            lambda series: series.rolling(21, min_periods=21).sum()
-        )
-        frame[f"{source}_events_21d"] = total
-        frame[f"{source}_events_rank_21d"] = (
-            total.where(frame["asset_id"].isin(population))
+    for spec in specs:
+        name = spec.name
+        values = frame[f"{name}_events_1d"].astype("Float64").astype("float64")
+        frame[f"{name}_events_1d"] = frame[f"{name}_events_1d"].astype("Int64")
+        for size in (5, 21, 63):
+            total = values.groupby(frame["asset_id"], sort=False).transform(
+                lambda series, size=size: series.rolling(size, min_periods=size).sum()
+            )
+            frame[f"{name}_events_{size}d"] = total
+        frame[f"{name}_events_rank_21d"] = (
+            frame[f"{name}_events_21d"]
+            .where(frame["asset_id"].isin(population))
             .groupby(frame["signal_session"])
             .rank(pct=True)
         )

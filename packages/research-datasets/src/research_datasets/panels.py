@@ -31,7 +31,6 @@ from .clocks import public_clock as _public_clock
 from .constants import (
     ALL_METRICS,
     CAPTURE_GRACE,
-    COUNT_SOURCES,
     DECISION_TIME,
     DURATION_METRICS,
     INSTANT_METRICS,
@@ -134,14 +133,20 @@ def _news_versions(version: Any) -> pd.DataFrame | None:
     )
 
 
-def _observations(version: Any) -> pd.DataFrame:
-    """Frozen observation versions, projected to the columns the reduction reads."""
+def _observations(
+    version: Any, specs: Sequence[EventSpec] | None = None
+) -> pd.DataFrame:
+    """Frozen observation versions, projected to the columns the reduction and the
+    specifications' filters read."""
     reader = version.event_observations
     try:
         projected = "columns" in inspect.signature(reader).parameters
     except (TypeError, ValueError):
         projected = False
-    return reader(columns=list(OBSERVATION_COLUMNS)) if projected else reader()
+    if not projected:
+        return reader()
+    filters = [column for spec in specs or () for column in spec.columns()]
+    return reader(columns=list(dict.fromkeys([*OBSERVATION_COLUMNS, *filters])))
 
 
 def _rank_population(universe: Any, benchmark_ids: Iterable[str]) -> frozenset[str]:
@@ -288,10 +293,10 @@ def _feature_provenance(
             if column.endswith("_missing")
         },
         "source_coverage_counts": {
-            source: _value_counts(features[f"{source}_coverage"])
-            for source in COUNT_SOURCES
+            source: _value_counts(features[f"{name}_coverage"])
+            for source, name in events["coverage_columns"].items()
         },
-        "source_coverage": _coverage_summary(features),
+        "source_coverage": _coverage_summary(features, events["coverage_columns"]),
         "skipped_sources": dict(events["skipped_sources"]),
         "undatable_events": dict(events["undatable_events"]),
         "rank_population": dict(events["rank_population"]),
@@ -303,15 +308,18 @@ def _value_counts(column: pd.Series) -> dict[str, int]:
     return {str(key): int(value) for key, value in counts.items() if value}
 
 
-def _coverage_summary(features: pd.DataFrame) -> dict[str, Any]:
-    """Per count source: window labels, bases and the first countable signal session."""
+def _coverage_summary(
+    features: pd.DataFrame, columns: Mapping[str, str]
+) -> dict[str, Any]:
+    """Per counted source (read from the named spec's columns): window labels, bases
+    and the first countable signal session."""
     summary = {}
-    for source in COUNT_SOURCES:
-        basis = features[f"{source}_coverage_basis"]
+    for source, name in columns.items():
+        basis = features[f"{name}_coverage_basis"]
         covered = features.loc[basis != "", "signal_session"]
         assets = features.loc[basis != "", "asset_id"]
         summary[source] = {
-            "states": _value_counts(features[f"{source}_coverage"]),
+            "states": _value_counts(features[f"{name}_coverage"]),
             "basis": _value_counts(basis[basis != ""]),
             "first_covered_session": str(covered.min()) if len(covered) else None,
             "assets_with_coverage": int(assets.nunique()),
@@ -1168,10 +1176,11 @@ def daily_features(
 
     ``{name}_events_rank_21d`` ranks among the universe's securities that are neither
     flagged benchmarks nor ``benchmark``, whatever the selection. ``specs`` replaces the
-    default one-per-source event specifications.
+    default one-per-source event specifications. A security selected twice gives one
+    set of rows.
     """
     _policy(time_policy)
-    asset_ids = version.resolve(symbols)
+    asset_ids = list(dict.fromkeys(map(str, version.resolve(symbols))))
     benchmark_ids = version.resolve(benchmark) if benchmark is not None else []
     calendar = list(map(_day, version.calendar))
     start_d = _day(start) if start is not None else calendar[0]
@@ -1190,7 +1199,7 @@ def daily_features(
         asset_ids,
         raw,
         adjusted,
-        _observations(version),
+        _observations(version, specs),
         version.source_checks(sorted(population.union(asset_ids))),
         time_policy,
         version.manifest.get("source_timezones", {}),
@@ -1207,6 +1216,7 @@ def daily_features(
             "end": str(end_d),
             "benchmark_ids": benchmark_ids,
             **_time_parameters(time_policy),
+            "event_specs": events["specs"],
         },
         counts={"candidates": len(features)},
         **_feature_provenance(features, events),
