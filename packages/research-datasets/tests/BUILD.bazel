@@ -103,13 +103,70 @@ unittest_test(
     ],
 )
 
+unittest_test(
+    name = "test_prepare",
+    size = "small",
+    srcs = [
+        "reference.py",
+        "test_events.py",
+        "test_prepare.py",
+        "test_sdk.py",
+    ],
+    imports = [".", "..", "../src"],
+    modules = ["tests.test_prepare"],
+    deps = [
+        "//packages/research-datasets/src/research_datasets:library",
+        "@python_deps//numpy",
+        "@python_deps//pandas",
+        "@python_deps//pyarrow",
+    ],
+)
+
+unittest_test(
+    name = "test_fundamental_features",
+    size = "small",
+    srcs = [
+        "reference.py",
+        "test_fundamental_features.py",
+    ],
+    imports = [".", "..", "../src"],
+    modules = ["tests.test_fundamental_features"],
+    deps = [
+        "//packages/research-datasets/src/research_datasets:library",
+        "@python_deps//numpy",
+        "@python_deps//pandas",
+        "@python_deps//pyarrow",
+    ],
+)
+
+unittest_test(
+    name = "test_fundamental_ratios",
+    size = "small",
+    srcs = [
+        "reference.py",
+        "test_fundamental_features.py",
+        "test_fundamental_ratios.py",
+    ],
+    imports = [".", "..", "../src"],
+    modules = ["tests.test_fundamental_ratios"],
+    deps = [
+        "//packages/research-datasets/src/research_datasets:library",
+        "@python_deps//numpy",
+        "@python_deps//pandas",
+        "@python_deps//pyarrow",
+    ],
+)
+
 test_suite(
     name = "tests",
     tests = [
         ":test_candidates",
         ":test_clocks",
         ":test_events",
+        ":test_fundamental_features",
+        ":test_fundamental_ratios",
         ":test_labels",
+        ":test_prepare",
         ":test_regressions",
         ":test_sdk",
     ],

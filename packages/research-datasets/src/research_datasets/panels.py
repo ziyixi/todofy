@@ -12,7 +12,6 @@ import inspect
 import json
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import date
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -22,29 +21,44 @@ import pandas as pd
 
 from . import candidates as _candidates
 from . import clocks
+from . import fundamentals as _fundamentals
 from . import labels as _labels
 from .candidates import build_candidates
 from .clocks import CAPTURE_DEADLINE as _CAPTURE_DEADLINE
-from .clocks import clock as _clock
 from .clocks import day as _day
 from .clocks import policy as _policy
-from .clocks import public_clock as _public_clock
 from .constants import (
-    ALL_METRICS,
-    CAPTURE_GRACE,
     DECISION_TIME,
     DEFAULT_HORIZONS,
-    DURATION_METRICS,
-    INSTANT_METRICS,
     KEYS,
     NEW_YORK_ZONE,
     QUARTER_DEFAULT_EXCLUDED_METRICS,
     QUARTER_DEFAULT_EXCLUDED_RATIOS,
-    RATIO_METRICS,
     TIME_POLICY_VERSION,
 )
 from .events import WARMUP_SESSIONS, EventSpec, event_features
+from .fundamentals import (
+    fundamental_features,
+    fundamental_ratios,
+    prepare_fundamental_features,
+    prepare_fundamental_ratios,
+)
 from .provenance import run_record
+
+__all__ = [
+    "KEYS",
+    "LIMITATIONS",
+    "build_candidates",
+    "daily_features",
+    "forward_returns",
+    "fundamental_features",
+    "fundamental_ratios",
+    "material_from_version",
+    "panel",
+    "prepare",
+    "prepare_fundamental_features",
+    "prepare_fundamental_ratios",
+]
 
 # Columns the event reduction reads; other observation columns are not loaded.
 OBSERVATION_COLUMNS = (
@@ -617,528 +631,6 @@ def prepare(
     return features, labels, splits, run
 
 
-def prepare_fundamental_features(
-    version_or_material: Any,
-    samples: pd.DataFrame,
-    *,
-    metrics: Mapping[str, str],
-    period_kind: str = "quarter",
-    time_policy: str,
-) -> pd.DataFrame:
-    """Join explicit-unit SEC facts to frozen candidate UUIDs without dropping rows.
-
-    A fact is available at or before the decision: public_reconstructed uses its public
-    clock (SEC filing-date rule), observed_content also needs its capture by the
-    decision plus CAPTURE_GRACE.
-    """
-    if (
-        not isinstance(metrics, Mapping)
-        or not metrics
-        or any(
-            not isinstance(metric, str)
-            or not metric
-            or not isinstance(unit, str)
-            or not unit
-            for metric, unit in metrics.items()
-        )
-    ):
-        raise ValueError("metrics must map each requested metric to an explicit unit")
-    _policy(time_policy)
-    if not set(KEYS + ["decision_at"]).issubset(samples.columns):
-        raise ValueError("Samples require candidate keys and decision_at")
-    if isinstance(version_or_material, Mapping):
-        manifest = version_or_material["manifest"]
-        universe = version_or_material["universe"]
-        facts = version_or_material["fundamentals"]
-    else:
-        manifest, universe = version_or_material.manifest, version_or_material.universe
-        records = (
-            universe.to_dict("records")
-            if isinstance(universe, pd.DataFrame)
-            else universe
-        )
-        requested = set(samples["asset_id"])
-        mapped = [
-            row["asset_id"]
-            for row in records
-            if row["asset_id"] in requested
-            and row.get("issuer_mapping_status") == "verified"
-            and isinstance(row.get("cik"), str)
-            and len(row["cik"]) == 10
-            and row["cik"].isascii()
-            and row["cik"].isdigit()
-        ]
-        facts = (
-            version_or_material.fundamentals(mapped, metrics=list(metrics))
-            if mapped
-            else pd.DataFrame()
-        )
-    universe = (
-        universe.to_dict("records") if isinstance(universe, pd.DataFrame) else universe
-    )
-    frozen = {row["asset_id"]: row for row in universe}
-    if len(frozen) != len(universe):
-        raise ValueError("Frozen universe contains duplicate security UUIDs")
-    zones, chains = manifest.get("source_timezones", {}), {}
-    for source_row in facts.to_dict("records"):
-        row = {**source_row, "source": source_row.get("source", "sec")}
-        sequence = row.get("observation_sequence")
-        if (
-            not isinstance(sequence, (int, np.integer))
-            or isinstance(sequence, bool)
-            or sequence < 0
-        ):
-            raise ValueError("Facts require a nonnegative observation_sequence")
-        public, observed = _public_clock(row, zones), _clock(row.get("observed_at"))
-        declared_invalid = (
-            row.get("public_time_precision") in {"second", "date"} and public is None
-        )
-        available = public
-        if time_policy == "observed_content":
-            captured = None if observed is None else observed - CAPTURE_GRACE
-            available = (
-                max(captured, public)
-                if captured is not None and public is not None
-                else captured
-            )
-            if declared_invalid:
-                available = None
-        period_end_raw = row.get("period_end")
-        period_end_day = _day(period_end_raw) if period_end_raw else None
-        row.update(
-            _public=public,
-            _observed=observed,
-            _available=available,
-            _period_end_day=period_end_day,
-        )
-        chains.setdefault(
-            (str(row.get("cik", "")).zfill(10), row.get("metric"), row["fact_id"]), []
-        ).append(row)
-    grouped: dict[tuple[str, Any], list[list[dict[str, Any]]]] = {}
-    for (cik, metric, _), versions in chains.items():
-        versions.sort(key=lambda row: row["observation_sequence"])
-        if len({row["observation_sequence"] for row in versions}) != len(versions):
-            raise ValueError("Duplicate observation_sequence for one fact")
-        if time_policy == "public_reconstructed":
-            first_by_clock: dict[pd.Timestamp, dict[str, Any]] = {}
-            unknown_v: list[dict[str, Any]] = []
-            for row in versions:
-                if row["_public"] is not None:
-                    first_by_clock.setdefault(row["_public"], row)
-                elif not row.get("is_retracted", False):
-                    unknown_v.append(row)
-            versions = unknown_v + sorted(
-                first_by_clock.values(), key=lambda row: row["_public"]
-            )
-        grouped.setdefault((cik, metric), []).append(versions)
-
-    provenance = (
-        "fact_id",
-        "cik",
-        "unit",
-        "currency",
-        "period_start",
-        "period_end",
-        "period_kind",
-        "accession",
-        "tag",
-        "source_url",
-        "public_at",
-        "public_date",
-        "public_time_precision",
-        "observed_at",
-    )
-
-    # Memoize per (cik, metric, unit, decision, report_limit) so dual-class securities
-    # (e.g. GOOG/GOOGL, BRK.A/BRK.B) and repeated evaluation keys share identical results.
-    eval_cache: dict[
-        tuple[str, str, str, pd.Timestamp | None, date | None], dict[str, Any]
-    ] = {}
-
-    def _eval_metric(
-        cik_padded: str,
-        verified: bool,
-        metric: str,
-        unit: str,
-        decision: pd.Timestamp | None,
-        report_limit: date | None,
-    ) -> dict[str, Any]:
-        cache_key = (
-            cik_padded if verified else "",
-            metric,
-            unit,
-            decision,
-            report_limit,
-        )
-        cached = eval_cache.get(cache_key)
-        if cached is not None:
-            return cached
-        feature: dict[str, Any] = {
-            "value": np.nan,
-            "status": "metric_missing",
-            "raw_value": None,
-            "available_at": pd.NaT,
-            "public_clock_missing": False,
-            "availability_basis": "",
-        }
-        feature.update({name: None for name in provenance})
-        if not verified:
-            feature["status"] = "mapping_missing"
-        elif decision is None:
-            feature["status"] = "clock_unknown"
-        else:
-            selected, unknown, retracted = [], [], False
-            for versions in grouped.get((cik_padded, metric), []):
-                eligible = [
-                    row
-                    for row in versions
-                    if row["_available"] is not None and row["_available"] <= decision
-                ]
-                chosen = eligible[-1] if eligible else None
-                if time_policy == "observed_content":
-                    unknown.extend(
-                        row
-                        for row in versions
-                        if row["_available"] is None
-                        and (
-                            row["_observed"] is None
-                            or row["_observed"] - CAPTURE_GRACE <= decision
-                        )
-                        and (
-                            chosen is None
-                            or row["observation_sequence"]
-                            > chosen["observation_sequence"]
-                        )
-                    )
-                elif chosen is None:
-                    unknown.extend(row for row in versions if row["_public"] is None)
-                if chosen is not None:
-                    retracted |= bool(chosen.get("is_retracted", False))
-                    if not chosen.get("is_retracted", False):
-                        selected.append(chosen)
-            possible = selected + unknown
-            matching_unit = [row for row in possible if row.get("unit") == unit]
-            matching_period = [
-                row for row in matching_unit if row.get("period_kind") == period_kind
-            ]
-            dated = [
-                row
-                for row in matching_period
-                if row["_period_end_day"] is not None
-                and report_limit is not None
-                and row["_period_end_day"] <= report_limit
-            ]
-            if not possible:
-                feature["status"] = (
-                    "retracted"
-                    if retracted
-                    else "not_yet_available"
-                    if (cik_padded, metric) in grouped
-                    else "metric_missing"
-                )
-            elif not matching_unit:
-                feature["status"] = "unit_unavailable"
-            elif not matching_period or not dated:
-                feature["status"] = "period_unavailable"
-            else:
-                latest_period = max(row["_period_end_day"] for row in dated)
-                candidates = [
-                    row for row in dated if row["_period_end_day"] == latest_period
-                ]
-                if any(row["_available"] is None for row in candidates):
-                    feature["status"] = "clock_unknown"
-                else:
-                    report_at = max(
-                        row["_public"]
-                        if row["_public"] is not None
-                        else row["_observed"]
-                        for row in candidates
-                    )
-                    candidates = [
-                        row
-                        for row in candidates
-                        if (
-                            row["_public"]
-                            if row["_public"] is not None
-                            else row["_observed"]
-                        )
-                        == report_at
-                    ]
-                    try:
-                        values = (
-                            {Decimal(row["value"]) for row in candidates}
-                            if all(
-                                isinstance(row.get("value"), str) for row in candidates
-                            )
-                            else set()
-                        )
-                    except (InvalidOperation, TypeError, ValueError):
-                        values = set()
-                    if not values or any(not value.is_finite() for value in values):
-                        feature["status"] = "invalid_value"
-                    elif (
-                        len(values) != 1
-                        or len({row.get("period_start") for row in candidates}) != 1
-                    ):
-                        feature["status"] = "ambiguous"
-                    else:
-                        chosen = min(
-                            candidates,
-                            key=lambda row: (
-                                row.get("tag_priority", 0),
-                                row["fact_id"],
-                            ),
-                        )
-                        feature.update({name: chosen.get(name) for name in provenance})
-                        number = float(next(iter(values)))
-                        feature.update(
-                            raw_value=chosen["value"],
-                            available_at=chosen["_available"],
-                            public_clock_missing=chosen["_public"] is None,
-                            availability_basis="observed_only"
-                            if chosen["_public"] is None
-                            else time_policy,
-                        )
-                        feature["status"] = (
-                            "ok_observed_only" if chosen["_public"] is None else "ok"
-                        )
-                        if np.isfinite(number):
-                            feature["value"] = number
-                        else:
-                            feature["status"] = "nonfinite_model_value"
-        prefixed = {f"{metric}_{name}": value for name, value in feature.items()}
-        eval_cache[cache_key] = prefixed
-        return prefixed
-
-    results = []
-    for sample in samples.to_dict("records"):
-        identity = frozen.get(sample["asset_id"], {})
-        cik = str(identity.get("cik", ""))
-        verified = (
-            identity.get("issuer_mapping_status") == "verified"
-            and cik.isdigit()
-            and len(cik) <= 10
-            and int(cik) > 0
-        )
-        cik_padded = cik.zfill(10) if verified else ""
-        decision, signal = _clock(sample["decision_at"]), _day(sample["signal_session"])
-        report_limit = sample.get("report_period_end", signal)
-        report_limit = (
-            None
-            if report_limit is None or pd.isna(report_limit) or report_limit == ""
-            else min(signal, _day(report_limit))
-        )
-        features: dict[str, Any] = {}
-        for metric, unit in metrics.items():
-            features.update(
-                _eval_metric(cik_padded, verified, metric, unit, decision, report_limit)
-            )
-        results.append(features)
-    columns = [
-        f"{metric}_{name}"
-        for metric in metrics
-        for name in (
-            "value",
-            "status",
-            "raw_value",
-            "available_at",
-            "public_clock_missing",
-            "availability_basis",
-            *provenance,
-        )
-    ]
-    result = pd.concat(
-        [
-            samples[KEYS].copy(),
-            pd.DataFrame(results, index=samples.index, columns=columns),
-        ],
-        axis=1,
-    )
-    for metric in metrics:
-        result[f"{metric}_available_at"] = pd.to_datetime(
-            result[f"{metric}_available_at"], utc=True
-        )
-    result.attrs["parameters"] = {
-        "metrics": dict(metrics),
-        "period_kind": period_kind,
-        "time_policy": time_policy,
-    }
-    result.attrs["limitations"] = list(manifest.get("limitations", [])) + [
-        "Frozen verified issuer mappings are static; share classes retain separate candidate UUIDs.",
-        "Public reconstruction keeps first saved states per fact/public clock; unknown public withdrawals are ignored.",
-        "SEC as-filed facts are not a restatement-complete PIT ledger; no FX, EPS or YTD-to-quarter derivation is performed.",
-    ]
-    return result
-
-
-def prepare_fundamental_ratios(
-    version_or_material: Any,
-    samples: pd.DataFrame,
-    *,
-    currency: str = "USD",
-    period_kind: str = "quarter",
-    time_policy: str,
-) -> pd.DataFrame:
-    """Six derived financial features with explicit source and comparison bases."""
-    metrics = (
-        "revenue",
-        "gross_profit",
-        "operating_income",
-        "net_income",
-        "operating_cash_flow",
-        "capex",
-    )
-    current = prepare_fundamental_features(
-        version_or_material,
-        samples,
-        metrics={name: currency for name in metrics},
-        period_kind=period_kind,
-        time_policy=time_policy,
-    )
-
-    def previous_year(value: Any) -> date | None:
-        if value is None or pd.isna(value) or value == "":
-            return None
-        day = _day(value)
-        try:
-            return day.replace(year=day.year - 1)
-        except ValueError:
-            return day.replace(year=day.year - 1, day=28)
-
-    prior_samples = samples.copy()
-    prior_samples["report_period_end"] = [
-        previous_year(value) for value in current["revenue_period_end"]
-    ]
-    prior = prepare_fundamental_features(
-        version_or_material,
-        prior_samples,
-        metrics={"revenue": currency},
-        period_kind=period_kind,
-        time_policy=time_policy,
-    )
-    result = samples[KEYS].copy()
-    references = (
-        "status",
-        "fact_id",
-        "raw_value",
-        "cik",
-        "unit",
-        "currency",
-        "period_start",
-        "period_end",
-        "accession",
-        "available_at",
-    )
-    for prefix, panel_df, names in (
-        ("source", current, metrics),
-        ("prior", prior, ("revenue",)),
-    ):
-        for metric in names:
-            for field in references:
-                result[f"{prefix}_{metric}_{field}"] = panel_df[
-                    f"{metric}_{field}"
-                ].array
-
-    def input_status(row: Mapping[str, Any], names: Sequence[str]) -> str:
-        if any(
-            row[f"{name}_status"] not in {"ok", "ok_observed_only"}
-            or not np.isfinite(row[f"{name}_value"])
-            for name in names
-        ):
-            return "input_unavailable"
-        fields = ("cik", "period_start", "period_end", "unit", "currency", "accession")
-        if any(not row[f"{name}_{field}"] for name in names for field in fields):
-            return "basis_missing"
-        if any(
-            row[f"{name}_unit"] != currency or row[f"{name}_currency"] != currency
-            for name in names
-        ):
-            return "unit_mismatch"
-        for field, status in (
-            ("cik", "issuer_mismatch"),
-            ("period_start", "period_mismatch"),
-            ("period_end", "period_mismatch"),
-            ("accession", "accession_mismatch"),
-        ):
-            if len({row[f"{name}_{field}"] for name in names}) != 1:
-                return status
-        return (
-            "ok_observed_only"
-            if any(row[f"{name}_status"] == "ok_observed_only" for name in names)
-            else "ok"
-        )
-
-    derived = []
-    for row, previous in zip(current.to_dict("records"), prior.to_dict("records")):
-        values: dict[str, Any] = {}
-        definitions = (
-            ("gross_margin", ("gross_profit", "revenue")),
-            ("operating_margin", ("operating_income", "revenue")),
-            ("net_margin", ("net_income", "revenue")),
-            ("free_cash_flow", ("operating_cash_flow", "capex")),
-            ("free_cash_flow_margin", ("operating_cash_flow", "capex", "revenue")),
-        )
-        for name, inputs in definitions:
-            status, value = input_status(row, inputs), np.nan
-            if status in {"ok", "ok_observed_only"}:
-                numerator = row[f"{inputs[0]}_value"]
-                if name.startswith("free_cash_flow"):
-                    numerator -= row["capex_value"]
-                if name == "free_cash_flow":
-                    value = numerator
-                elif row["revenue_value"] == 0:
-                    status = "zero_revenue"
-                else:
-                    value = numerator / row["revenue_value"]
-            if not np.isfinite(value) and status in {"ok", "ok_observed_only"}:
-                status, value = "nonfinite_result", np.nan
-            values.update({f"{name}_value": value, f"{name}_status": status})
-        status, growth = input_status(row, ("revenue",)), np.nan
-        if status in {"ok", "ok_observed_only"}:
-            if previous["revenue_status"] not in {"ok", "ok_observed_only"}:
-                status = "prior_unavailable"
-            elif any(
-                previous[f"revenue_{field}"] != row[f"revenue_{field}"]
-                for field in ("cik", "unit", "currency")
-            ):
-                status = "prior_basis_mismatch"
-            elif any(
-                not previous[f"revenue_period_{field}"]
-                or _day(previous[f"revenue_period_{field}"])
-                != previous_year(row[f"revenue_period_{field}"])
-                for field in ("start", "end")
-            ):
-                status = "unverified_prior_period"
-            elif previous["revenue_value"] == 0:
-                status = "zero_prior_revenue"
-            else:
-                growth = row["revenue_value"] / previous["revenue_value"] - 1
-                status = (
-                    "ok_observed_only"
-                    if "ok_observed_only" in {status, previous["revenue_status"]}
-                    else "ok"
-                )
-                if not np.isfinite(growth):
-                    status, growth = "nonfinite_result", np.nan
-        values.update(revenue_yoy_value=growth, revenue_yoy_status=status)
-        derived.append(values)
-    columns = [
-        f"{metric}_{field}" for metric in RATIO_METRICS for field in ("value", "status")
-    ]
-    result = pd.concat(
-        [result, pd.DataFrame(derived, index=samples.index, columns=columns)], axis=1
-    )
-    result.attrs["parameters"] = {
-        "currency": currency,
-        "period_kind": period_kind,
-        "time_policy": time_policy,
-    }
-    result.attrs["limitations"] = current.attrs["limitations"] + [
-        "YoY requires exact one-calendar-year-shifted actual periods, with February 29 clamped; unverified 52/53-week comparisons stay missing.",
-    ]
-    return result
-
-
 # ---------------------------------------------------------------------------
 # High-level split-free pandas DataFrame builders (Layer 2)
 # ---------------------------------------------------------------------------
@@ -1213,143 +705,6 @@ def daily_features(
     return features
 
 
-def _ensure_samples(
-    version: Any,
-    candidates_or_symbols: pd.DataFrame | str | Sequence[str] | None,
-    *,
-    start: str | date | None = None,
-    end: str | date | None = None,
-) -> pd.DataFrame:
-    if isinstance(candidates_or_symbols, pd.DataFrame):
-        if not set(KEYS).issubset(candidates_or_symbols.columns):
-            raise ValueError("Samples require asset_id and signal_session")
-        return candidates_or_symbols.reset_index(drop=True)
-    # Features are not gated by membership: every selected security keeps its rows.
-    return build_candidates(
-        version, candidates_or_symbols, start=start, end=end, universe="static"
-    )
-
-
-def _default_metrics_for_period(period_kind: str) -> dict[str, str]:
-    if period_kind == "instant":
-        return dict(INSTANT_METRICS)
-    if period_kind == "quarter":
-        return {
-            name: unit
-            for name, unit in DURATION_METRICS.items()
-            if name not in QUARTER_DEFAULT_EXCLUDED_METRICS
-        }
-    if period_kind == "annual":
-        return dict(DURATION_METRICS)
-    return dict(ALL_METRICS)
-
-
-def fundamental_features(
-    version: Any,
-    candidates_or_symbols: pd.DataFrame | str | Sequence[str] | None = None,
-    *,
-    time_policy: str,
-    start: str | date | None = None,
-    end: str | date | None = None,
-    metrics: Mapping[str, str] | Sequence[str] | None = None,
-    period_kind: str | Sequence[str] = "quarter",
-) -> pd.DataFrame:
-    """Return PIT-aligned fundamental features as a ``pd.DataFrame``.
-
-    - ``metrics`` may be ``None`` (standard duration or instant metrics for ``period_kind``;
-      quarterly defaults omit the year-to-date cash-flow metrics),
-      a sequence of metric names (auto-mapped via ``ALL_METRICS``), or an explicit ``{metric: unit}`` mapping.
-    - ``period_kind`` may be ``"quarter"``, ``"annual"``, ``"instant"``, ``"all"``, or a sequence of period kinds.
-      When multiple period kinds are requested, columns are prefixed with ``{period_kind}_``.
-    """
-    samples = _ensure_samples(version, candidates_or_symbols, start=start, end=end)
-    if period_kind == "all":
-        periods: list[str] = ["quarter", "annual", "instant"]
-    elif isinstance(period_kind, str):
-        periods = [period_kind]
-    else:
-        periods = list(period_kind)
-
-    def resolve_metrics(pk: str) -> dict[str, str]:
-        if metrics is None:
-            return _default_metrics_for_period(pk)
-        if isinstance(metrics, Mapping):
-            return dict(metrics)
-        return {name: ALL_METRICS.get(name, "USD") for name in metrics}
-
-    if len(periods) == 1:
-        pk = periods[0]
-        return prepare_fundamental_features(
-            version,
-            samples,
-            metrics=resolve_metrics(pk),
-            period_kind=pk,
-            time_policy=time_policy,
-        )
-
-    merged = samples[KEYS].copy()
-    for pk in periods:
-        part = prepare_fundamental_features(
-            version,
-            samples,
-            metrics=resolve_metrics(pk),
-            period_kind=pk,
-            time_policy=time_policy,
-        )
-        value_cols = [col for col in part.columns if col not in KEYS]
-        renamed = {col: f"{pk}_{col}" for col in value_cols}
-        merged = pd.concat([merged, part[value_cols].rename(columns=renamed)], axis=1)
-    merged.attrs["parameters"] = {
-        "period_kinds": periods,
-        "time_policy": time_policy,
-    }
-    return merged
-
-
-def fundamental_ratios(
-    version: Any,
-    candidates_or_symbols: pd.DataFrame | str | Sequence[str] | None = None,
-    *,
-    time_policy: str,
-    start: str | date | None = None,
-    end: str | date | None = None,
-    currency: str = "USD",
-    period_kind: str | Sequence[str] = "quarter",
-) -> pd.DataFrame:
-    """Return PIT-aligned fundamental ratios as a ``pd.DataFrame``.
-
-    ``period_kind`` may be ``"quarter"``, ``"annual"``, or ``("quarter", "annual")``.
-    """
-    samples = _ensure_samples(version, candidates_or_symbols, start=start, end=end)
-    periods = [period_kind] if isinstance(period_kind, str) else list(period_kind)
-    if len(periods) == 1:
-        return prepare_fundamental_ratios(
-            version,
-            samples,
-            currency=currency,
-            period_kind=periods[0],
-            time_policy=time_policy,
-        )
-    merged = samples[KEYS].copy()
-    for pk in periods:
-        part = prepare_fundamental_ratios(
-            version,
-            samples,
-            currency=currency,
-            period_kind=pk,
-            time_policy=time_policy,
-        )
-        value_cols = [col for col in part.columns if col not in KEYS]
-        renamed = {col: f"{pk}_{col}" for col in value_cols}
-        merged = pd.concat([merged, part[value_cols].rename(columns=renamed)], axis=1)
-    merged.attrs["parameters"] = {
-        "currency": currency,
-        "period_kinds": periods,
-        "time_policy": time_policy,
-    }
-    return merged
-
-
 def forward_returns(
     version: Any,
     candidates_or_symbols: pd.DataFrame | str | Sequence[str] | None = None,
@@ -1384,7 +739,7 @@ def forward_returns(
     universe_basis = _candidates.require_pit(rule, allow_static_universe)
     benchmark_id = str(version.resolve(benchmark)[0])
     if isinstance(candidates_or_symbols, pd.DataFrame):
-        samples = _ensure_samples(version, candidates_or_symbols)
+        samples = _candidates.ensure_samples(version, candidates_or_symbols)
     else:
         samples = build_candidates(
             version,
@@ -1483,6 +838,7 @@ def panel(
     fundamental_time_policy: str | None = None,
     include_fundamentals: bool = True,
     include_ratios: bool = True,
+    provenance_columns: bool = False,
     output_dir: str | Path | None = None,
 ) -> pd.DataFrame:
     """Build a unified PIT research ``pd.DataFrame`` combining daily features, fundamentals, ratios, and forward returns.
@@ -1492,6 +848,8 @@ def panel(
     rows. A version without membership rows needs ``allow_static_universe=True``.
     Default quarterly columns omit operating cash flow, capex and free cash flow (10-Q
     cash flows are year-to-date); request them explicitly through ``fundamental_features``.
+    Fundamental columns are each metric's value and categorical status;
+    ``provenance_columns=True`` adds the selected facts' provenance and ratio inputs.
     """
     _policy(time_policy)
     fund_policy = _policy(fundamental_time_policy or time_policy)
@@ -1529,21 +887,47 @@ def panel(
     parts: list[pd.DataFrame] = [rows]
     samples = rows[KEYS + ["decision_at"]]
 
+    # One read of the facts and one prepared engine serve features and ratios.
+    metrics = {
+        kind: _fundamentals.default_metrics(kind)
+        for kind in ("quarter", "annual", "instant")
+    }
+    inputs = (
+        _fundamentals.FactInputs(
+            version,
+            samples["asset_id"],
+            list(
+                dict.fromkeys(
+                    [
+                        *(name for names in metrics.values() for name in names),
+                        *_fundamentals.RATIO_INPUTS,
+                    ]
+                )
+            ),
+        )
+        if include_fundamentals or include_ratios
+        else None
+    )
     if include_fundamentals:
-        fund = fundamental_features(
+        fund = _fundamentals.features_by_period(
             version,
             samples,
-            period_kind=("quarter", "annual", "instant"),
+            metrics,
             time_policy=fund_policy,
+            provenance=provenance_columns,
+            inputs=inputs,
         )
         parts.append(fund.drop(columns=KEYS))
 
     if include_ratios:
-        ratios = fundamental_ratios(
+        ratios = _fundamentals.ratios_by_period(
             version,
             samples,
-            period_kind=("quarter", "annual"),
+            ("quarter", "annual"),
+            currency="USD",
             time_policy=fund_policy,
+            provenance=provenance_columns,
+            inputs=inputs,
         )
         stale = tuple(
             [f"quarter_{name}_" for name in QUARTER_DEFAULT_EXCLUDED_RATIOS]
@@ -1592,6 +976,7 @@ def panel(
             "fundamental_time_policy": fund_policy,
             "include_fundamentals": include_fundamentals,
             "include_ratios": include_ratios,
+            "provenance_columns": provenance_columns,
             "next_session": None if next_session is None else str(_day(next_session)),
             "keep_non_members": keep_non_members,
             **{

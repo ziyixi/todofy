@@ -40,6 +40,18 @@ from .constants import (
     __version__,
 )
 from .events import EventSpec
+from .fundamentals import (
+    fundamental_features as _fundamental_features,
+)
+from .fundamentals import (
+    fundamental_ratios as _fundamental_ratios,
+)
+from .fundamentals import (
+    prepare_fundamental_features as _prepare_fundamental_features,
+)
+from .fundamentals import (
+    prepare_fundamental_ratios as _prepare_fundamental_ratios,
+)
 from .panels import (
     build_candidates,
 )
@@ -50,22 +62,10 @@ from .panels import (
     forward_returns as _forward_returns,
 )
 from .panels import (
-    fundamental_features as _fundamental_features,
-)
-from .panels import (
-    fundamental_ratios as _fundamental_ratios,
-)
-from .panels import (
     panel as _panel,
 )
 from .panels import (
     prepare as _prepare,
-)
-from .panels import (
-    prepare_fundamental_features as _prepare_fundamental_features,
-)
-from .panels import (
-    prepare_fundamental_ratios as _prepare_fundamental_ratios,
 )
 
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -1628,6 +1628,7 @@ class Dataset:
         end: str | date | None = None,
         metrics: Mapping[str, str] | Sequence[str] | None = None,
         period_kind: str | Sequence[str] = "quarter",
+        provenance: bool = True,
     ) -> pd.DataFrame:
         """Return PIT-aligned fundamental features as a ``pd.DataFrame``."""
         return _fundamental_features(
@@ -1638,6 +1639,7 @@ class Dataset:
             metrics=metrics,
             period_kind=period_kind,
             time_policy=time_policy,
+            provenance=provenance,
         )
 
     def fundamental_ratios(
@@ -1649,6 +1651,7 @@ class Dataset:
         end: str | date | None = None,
         currency: str = "USD",
         period_kind: str | Sequence[str] = "quarter",
+        provenance: bool = True,
     ) -> pd.DataFrame:
         """Return PIT-aligned fundamental ratios as a ``pd.DataFrame``."""
         return _fundamental_ratios(
@@ -1659,6 +1662,7 @@ class Dataset:
             currency=currency,
             period_kind=period_kind,
             time_policy=time_policy,
+            provenance=provenance,
         )
 
     def forward_returns(
@@ -1711,6 +1715,7 @@ class Dataset:
         fundamental_time_policy: str | None = None,
         include_fundamentals: bool = True,
         include_ratios: bool = True,
+        provenance_columns: bool = False,
         output_dir: str | Path | None = None,
     ) -> pd.DataFrame:
         """Build a unified PIT research ``pd.DataFrame`` combining daily, fundamental, ratio, and label columns."""
@@ -1732,6 +1737,7 @@ class Dataset:
             fundamental_time_policy=fundamental_time_policy,
             include_fundamentals=include_fundamentals,
             include_ratios=include_ratios,
+            provenance_columns=provenance_columns,
             output_dir=output_dir,
         )
 

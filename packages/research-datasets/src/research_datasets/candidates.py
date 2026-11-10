@@ -19,6 +19,7 @@ from . import clocks
 from .constants import (
     CANDIDATE_SECURITY_TYPES,
     DEFAULT_UNIVERSE_RULE,
+    KEYS,
     LABEL_OPEN_TIME,
     SAMPLINGS,
 )
@@ -369,4 +370,22 @@ def candidate_frame(
             "membership_carried": np.zeros(len(tiled), dtype=bool),
             "is_benchmark": np.repeat(np.array(benchmarks, dtype=bool), length),
         }
+    )
+
+
+def ensure_samples(
+    version: Any,
+    candidates_or_symbols: pd.DataFrame | str | Sequence[str] | None,
+    *,
+    start: str | date | None = None,
+    end: str | date | None = None,
+) -> pd.DataFrame:
+    """A candidate frame as given (fresh index), or candidates of the symbols over the
+    frozen securities (not gated by membership: every selected security keeps its rows)."""
+    if isinstance(candidates_or_symbols, pd.DataFrame):
+        if not set(KEYS).issubset(candidates_or_symbols.columns):
+            raise ValueError("Samples require asset_id and signal_session")
+        return candidates_or_symbols.reset_index(drop=True)
+    return build_candidates(
+        version, candidates_or_symbols, start=start, end=end, universe="static"
     )

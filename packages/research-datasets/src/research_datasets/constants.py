@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import time, timedelta
 from types import MappingProxyType
 
-__version__ = "2.0.0rc1"
+__version__ = "2.0.0"
 API = "v1"
 
 # The newest manifest layout this SDK reads; client_min_version is checked separately.

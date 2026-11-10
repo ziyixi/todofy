@@ -13,6 +13,7 @@ py_library(
         "clocks.py",
         "constants.py",
         "events.py",
+        "fundamentals.py",
         "labels.py",
         "panels.py",
         "provenance.py",

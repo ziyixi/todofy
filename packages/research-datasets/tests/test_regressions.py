@@ -259,6 +259,47 @@ class ContractRegressionTest(unittest.TestCase):
             )
             self.assertIn("operating_cash_flow_value", explicit.columns)
 
+    def test_panel_fundamentals_are_lean_unless_provenance_columns(self) -> None:
+        objects, _ = fixture._build_synthetic_bundle()
+        with (
+            fixture.SyntheticDatasetServer(objects) as server,
+            tempfile.TemporaryDirectory() as tmp,
+        ):
+            ds = _load(server, tmp)
+            options = {
+                "start": ds.calendar[6],
+                "end": ds.calendar[8],
+                "time_policy": "public_reconstructed",
+                "allow_static_universe": True,
+            }
+            lean = ds.panel(["AAPL", "GOOG"], **options)
+            full = ds.panel(["AAPL", "GOOG"], provenance_columns=True, **options)
+        for name in ("quarter_revenue_status", "quarter_gross_margin_status"):
+            self.assertIsInstance(lean[name].dtype, pd.CategoricalDtype)
+            self.assertEqual(lean[name].astype(object).tolist(), full[name].tolist())
+        self.assertIn("ok", set(lean["quarter_revenue_status"]))
+        pd.testing.assert_series_equal(
+            lean["quarter_revenue_value"], full["quarter_revenue_value"]
+        )
+        for name in (
+            "quarter_revenue_fact_id",
+            "quarter_revenue_available_at",
+            "quarter_source_revenue_fact_id",
+            "annual_prior_revenue_period_end",
+        ):
+            self.assertNotIn(name, lean.columns)
+            self.assertIn(name, full.columns)
+        # Only fundamental columns differ; the lean columns keep the full panel's order.
+        extra = [name for name in full if name not in lean]
+        self.assertTrue(
+            extra
+            and all(
+                name.startswith(("quarter_", "annual_", "instant_")) for name in extra
+            )
+        )
+        self.assertEqual([name for name in full if name in lean], list(lean.columns))
+        self.assertFalse(lean.attrs["provenance"]["parameters"]["provenance_columns"])
+
     def test_manifest_schema_newer_than_client_is_refused(self) -> None:
         newest = research_datasets.MANIFEST_SCHEMA_MAX
         objects, _ = fixture._build_synthetic_bundle(
@@ -286,8 +327,9 @@ class ContractRegressionTest(unittest.TestCase):
             ("1.0.0", True),
             ("2.0.0rc1", True),
             ("2.0.0b9", True),
-            ("2.0.0", False),
-            ("2.0.0rc2", False),
+            ("2.0.0", True),
+            ("2.0.1", False),
+            ("2.0.1rc1", False),
             ("2.1.0", False),
             ("next", False),
         ):
