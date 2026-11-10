@@ -26,3 +26,10 @@ was accepted once, and the Dot's execution data confirmed it. A unique synthetic
 Cleanup stopped every subscription and deleted the synthetic tasks. Not exercised: natural date transitions,
 production Mail collection, real completions, real Recall content and a new Home fault.
 Evidence: [release of `f5386a9d`](https://github.com/ziyixi/todofy/actions/runs/39568082826).
+
+## Claude connection
+
+2026-11-10. After `ac21a59c` allowed Claude's callback and Infra apply updated only the MCP Access app, claude.ai
+detected OAuth sign-in with DCR, the Access consent named the Claude client, and the custom connector listed all 36
+tools (22 read-only, 14 write). A Claude chat called `connection_status` once and reported the deployed build.
+No business tool was called, and Claude holds no event subscription.
