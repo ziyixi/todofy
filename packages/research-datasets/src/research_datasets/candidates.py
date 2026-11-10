@@ -192,6 +192,12 @@ def latest_membership(
     return latest.assign(warmup=warm.to_numpy(dtype=bool))
 
 
+def following_month(month: str) -> str:
+    """The ``YYYY-MM`` month after ``month``."""
+    year, number = map(int, month.split("-"))
+    return f"{year + number // 12:04d}-{number % 12 + 1:02d}"
+
+
 def known_months(
     latest: pd.DataFrame, rule_info: Mapping[str, Any] | None = None
 ) -> list[str]:
@@ -278,9 +284,12 @@ def build_candidates(
     or a rule version), rows outside the universe are dropped unless
     ``keep_non_members``; ``in_universe`` is NA for a static universe.
     ``next_session`` gives the last frozen session a live decision instant; when its
-    month is after the rule's last known month (ranked on that month's first session,
-    so a version frozen at the month end lacks it), that row takes the last known
-    month's membership and ``membership_carried`` is True.
+    month is the one right after the rule's last known month (ranked on that month's
+    first session, so a version frozen at the month end lacks it), that row takes the
+    last known month's membership and ``membership_carried`` is True
+    (``attrs["parameters"]["membership_carried_from"]`` names the month). A later month
+    is not carried: the live row's membership is unknown (NA) and
+    ``attrs["parameters"]["live_membership_unknown"]`` is True.
     """
     benchmark_ids = (
         list(map(str, version.resolve(benchmark))) if benchmark is not None else []
@@ -296,6 +305,8 @@ def build_candidates(
     rule = membership_rule("universe_membership" in families(version), universe)
     frame = candidate_frame(cal, asset_ids, positions, version.universe)
     total = len(frame)
+    carried_from: str | None = None
+    live_unknown = False
     if rule is not None:
         membership, rule_info = (
             read_membership(version, asset_ids),
@@ -304,11 +315,17 @@ def build_candidates(
         entries = frame["entry_session"].to_numpy(dtype=object)
         known = known_months(latest_membership(membership, rule, rule_info), rule_info)
         live = cal.next_session
-        if live is not None and known and f"{live:%Y-%m}" > max(known):
-            carried = entries == live
-            year, month = map(int, max(known).split("-"))
-            entries = np.where(carried, date(year, month, 1), entries)
-            frame["membership_carried"] = carried
+        live_rows = entries == live if live is not None else np.zeros(total, bool)
+        if live is not None and live_rows.any():
+            last = max(known) if known else None
+            if last is not None and f"{live:%Y-%m}" == following_month(last):
+                year, month = map(int, last.split("-"))
+                entries = np.where(live_rows, date(year, month, 1), entries)
+                frame["membership_carried"] = live_rows
+                carried_from = last
+            else:
+                # Membership more than one month stale is not carried: NA.
+                live_unknown = last is None or f"{live:%Y-%m}" > last
         frame["in_universe"] = in_universe(
             frame["asset_id"], entries, membership, rule, rule_info
         )
@@ -324,6 +341,8 @@ def build_candidates(
         "universe_rule": rule,
         "keep_non_members": keep_non_members,
         "next_session": None if cal.next_session is None else str(cal.next_session),
+        "membership_carried_from": carried_from,
+        "live_membership_unknown": live_unknown,
     }
     frame.attrs["counts"] = {
         "grid": total,

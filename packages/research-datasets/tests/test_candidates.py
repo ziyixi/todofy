@@ -100,6 +100,23 @@ class MembershipTest(unittest.TestCase):
             version, [A], universe="pit-liquid-v1", keep_non_members=True
         )
         self.assertFalse(rows(liquid, A).loc[thursday, "in_universe"])
+        # Labels judge candidates under the rule they were built with.
+        with self.assertRaisesRegex(ValueError, "pit-liquid-v1"):
+            research_datasets.forward_returns(
+                version, liquid, benchmark=BENCH, horizons=1
+            )
+        matched = research_datasets.forward_returns(
+            version, liquid, benchmark=BENCH, horizons=1, universe="pit-liquid-v1"
+        )
+        self.assertFalse(rows(matched, A).loc[thursday, "in_universe"])
+        self.assertFalse(rows(matched, A).loc[thursday, "trainable_1d"])
+        static_rows = research_datasets.build_candidates(
+            version, [A], universe="static"
+        )
+        with self.assertRaisesRegex(ValueError, "static"):
+            research_datasets.forward_returns(
+                version, static_rows, benchmark=BENCH, horizons=1
+            )
         # A rule version without rows must be one the version exports.
         with self.assertRaisesRegex(ValueError, "pit-typo-v1"):
             research_datasets.build_candidates(version, [A], universe="pit-typo-v1")
@@ -249,6 +266,25 @@ class ClockTest(unittest.TestCase):
         )
         self.assertEqual(kept["asset_id"].tolist(), [A])
         self.assertEqual(kept.attrs["counts"]["membership_carried"], 1)
+        self.assertEqual(kept.attrs["parameters"]["membership_carried_from"], "2026-01")
+        self.assertFalse(kept.attrs["parameters"]["live_membership_unknown"])
+        # Only the month right after the last known one is carried: a March live
+        # session with January membership is unknown (NA, dropped under pit).
+        stale = research_datasets.build_candidates(
+            version, [A, B], next_session="2026-03-02", keep_non_members=True
+        )
+        self.assertTrue(
+            stale.loc[stale["signal_session"] == DAYS[4], "in_universe"].isna().all()
+        )
+        self.assertFalse(stale["membership_carried"].any())
+        self.assertIsNone(stale.attrs["parameters"]["membership_carried_from"])
+        self.assertTrue(stale.attrs["parameters"]["live_membership_unknown"])
+        self.assertTrue(
+            research_datasets.build_candidates(
+                version, [A], start=DAYS[4], next_session="2026-03-02"
+            ).empty
+        )
+        self.assertEqual(candidates.following_month("2026-12"), "2027-01")
         # Without a live session nothing is carried: the last signal has no entry.
         frozen = research_datasets.build_candidates(version, [A], keep_non_members=True)
         self.assertTrue(pd.isna(frozen.iloc[-1]["in_universe"]))

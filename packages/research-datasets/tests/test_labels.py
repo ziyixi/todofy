@@ -651,6 +651,17 @@ class SplitTest(unittest.TestCase):
                 gap = max(horizon - 1, embargo)
                 self.assertEqual(len(kept), max(validation_first - gap, 0))
                 self.assertEqual(set(splits["split"]), {"train", "validation", "test"})
+                # The validation split is purged against the test split the same way
+                # (validation 15..24, test from 25).
+                validation = splits[splits["split"] == "validation"]
+                kept = validation.loc[~validation["purged"], "signal_session"]
+                self.assertEqual(len(kept), max(10 - gap, 0))
+                test_first = splits.loc[splits["split"] == "test", "decision_at"].min()
+                self.assertTrue(
+                    (
+                        validation.loc[~validation["purged"], "label_end"] < test_first
+                    ).all()
+                )
         with self.assertRaises(TypeError):
             research_datasets.split_membership(
                 frame,
@@ -658,6 +669,45 @@ class SplitTest(unittest.TestCase):
                 validation_end=SESSIONS[20],
                 cal=cal,
                 embargo_sessions=1.5,
+            )
+
+    def test_empty_middle_split_purges_train_against_test(self) -> None:
+        closes = [100.0 + i for i in range(len(SESSIONS))]
+        version = LabelVersion(
+            [A, BENCH],
+            families={"daily_returns": session_rows(A, closes) + benchmark_rows()},
+        )
+        cal = research_datasets.Calendar(SESSIONS)
+        frame = labels_for(version, [(A, i) for i in range(30)], 10).assign(
+            decision_at=[cal.decision_at(i + 1) for i in range(30)]
+        )
+        # Signals 15..19 (the validation split) were not members and are gone.
+        frame = frame[~frame["signal_session"].isin(SESSIONS[15:20])]
+        for embargo in (0, 12):
+            with self.subTest(embargo=embargo):
+                splits = research_datasets.split_membership(
+                    frame,
+                    train_end=SESSIONS[14].isoformat(),  # ISO strings are accepted
+                    validation_end=SESSIONS[19].isoformat(),
+                    cal=cal,
+                    embargo_sessions=embargo,
+                )
+                self.assertEqual(set(splits["split"]), {"train", "test"})
+                train = splits[splits["split"] == "train"].set_index("signal_session")
+                test_first = splits.loc[splits["split"] == "test", "decision_at"].min()
+                self.assertEqual(test_first, cal.decision_at(21))
+                kept = train[~train["purged"]]
+                self.assertTrue((kept["label_end"] < test_first).all())
+                # H=10: a label ends at the test's first decision from signal 11 on;
+                # the embargo counts from the test's first signal (20).
+                first_purged = min(11, 20 - embargo)
+                self.assertEqual(list(kept.index), SESSIONS[:first_purged])
+                reasons = train["purge_reason"].value_counts().to_dict()
+                self.assertEqual(reasons.get("label_end_not_before_next_split"), 4)
+                self.assertEqual(reasons.get("embargo", 0), 11 - first_purged)
+        with self.assertRaisesRegex(ValueError, "train_end < validation_end"):
+            research_datasets.split_membership(
+                frame, train_end=SESSIONS[19], validation_end=SESSIONS[14], cal=cal
             )
 
 
@@ -878,6 +928,7 @@ class FamilyLabelTest(unittest.TestCase):
             )
             self.assertEqual(len(features), len(labels))
             self.assertEqual(run["counts"]["not_in_universe_dropped"], 5)
+            self.assertEqual(run["counts"]["in_universe"], run["counts"]["candidates"])
             self.assertEqual(run["parameters"]["universe_basis"], "pit")
             self.assertEqual(set(labels["return_basis"]), {"total_return"})
             self.assertTrue(labels["trainable_1d"].any())
@@ -887,6 +938,16 @@ class FamilyLabelTest(unittest.TestCase):
                 sorted({str(day) for day in embargoed["signal_session"]}),
                 [sessions[9], sessions[10], sessions[15], sessions[16]],
             )
+            # AAPL alone has no member rows from February on: the test split (its
+            # signals enter in February) is empty after the point-in-time filter.
+            with self.assertRaisesRegex(ValueError, "point-in-time universe"):
+                research_datasets.prepare(
+                    ds,
+                    horizon=1,
+                    train_end=sessions[10],
+                    validation_end=sessions[22],
+                    **{**selection, "asset_ids": [bundle.ASSET_A]},
+                )
             weekly, _, _, run = research_datasets.prepare(
                 ds, horizon=5, sampling="weekly", **selection
             )
@@ -981,8 +1042,38 @@ class FamilyLabelTest(unittest.TestCase):
             self.assertTrue(pd.isna(live["asset_return"]).all())
             provenance = live.attrs["provenance"]
             self.assertEqual(provenance["counts"]["membership_carried"], 1)
+            self.assertEqual(provenance["counts"]["in_universe"], 1)
+            self.assertEqual(
+                provenance["parameters"]["membership_carried_from"], "2026-02"
+            )
             self.assertTrue(
-                any("membership_carried" in line for line in provenance["limitations"])
+                any(
+                    "2026-02 membership (membership_carried)" in line
+                    for line in provenance["limitations"]
+                )
+            )
+            # The carried member is in the universe; only AAPL (dropped) is not.
+            self.assertEqual(provenance["masks"]["5"]["not_in_universe"], 1)
+            self.assertEqual(provenance["masks"]["5"]["trainable"], 0)
+            # Two months past the last frozen month nothing is carried.
+            stale = ds.panel(
+                ["AAPL", "GOOG"],
+                time_policy="public_reconstructed",
+                horizons=5,
+                start=sessions[-1],
+                end=sessions[-1],
+                next_session="2026-04-01",
+                keep_non_members=True,
+                include_fundamentals=False,
+                include_ratios=False,
+            )
+            self.assertTrue(stale["in_universe"].isna().all())
+            self.assertFalse(stale["membership_carried"].any())
+            provenance = stale.attrs["provenance"]
+            self.assertTrue(provenance["parameters"]["live_membership_unknown"])
+            self.assertEqual(provenance["masks"]["5"]["not_in_universe"], 2)
+            self.assertTrue(
+                any("is unknown" in line for line in provenance["limitations"])
             )
 
 

@@ -90,11 +90,27 @@ LIMITATIONS = [
     "21-session event ranks are percentiles over the universe's non-benchmark securities, whatever the selection.",
     "Quarterly cash-flow facts are year-to-date in 10-Q filings, so default quarterly columns omit operating cash flow, capex and free cash flow.",
 ]
-# Added by panel when a live row's month has no frozen membership.
-CARRIED_LIMITATION = (
-    "The live session's month has no frozen membership yet: its rows use the last "
-    "known month (membership_carried)."
-)
+
+
+def _live_limitations(parameters: Mapping[str, Any], carried: int) -> list[str]:
+    """Run-record lines for a live session whose month has no frozen membership."""
+    if carried:
+        month = parameters["membership_carried_from"]
+        return [
+            (
+                "The live session's month has no frozen membership yet: its rows use "
+                f"the {month} membership (membership_carried)."
+            )
+        ]
+    if parameters.get("live_membership_unknown"):
+        return [
+            (
+                "The live session's month and the month before it have no frozen "
+                "membership: its rows' membership is unknown (dropped unless "
+                "keep_non_members)."
+            )
+        ]
+    return []
 
 
 def _price_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -561,6 +577,17 @@ def prepare(
         keep = labels["in_universe"].fillna(False).to_numpy(dtype=bool)
         features = features[keep].reset_index(drop=True)
         labels = labels[keep].reset_index(drop=True)
+        if has_splits and train_d is not None and val_d is not None:
+            kept = set(features["signal_session"])
+            if (
+                not any(day <= train_d for day in kept)
+                or not any(train_d < day <= val_d for day in kept)
+                or not any(day > val_d for day in kept)
+            ):
+                raise ValueError(
+                    "Each split must contain at least one member row of the "
+                    "point-in-time universe"
+                )
     splits = (
         _labels.split_membership(
             features[[*KEYS, "decision_at"]].assign(label_end=labels["label_end"]),
@@ -594,6 +621,7 @@ def prepare(
     masks = masks[str(horizon)]
     counts: dict[str, int] = {
         "candidates": len(features),
+        "in_universe": int(labels["in_universe"].fillna(rule is None).sum()),
         "not_in_universe_dropped": dropped,
         "pair_valid": masks.pop("pair_valid"),
         "trainable": masks.pop("trainable"),
@@ -727,7 +755,9 @@ def forward_returns(
     One ``int`` horizon gives the standard label columns; several prefix each horizon's
     columns with ``h{H}_``. Every horizon adds ``forward_excess_return_{H}d`` and
     ``trainable_{H}d``. Symbols build candidates (sampling, membership); a candidate
-    DataFrame keeps its rows and gets ``in_universe``. A version without membership rows
+    DataFrame keeps its rows and gets ``in_universe`` under ``universe`` (candidates
+    whose ``attrs["parameters"]`` name another rule are refused; a live row gets NA,
+    use ``panel`` for live rows). A version without membership rows
     needs ``allow_static_universe=True``. ``neutralize`` names groups ("size", a sample
     column or a universe field) for ``excess_return_{H}d_{group}``. Masks count rows
     outside the universe, including those dropped when candidates are built here
@@ -739,6 +769,17 @@ def forward_returns(
     universe_basis = _candidates.require_pit(rule, allow_static_universe)
     benchmark_id = str(version.resolve(benchmark)[0])
     if isinstance(candidates_or_symbols, pd.DataFrame):
+        origin = candidates_or_symbols.attrs.get("parameters")
+        if (
+            isinstance(origin, Mapping)
+            and "universe_rule" in origin
+            and origin["universe_rule"] != rule
+        ):
+            raise ValueError(
+                f"The candidates use universe {origin['universe_rule'] or 'static'} "
+                f"but forward_returns resolves {rule or 'static'}; pass the "
+                "candidates' universe"
+            )
         samples = _candidates.ensure_samples(version, candidates_or_symbols)
     else:
         samples = build_candidates(
@@ -952,11 +993,16 @@ def panel(
         terminal_policy=terminal_policy,
         neutralize=neutralize,
     )
-    # Candidate columns (keys, clocks, membership) win over the label's copies.
+    # Candidate columns (keys, clocks, membership) win over the label's copies. The
+    # labels' calendar has no live session, so non-members are counted from the
+    # candidates' membership (it includes the live row's) plus the rows dropped.
     parts.append(labels.drop(columns=[c for c in labels.columns if c in rows]))
-    dropped = candidates.attrs["counts"]["not_in_universe_dropped"]
+    member = np.asarray(rows["in_universe"].fillna(rule is None), dtype=bool)
+    outside = (
+        int((~member).sum()) + candidates.attrs["counts"]["not_in_universe_dropped"]
+    )
     masks = {
-        horizon: {**counts, "not_in_universe": counts["not_in_universe"] + dropped}
+        horizon: {**counts, "not_in_universe": outside}
         for horizon, counts in labels.attrs["masks"].items()
     }
 
@@ -978,6 +1024,12 @@ def panel(
             "include_ratios": include_ratios,
             "provenance_columns": provenance_columns,
             "next_session": None if next_session is None else str(_day(next_session)),
+            "membership_carried_from": candidates.attrs["parameters"][
+                "membership_carried_from"
+            ],
+            "live_membership_unknown": candidates.attrs["parameters"][
+                "live_membership_unknown"
+            ],
             "keep_non_members": keep_non_members,
             **{
                 name: label_parameters[name]
@@ -994,6 +1046,7 @@ def panel(
         counts={
             "rows": len(combined),
             "columns": len(combined.columns),
+            "in_universe": int(member.sum()),
             **candidates.attrs.get("counts", {}),
         },
         rows=len(combined),
@@ -1012,10 +1065,9 @@ def panel(
         limitations=[
             *LIMITATIONS,
             *labels.attrs["limitations"],
-            *(
-                [CARRIED_LIMITATION]
-                if candidates.attrs["counts"]["membership_carried"]
-                else []
+            *_live_limitations(
+                candidates.attrs["parameters"],
+                candidates.attrs["counts"]["membership_carried"],
             ),
             *version.manifest.get("limitations", []),
         ],

@@ -558,30 +558,34 @@ def label_overlap(signal: np.ndarray, horizon_list: Sequence[int]) -> dict[str, 
 def split_membership(
     frame: pd.DataFrame,
     *,
-    train_end: date,
-    validation_end: date,
+    train_end: date | str,
+    validation_end: date | str,
     cal: clocks.Calendar,
     embargo_sessions: int = 0,
 ) -> pd.DataFrame:
     """Chronological train/validation/test membership. A row of an earlier split is
-    purged when its label ends at or after the next split's first decision (or has no
-    end), and embargoed when its signal is within ``embargo_sessions`` sessions before
-    the next split's first signal."""
+    purged when its label ends at or after the first decision of any later split (or
+    has no end), and embargoed when its signal is within ``embargo_sessions`` sessions
+    before the first signal of the nearest later split that has rows."""
     if isinstance(embargo_sessions, bool) or not isinstance(embargo_sessions, int):
         raise TypeError("embargo_sessions must be a non-negative integer")
     if embargo_sessions < 0:
         raise ValueError("embargo_sessions must be a non-negative integer")
+    train_end, validation_end = clocks.day(train_end), clocks.day(validation_end)
+    if not train_end < validation_end:
+        raise ValueError("Require train_end < validation_end")
     result = frame[[*KEYS, "decision_at", "label_end"]].reset_index(drop=True).copy()
     signal = cal.positions(result["signal_session"])
     days = np.array(cal.days, dtype=object)[signal]
-    result["split"] = np.select(
-        [days <= train_end, days <= validation_end], ["train", "validation"], "test"
-    )
+    order = np.select([days <= train_end, days <= validation_end], [0, 1], 2)
+    result["split"] = np.array(["train", "validation", "test"], dtype=object)[order]
     result["purged"] = False
     result["purge_reason"] = ""
-    for previous, following in (("train", "validation"), ("validation", "test")):
-        later = (result["split"] == following).to_numpy()
-        earlier = (result["split"] == previous).to_numpy()
+    # Each split is purged against every later one: an empty middle split must not
+    # let train labels run into the test period.
+    for split in (0, 1):
+        later = order > split
+        earlier = order == split
         if not later.any():
             continue
         next_decision = result.loc[later, "decision_at"].min()
