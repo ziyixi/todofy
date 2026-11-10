@@ -1,8 +1,9 @@
 # Personal Cloud connection
 
-Access Managed OAuth protects the existing private ChatGPT App. Keep its App identity and account connection;
-application publication and plugin/tool-catalog refresh are separate operations. Current tools are defined by the
-Worker, with usage rules in [the skill](../plugin/skills/personal-cloud/SKILL.md).
+Access Managed OAuth protects the existing private ChatGPT App and the owner's [Claude](#claude) custom connector.
+Keep the App identity and account connection; application publication and plugin/tool-catalog refresh are separate
+operations. Current tools are defined by the Worker, with usage rules in
+[the skill](../plugin/skills/personal-cloud/SKILL.md).
 
 ## Setup and publication
 
@@ -15,6 +16,16 @@ Worker, with usage rules in [the skill](../plugin/skills/personal-cloud/SKILL.md
    catalog and verify the actual discovered tools and event types. An Inspector call alone does not verify Dots.
 4. If changing the packaged skill, retrieve the current App-backed manifest, update its version and skill files,
    and preserve its App binding, title, description and sharing. Worker deployment does not publish this package.
+
+## Claude
+
+Claude's hosted apps (web, Desktop, mobile) add the same `/mcp` URL as a custom connector. Access advertises a
+registration endpoint and no Client ID Metadata Document, so Claude registers through DCR with its one documented
+callback, `https://claude.ai/api/mcp/auth_callback`, which the Access app allows exactly. Claude Code uses that
+connector through the owner's claude.ai account; the Access app allows no loopback client. Claude does not subscribe
+to MCP events: it sees Work reports and source changes only when it reads them. The packaged skill belongs to the
+ChatGPT plugin; in Claude the tool descriptions carry the rules.
+Reference: [Claude connector authentication](https://claude.com/docs/connectors/building/authentication).
 
 ## Subscription behavior
 

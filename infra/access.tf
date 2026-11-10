@@ -86,14 +86,20 @@ resource "cloudflare_zero_trust_access_application" "owner" {
   session_duration           = each.value.session
 
   # Private MCP only; existing applications retain null. Both exact ChatGPT redirects are used by
-  # its documented issuer-aware flow and this owner's live connection form. No redirect wildcard.
+  # its documented issuer-aware flow and this owner's live connection form. Claude's hosted apps
+  # (web, Desktop, mobile) share one documented callback; Claude Code reaches the same connector
+  # through the claude.ai account, so no loopback client is allowed. No redirect wildcard.
   oauth_configuration = each.key == "personal-mcp" ? {
     enabled = true
     dynamic_client_registration = {
       enabled                = true
       allow_any_on_localhost = false
       allow_any_on_loopback  = false
-      allowed_uris           = ["https://chatgpt.com/connector_platform_oauth_redirect", "https://chatgpt.com/connector/oauth/FSrczCNZCMHZ"]
+      allowed_uris = [
+        "https://chatgpt.com/connector_platform_oauth_redirect",
+        "https://chatgpt.com/connector/oauth/FSrczCNZCMHZ",
+        "https://claude.ai/api/mcp/auth_callback",
+      ]
     }
     grant = {
       access_token_lifetime = "15m"

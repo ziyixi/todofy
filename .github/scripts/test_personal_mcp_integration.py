@@ -51,5 +51,6 @@ class PersonalMcpIntegration(unittest.TestCase):
         self.assertEqual(re.findall(r'"([^"\n]+)"', allowed), [
             'https://chatgpt.com/connector_platform_oauth_redirect',
             'https://chatgpt.com/connector/oauth/FSrczCNZCMHZ',
+            'https://claude.ai/api/mcp/auth_callback',
         ])
         self.assertNotIn('*', allowed)
