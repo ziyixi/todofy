@@ -20,23 +20,23 @@ from uuid import UUID
 import numpy as np
 import pandas as pd
 
+from . import candidates as _candidates
 from . import clocks
+from . import labels as _labels
+from .candidates import build_candidates
 from .clocks import CAPTURE_DEADLINE as _CAPTURE_DEADLINE
-from .clocks import at as _at
 from .clocks import clock as _clock
 from .clocks import day as _day
-from .clocks import decision_at as _decision_at
 from .clocks import policy as _policy
 from .clocks import public_clock as _public_clock
 from .constants import (
     ALL_METRICS,
     CAPTURE_GRACE,
     DECISION_TIME,
+    DEFAULT_HORIZONS,
     DURATION_METRICS,
     INSTANT_METRICS,
     KEYS,
-    LABEL_CLOSE_TIME,
-    LABEL_OPEN_TIME,
     NEW_YORK_ZONE,
     QUARTER_DEFAULT_EXCLUDED_METRICS,
     QUARTER_DEFAULT_EXCLUDED_RATIOS,
@@ -67,9 +67,7 @@ OBSERVATION_COLUMNS = (
 )
 LIMITATIONS = [
     "Vendor-adjusted prices can be revised; this is not a strict price-PIT dataset.",
-    "The frozen research universe is not a historical eligibility universe.",
-    "Adjusted open-to-close ratios are analytical proxies, not fills or net PnL.",
-    "A date-only calendar uses 16:00 New York label ends, conservatively including early-close days.",
+    "Labels are analytical open-to-close returns, not fills or net PnL.",
     "A row is decided at 06:00 New York on its entry session and sees information public at or before then; its event window is (06:00 on the signal session, 06:00 on the entry session].",
     "SEC filings are public at max(acceptance, 06:00 New York on the SEC filing date); observed_content also requires each capture by 09:00 New York on the entry session.",
     "Under public_reconstructed, event links come from each event's latest saved version and coverage comes from saved check windows regardless of when they ran.",
@@ -100,14 +98,6 @@ def _price_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
-def _prices(frame: pd.DataFrame, calendar: Sequence[date]) -> dict[str, pd.DataFrame]:
-    """Per security, normalized price rows reindexed to the calendar."""
-    return {
-        str(asset): rows.set_index("date").reindex(calendar)
-        for asset, rows in frame.groupby("asset_id", observed=True)
-    }
-
-
 def _wide(
     frame: pd.DataFrame, calendar: Sequence[date], assets: Sequence[str], column: str
 ) -> pd.DataFrame:
@@ -118,15 +108,11 @@ def _wide(
     return wide.reindex(index=list(calendar), columns=list(assets)).astype("float64")
 
 
-def _families(version: Any) -> Mapping[str, Any]:
-    manifest = getattr(version, "manifest", None)
-    families = manifest.get("data_families") if isinstance(manifest, Mapping) else None
-    return families if isinstance(families, Mapping) else {}
-
-
 def _news_versions(version: Any) -> pd.DataFrame | None:
     """Story keys of frozen article text versions, when the version has them."""
-    if "news_versions" not in _families(version) or not hasattr(version, "family"):
+    if "news_versions" not in _candidates.families(version) or not hasattr(
+        version, "family"
+    ):
         return None
     return version.family(
         "news_versions", columns=["event_id", "story_key", "provider_updated_at"]
@@ -171,7 +157,11 @@ def material_from_version(
     asset_ids: Sequence[str],
     benchmark_id: str | None = None,
 ) -> dict[str, Any]:
-    """Read frozen families only; missing capabilities deliberately raise."""
+    """Read frozen families only; missing capabilities deliberately raise.
+
+    Label inputs (universe_membership, daily_returns with exit successors,
+    delistings) are read when the version has them.
+    """
     if str(version.id) != dataset_id:
         raise ValueError("Version does not match the explicit dataset UUID")
     ids = list(
@@ -183,7 +173,7 @@ def material_from_version(
     population = _rank_population(
         version.universe, [benchmark_id] if benchmark_id is not None else []
     )
-    return {
+    material = {
         "manifest": version.manifest,
         "manifest_sha256": version.manifest_sha256,
         "calendar": version.calendar,
@@ -193,7 +183,11 @@ def material_from_version(
         "event_observations": _observations(version),
         "source_checks": version.source_checks(sorted(population.union(asset_ids))),
         "news_versions": _news_versions(version),
+        "universe_membership": _candidates.read_membership(version, asset_ids),
     }
+    if "daily_returns" in _candidates.families(version):
+        material.update(_return_inputs(version, ids))
+    return material
 
 
 def _feature_rows(
@@ -209,6 +203,7 @@ def _feature_rows(
     news_versions: pd.DataFrame | None = None,
     population: frozenset[str] = frozenset(),
     specs: Sequence[EventSpec] | None = None,
+    next_session: date | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Daily features for contiguous signal sessions and the event reduction summary.
 
@@ -216,7 +211,7 @@ def _feature_rows(
     computed for the selection and the rank population, over warm-up sessions that feed
     the rolling counts of the first signals.
     """
-    sessions = clocks.Calendar(calendar)
+    sessions = clocks.Calendar(calendar, next_session=next_session)
     first, last = sessions.index(signals[0]), sessions.index(signals[-1])
     start = max(0, first - WARMUP_SESSIONS)
     assets = [*asset_ids, *sorted(population.difference(asset_ids))]
@@ -257,12 +252,10 @@ def _feature_rows(
             "signal_session": np.tile(
                 np.array(calendar[first : last + 1], dtype=object), count
             ),
-            "previous_decision_at": pd.to_datetime(
-                np.tile(decisions[first : last + 1], count), utc=True
+            "previous_decision_at": clocks.utc(
+                np.tile(decisions[first : last + 1], count)
             ),
-            "decision_at": pd.to_datetime(
-                np.tile(decisions[first + 1 : last + 2], count), utc=True
-            ),
+            "decision_at": clocks.utc(np.tile(decisions[first + 1 : last + 2], count)),
             "momentum20": rows(momentum),
             "volatility20": rows(volatility),
             "price_history_missing": ~rows(consecutive).astype(bool),
@@ -327,115 +320,105 @@ def _coverage_summary(
     return summary
 
 
-def _positive(value: Any) -> bool:
-    return bool(pd.notna(value) and np.isfinite(value) and value > 0)
+def _membership_present(material: Any) -> bool:
+    if isinstance(material, Mapping):
+        return material.get("universe_membership") is not None
+    return "universe_membership" in _candidates.families(material)
+
+
+def _return_inputs(
+    version: Any,
+    asset_ids: Sequence[str],
+    start: date | None = None,
+    end: date | None = None,
+) -> dict[str, Any]:
+    """Label inputs of the securities: total-return rows (with the successors of their
+    exits) and delistings, or vendor-adjusted prices when the version has no
+    daily_returns."""
+    present = _candidates.families(version)
+    ids = list(dict.fromkeys(map(str, asset_ids)))
+    if "daily_returns" not in present:
+        return {"all": version.prices(ids, adjusted=True)}
+    delistings = (
+        version.family("delistings", ids, columns=list(_labels.DELISTING_COLUMNS))
+        if "delistings" in present
+        else None
+    )
+    known = {str(row["asset_id"]) for row in _candidates.records(version.universe)}
+    heirs = [
+        heir
+        for heir in _labels.successors(delistings).values()
+        if heir in known and heir not in ids
+    ]
+    dates = {
+        key: str(value)
+        for key, value in (("start", start), ("end", end))
+        if value is not None
+    }
+    daily = version.family(
+        "daily_returns",
+        [*ids, *dict.fromkeys(heirs)],
+        columns=list(_labels.DAILY_RETURN_COLUMNS),
+        **dates,
+    )
+    return {"daily_returns": daily, "delistings": delistings}
+
+
+def _series(
+    inputs: Mapping[str, Any], days: Sequence[date], assets: Sequence[str]
+) -> _labels.ReturnSeries:
+    daily = inputs.get("daily_returns")
+    if daily is None:
+        return _labels.vendor_series(_price_frame(inputs["all"]), days, assets)
+    delistings = inputs.get("delistings")
+    heirs = list(_labels.successors(delistings).values())
+    assets = list(dict.fromkeys([*assets, *heirs]))
+    return _labels.total_return_series(daily, days, assets, delistings)
 
 
 def _label_rows(
-    features: pd.DataFrame,
-    calendar: Sequence[date],
-    adjusted: Mapping[str, pd.DataFrame],
+    samples: pd.DataFrame,
+    inputs: Mapping[str, Any],
+    cal: clocks.Calendar,
+    *,
+    horizon_list: Sequence[int],
+    single: bool,
     benchmark_id: str,
-    horizon: int,
-    material_end: date,
+    cutoff: date,
+    policy: Mapping[str, Any],
+    membership: pd.DataFrame | None,
+    rule: str | None,
+    months: Mapping[str, Any],
 ) -> pd.DataFrame:
-    cal_index = {day: idx for idx, day in enumerate(calendar)}
-    labels = []
-    for row in features.itertuples(index=False):
-        sig_day = _day(row.signal_session)
-        index = cal_index[sig_day]
-        entry_index, exit_index = index + 1, index + horizon
-        entry = calendar[entry_index] if entry_index < len(calendar) else None
-        exit_day = calendar[exit_index] if exit_index < len(calendar) else None
-        beyond = exit_day is None or exit_day > material_end
-        expected = calendar[entry_index : exit_index + 1] if not beyond else []
-        bars, benchmark = adjusted.get(row.asset_id), adjusted.get(benchmark_id)
-        entry_expected = entry is not None and entry <= material_end
-        missing_entry = entry_expected and (
-            bars is None or not _positive(bars.at[entry, "open"])
+    """Label columns for ``samples`` rows with their point-in-time membership."""
+    signal = cal.positions(samples["signal_session"])
+    if rule is None:
+        member = _candidates.unknown(len(samples))
+    else:
+        member = _candidates.in_universe(
+            samples["asset_id"].astype(str),
+            _candidates.entry_days(cal, signal),
+            membership,
+            rule,
+            months,
         )
-        missing_post = not beyond and (
-            bars is None
-            or not all(_positive(bars.at[day, "close"]) for day in expected)
-        )
-        missing_benchmark = not beyond and (
-            benchmark is None
-            or not _positive(benchmark.at[entry, "open"])
-            or not all(_positive(benchmark.at[day, "close"]) for day in expected)
-        )
-        asset_return = (
-            np.nan
-            if beyond or missing_entry or missing_post
-            else bars.at[exit_day, "close"] / bars.at[entry, "open"] - 1
-        )
-        benchmark_return = (
-            np.nan
-            if beyond or missing_benchmark
-            else benchmark.at[exit_day, "close"] / benchmark.at[entry, "open"] - 1
-        )
-        pair_valid = not (beyond or missing_entry or missing_post or missing_benchmark)
-        labels.append(
-            {
-                "asset_id": row.asset_id,
-                "signal_session": row.signal_session,
-                "label_start": _at(entry, LABEL_OPEN_TIME.hour, LABEL_OPEN_TIME.minute)
-                if entry_expected
-                else pd.NaT,
-                "label_end": _at(
-                    exit_day, LABEL_CLOSE_TIME.hour, LABEL_CLOSE_TIME.minute
-                )
-                if not beyond
-                else pd.NaT,
-                "entry_session": entry,
-                "exit_session": exit_day,
-                "horizon_beyond_material": beyond,
-                "entry_price_missing": bool(missing_entry),
-                "post_entry_price_missing": bool(missing_post),
-                "benchmark_missing": bool(missing_benchmark),
-                "asset_return_proxy": asset_return,
-                "benchmark_return_proxy": benchmark_return,
-                "excess_return_proxy": asset_return - benchmark_return
-                if pair_valid
-                else np.nan,
-                "pair_valid": pair_valid,
-            }
-        )
-    frame = pd.DataFrame(labels)
-    for column in ("label_start", "label_end"):
-        frame[column] = pd.to_datetime(frame[column], utc=True)
+    assets = [*dict.fromkeys(samples["asset_id"].astype(str)), benchmark_id]
+    series = _series(inputs, cal.days, list(dict.fromkeys(assets)))
+    frame = _labels.label_frame(
+        samples,
+        series,
+        cal,
+        horizon_list=horizon_list,
+        single=single,
+        benchmark_id=benchmark_id,
+        cutoff=cutoff,
+        policy=policy,
+        in_universe=member,
+        static=rule is None,
+    )
+    frame.attrs["return_basis"] = series.basis
+    frame.attrs["label_overlap"] = _labels.label_overlap(signal, horizon_list)
     return frame
-
-
-def _split_membership(
-    features: pd.DataFrame,
-    labels: pd.DataFrame,
-    train_end: date,
-    validation_end: date,
-) -> pd.DataFrame:
-    result = features[KEYS + ["decision_at"]].merge(
-        labels[KEYS + ["label_end"]], on=KEYS, validate="one_to_one"
-    )
-    result["split"] = result["signal_session"].map(
-        lambda day: (
-            "train"
-            if day <= train_end
-            else "validation"
-            if day <= validation_end
-            else "test"
-        )
-    )
-    result["purged"] = False
-    result["purge_reason"] = ""
-    for previous, following in (("train", "validation"), ("validation", "test")):
-        next_decision = result.loc[result["split"] == following, "decision_at"].min()
-        if pd.isna(next_decision):
-            continue
-        purge = (result["split"] == previous) & (
-            result["label_end"].isna() | (result["label_end"] >= next_decision)
-        )
-        result.loc[purge, "purged"] = True
-        result.loc[purge, "purge_reason"] = "label_end_not_before_next_split"
-    return result
 
 
 def prepare(
@@ -450,16 +433,29 @@ def prepare(
     train_end: str | date | None = None,
     validation_end: str | date | None = None,
     horizon: int = 5,
+    embargo_sessions: int = 0,
+    sampling: str = "daily",
+    universe: str = "pit",
+    allow_static_universe: bool = False,
+    terminal_policy: Mapping[str, Any] | None = None,
     output_dir: str | Path | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame | None, dict[str, Any]]:
-    """Return features, labels, split membership (or None when train_end/validation_end are omitted), and provenance."""
+    """Return features, labels, split membership (or None when train_end/validation_end
+    are omitted), and provenance.
+
+    Rows are the selected securities on the sampled signal sessions; under a
+    point-in-time universe only members are kept. A version without membership rows
+    needs ``allow_static_universe=True`` (UNIVERSE_NOT_PIT otherwise).
+    """
     dataset_id, benchmark_id = str(UUID(dataset_id)), str(UUID(benchmark_id))
     asset_ids = [str(UUID(asset)) for asset in asset_ids]
     if not asset_ids or len(asset_ids) != len(set(asset_ids)):
         raise ValueError("Choose unique asset UUIDs")
     _policy(time_policy)
-    if horizon not in {1, 5}:
-        raise ValueError("Choose H=1 or H=5")
+    if isinstance(horizon, bool) or not isinstance(horizon, int):
+        raise TypeError("prepare takes one integer horizon")
+    horizon_list, _ = _labels.horizons(horizon)
+    policy = _labels.terminal_policy(terminal_policy)
     start_d, end_d = _day(start), _day(end)
     if start_d > end_d:
         raise ValueError("Require start <= end")
@@ -472,6 +468,8 @@ def prepare(
         train_d, val_d = _day(train_end), _day(validation_end)
         if not start_d <= train_d < val_d < end_d:
             raise ValueError("Require start <= train_end < validation_end < end")
+    rule = _candidates.membership_rule(_membership_present(material), universe)
+    universe_basis = _candidates.require_pit(rule, allow_static_universe)
     if not isinstance(material, Mapping):
         material = material_from_version(material, dataset_id, asset_ids, benchmark_id)
     manifest = material["manifest"]
@@ -485,25 +483,21 @@ def prepare(
     calendar = list(map(_day, material["calendar"]))
     if not calendar or calendar != sorted(set(calendar)):
         raise ValueError("Frozen calendar must contain unique ordered session dates")
-    universe = material["universe"]
-    known = set(
-        universe["asset_id"]
-        if isinstance(universe, pd.DataFrame)
-        else [row["asset_id"] for row in universe]
-    )
+    universe_rows = material["universe"]
+    known = {str(row["asset_id"]) for row in _candidates.records(universe_rows)}
     if not {*asset_ids, benchmark_id}.issubset(known):
         raise ValueError("A selected security is outside the frozen universe")
-    signals = [day for day in calendar if start_d <= day <= end_d]
-    if not signals:
-        raise ValueError("No frozen signal sessions in [start, end]")
+    cal = _candidates.calendar(manifest, calendar)
+    positions = _candidates.signal_positions(cal, start_d, end_d, sampling)
+    sampled = [calendar[position] for position in positions]
     if (
         has_splits
         and train_d is not None
         and val_d is not None
         and (
-            not any(day <= train_d for day in signals)
-            or not any(train_d < day <= val_d for day in signals)
-            or not any(day > val_d for day in signals)
+            not any(day <= train_d for day in sampled)
+            or not any(train_d < day <= val_d for day in sampled)
+            or not any(day > val_d for day in sampled)
         )
     ):
         raise ValueError("Each split must contain at least one frozen signal session")
@@ -511,7 +505,7 @@ def prepare(
     zones = manifest.get("source_timezones", {})
     features, events = _feature_rows(
         calendar,
-        signals,
+        [sampled[0], sampled[-1]],
         asset_ids,
         raw,
         adjusted,
@@ -520,27 +514,45 @@ def prepare(
         time_policy,
         zones,
         material.get("news_versions"),
-        _rank_population(universe, [benchmark_id]),
+        _rank_population(universe_rows, [benchmark_id]),
     )
+    features = features[features["signal_session"].isin(set(sampled))]
+    features = features.reset_index(drop=True)
+    inputs = {
+        "all": material["all"],
+        "daily_returns": material.get("daily_returns"),
+        "delistings": material.get("delistings"),
+    }
     labels = _label_rows(
         features,
-        calendar,
-        _prices(adjusted, calendar),
-        benchmark_id,
-        horizon,
-        _day(manifest["cutoff_date"]),
+        inputs,
+        cal,
+        horizon_list=horizon_list,
+        single=True,
+        benchmark_id=benchmark_id,
+        cutoff=_day(manifest["cutoff_date"]),
+        policy=policy,
+        membership=material.get("universe_membership"),
+        rule=rule,
+        months=_candidates.membership_months(manifest),
     )
+    return_basis, overlap = labels.attrs["return_basis"], labels.attrs["label_overlap"]
+    grid = len(features)
+    if rule is not None:
+        keep = labels["in_universe"].fillna(False).to_numpy(dtype=bool)
+        features = features[keep].reset_index(drop=True)
+        labels = labels[keep].reset_index(drop=True)
     splits = (
-        _split_membership(features, labels, train_d, val_d)
+        _labels.split_membership(
+            features[[*KEYS, "decision_at"]].assign(label_end=labels["label_end"]),
+            train_end=train_d,
+            validation_end=val_d,
+            cal=cal,
+            embargo_sessions=embargo_sessions,
+        )
         if has_splits and train_d is not None and val_d is not None
         else None
     )
-    masks = [
-        "horizon_beyond_material",
-        "entry_price_missing",
-        "post_entry_price_missing",
-        "benchmark_missing",
-    ]
     parameters: dict[str, Any] = {
         "asset_ids": asset_ids,
         "benchmark_id": benchmark_id,
@@ -548,13 +560,22 @@ def prepare(
         "end": str(end_d),
         **_time_parameters(time_policy),
         "horizon": horizon,
+        "sampling": sampling,
+        "embargo_sessions": embargo_sessions,
+        "universe_basis": universe_basis,
+        "universe_rule": rule,
+        "terminal_policy": policy,
+        "return_basis": return_basis,
     }
     if has_splits and train_d is not None and val_d is not None:
         parameters["train_end"] = str(train_d)
         parameters["validation_end"] = str(val_d)
+    masks = _labels.mask_counts(labels, horizon_list, True, rule is None)[str(horizon)]
     counts: dict[str, int] = {
         "candidates": len(features),
-        "pair_valid": int(labels["pair_valid"].sum()),
+        "not_in_universe_dropped": grid - len(features),
+        "pair_valid": masks.pop("pair_valid"),
+        "trainable": masks.pop("trainable"),
     }
     if splits is not None:
         counts["purged"] = int(splits["purged"].sum())
@@ -563,9 +584,14 @@ def prepare(
         manifest_sha256=digest,
         parameters=parameters,
         counts=counts,
-        masks={name: int(labels[name].sum()) for name in masks},
+        masks=masks,
+        label_overlap=overlap,
         **_feature_provenance(features, events),
-        limitations=LIMITATIONS + list(manifest.get("limitations", [])),
+        limitations=[
+            *LIMITATIONS,
+            *_labels.limitations(universe_basis, return_basis),
+            *manifest.get("limitations", []),
+        ],
     )
     if output_dir is not None:
         destination = Path(output_dir)
@@ -1111,57 +1137,6 @@ def prepare_fundamental_ratios(
 # ---------------------------------------------------------------------------
 
 
-def build_candidates(
-    version: Any,
-    symbols: str | Sequence[str] | None = None,
-    *,
-    start: str | date | None = None,
-    end: str | date | None = None,
-) -> pd.DataFrame:
-    """Return a candidate ``(asset_id, symbol, signal_session, previous_decision_at, decision_at)`` DataFrame."""
-    asset_ids = version.resolve(symbols)
-    calendar = list(map(_day, version.calendar))
-    start_d = _day(start) if start is not None else calendar[0]
-    end_d = _day(end) if end is not None else calendar[-1]
-    if start_d > end_d:
-        raise ValueError("Require start <= end")
-    signals = [day for day in calendar if start_d <= day <= end_d]
-    if not signals:
-        raise ValueError("No frozen signal sessions in [start, end]")
-    cal_index = {day: idx for idx, day in enumerate(calendar)}
-    univ = version.universe
-    symbol_map = (
-        dict(zip(univ["asset_id"], univ["symbol"]))
-        if isinstance(univ, pd.DataFrame) and "symbol" in univ.columns
-        else {}
-    )
-    rows = []
-    for asset_id in asset_ids:
-        sym = symbol_map.get(asset_id, "")
-        for signal in signals:
-            idx = cal_index[signal]
-            decision = (
-                _decision_at(calendar[idx + 1]) if idx + 1 < len(calendar) else pd.NaT
-            )
-            previous = _decision_at(signal)
-            rows.append(
-                {
-                    "asset_id": asset_id,
-                    "symbol": sym,
-                    "signal_session": signal,
-                    "previous_decision_at": previous,
-                    "decision_at": decision,
-                }
-            )
-    frame = pd.DataFrame(rows)
-    frame.attrs["parameters"] = {
-        "asset_ids": asset_ids,
-        "start": str(start_d),
-        "end": str(end_d),
-    }
-    return frame
-
-
 def daily_features(
     version: Any,
     symbols: str | Sequence[str] | None = None,
@@ -1171,31 +1146,31 @@ def daily_features(
     end: str | date | None = None,
     benchmark: str | None = None,
     specs: Sequence[EventSpec] | None = None,
+    sampling: str = "daily",
+    next_session: str | date | None = None,
 ) -> pd.DataFrame:
     """Return daily price/volume/event-count PIT features as a ``pd.DataFrame`` (no split boundaries needed).
 
     ``{name}_events_rank_21d`` ranks among the universe's securities that are neither
     flagged benchmarks nor ``benchmark``, whatever the selection. ``specs`` replaces the
     default one-per-source event specifications. A security selected twice gives one
-    set of rows.
+    set of rows. Features are computed on the daily grid, then ``sampling`` keeps the
+    last session of each completed week or month. ``next_session`` gives the last frozen
+    session a live decision instant and event window.
     """
     _policy(time_policy)
     asset_ids = list(dict.fromkeys(map(str, version.resolve(symbols))))
     benchmark_ids = version.resolve(benchmark) if benchmark is not None else []
     calendar = list(map(_day, version.calendar))
-    start_d = _day(start) if start is not None else calendar[0]
-    end_d = _day(end) if end is not None else calendar[-1]
-    if start_d > end_d:
-        raise ValueError("Require start <= end")
-    signals = [day for day in calendar if start_d <= day <= end_d]
-    if not signals:
-        raise ValueError("No frozen signal sessions in [start, end]")
+    cal = _candidates.calendar(version, calendar, next_session=next_session)
+    positions = _candidates.signal_positions(cal, start, end, sampling)
+    sampled = [calendar[position] for position in positions]
     raw = _price_frame(version.prices(asset_ids, adjusted=False))
     adjusted = _price_frame(version.prices(asset_ids, adjusted=True))
     population = _rank_population(version.universe, benchmark_ids)
     features, events = _feature_rows(
         calendar,
-        signals,
+        [sampled[0], sampled[-1]],
         asset_ids,
         raw,
         adjusted,
@@ -1206,17 +1181,23 @@ def daily_features(
         _news_versions(version),
         population,
         specs,
+        next_session=cal.next_session,
     )
+    if sampling != "daily":
+        features = features[features["signal_session"].isin(set(sampled))]
+        features = features.reset_index(drop=True)
     features.attrs["provenance"] = run_record(
         dataset_id=str(version.id),
         manifest_sha256=version.manifest_sha256,
         parameters={
             "asset_ids": asset_ids,
-            "start": str(start_d),
-            "end": str(end_d),
+            "start": str(sampled[0]),
+            "end": str(sampled[-1]),
             "benchmark_ids": benchmark_ids,
             **_time_parameters(time_policy),
             "event_specs": events["specs"],
+            "sampling": sampling,
+            "next_session": None if cal.next_session is None else str(cal.next_session),
         },
         counts={"candidates": len(features)},
         **_feature_provenance(features, events),
@@ -1236,7 +1217,10 @@ def _ensure_samples(
         if not set(KEYS).issubset(candidates_or_symbols.columns):
             raise ValueError("Samples require asset_id and signal_session")
         return candidates_or_symbols.reset_index(drop=True)
-    return build_candidates(version, candidates_or_symbols, start=start, end=end)
+    # Features are not gated by membership: every selected security keeps its rows.
+    return build_candidates(
+        version, candidates_or_symbols, start=start, end=end, universe="static"
+    )
 
 
 def _default_metrics_for_period(period_kind: str) -> dict[str, str]:
@@ -1366,50 +1350,96 @@ def forward_returns(
     start: str | date | None = None,
     end: str | date | None = None,
     benchmark: str = "SPY",
-    horizons: int | Iterable[int] = (1, 5),
+    horizons: int | Iterable[int] = DEFAULT_HORIZONS,
+    sampling: str = "daily",
+    universe: str = "pit",
+    allow_static_universe: bool = False,
+    keep_non_members: bool = False,
+    terminal_policy: Mapping[str, Any] | None = None,
+    neutralize: Sequence[str] = (),
 ) -> pd.DataFrame:
     """Return forward return labels as a ``pd.DataFrame`` without requiring split boundaries.
 
-    If ``horizons`` is a single ``int`` (e.g. ``5``), returns the standard label columns.
-    If ``horizons`` is an iterable of horizons (e.g. ``(1, 5)``), prefixes each horizon's
-    label columns with ``h{H}_`` (and includes convenient ``excess_return_{H}d`` aliases).
+    Entry is the open of the session after the signal, exit the close ``H`` sessions
+    later; total return when the version has ``daily_returns``, else vendor-adjusted.
+    One ``int`` horizon gives the standard label columns; several prefix each horizon's
+    columns with ``h{H}_``. Every horizon adds ``forward_excess_return_{H}d`` and
+    ``trainable_{H}d``. Symbols build candidates (sampling, membership); a candidate
+    DataFrame keeps its rows and gets ``in_universe``. A version without membership rows
+    needs ``allow_static_universe=True``. ``neutralize`` names groups ("size", a sample
+    column or a universe field) for ``excess_return_{H}d_{group}``.
     """
-    samples = _ensure_samples(version, candidates_or_symbols, start=start, end=end)
-    single_horizon = isinstance(horizons, int)
-    horizon_list = [horizons] if single_horizon else list(horizons)
-    if not horizon_list or any(h < 1 for h in horizon_list):
-        raise ValueError("horizons must be positive integers")
-
-    asset_ids = list(dict.fromkeys(samples["asset_id"].astype(str)))
-    benchmark_id = version.resolve(benchmark)[0]
-    calendar = list(map(_day, version.calendar))
-    all_ids = list(dict.fromkeys([*asset_ids, benchmark_id]))
-    adjusted = _prices(_price_frame(version.prices(all_ids, adjusted=True)), calendar)
-    cutoff_day = _day(version.manifest["cutoff_date"])
-
-    if single_horizon:
-        labels = _label_rows(
-            samples, calendar, adjusted, benchmark_id, horizon_list[0], cutoff_day
+    horizon_list, single = _labels.horizons(horizons)
+    policy = _labels.terminal_policy(terminal_policy)
+    rule = _candidates.membership_rule(_membership_present(version), universe)
+    universe_basis = _candidates.require_pit(rule, allow_static_universe)
+    benchmark_id = str(version.resolve(benchmark)[0])
+    if isinstance(candidates_or_symbols, pd.DataFrame):
+        samples = _ensure_samples(version, candidates_or_symbols)
+    else:
+        samples = build_candidates(
+            version,
+            candidates_or_symbols,
+            start=start,
+            end=end,
+            sampling=sampling,
+            universe=universe,
+            keep_non_members=keep_non_members,
+            benchmark=benchmark,
         )
-        labels.attrs["parameters"] = {
-            "benchmark_id": benchmark_id,
-            "horizon": horizon_list[0],
+    cal = _candidates.calendar(version, version.calendar)
+    signal = cal.positions(samples["signal_session"])
+    asset_ids = list(dict.fromkeys(samples["asset_id"].astype(str)))
+    n = len(cal)
+    first = cal.days[min(int(signal.min()) + 1, n - 1)] if len(signal) else None
+    last = (
+        cal.days[min(int(signal.max()) + max(horizon_list), n - 1)]
+        if len(signal)
+        else None
+    )
+    labels = _label_rows(
+        samples,
+        _return_inputs(version, [*asset_ids, benchmark_id], first, last),
+        cal,
+        horizon_list=horizon_list,
+        single=single,
+        benchmark_id=benchmark_id,
+        cutoff=_day(version.manifest["cutoff_date"]),
+        policy=policy,
+        membership=_candidates.read_membership(version, asset_ids) if rule else None,
+        rule=rule,
+        months=_candidates.membership_months(version),
+    )
+    universe_rows = {
+        str(row["asset_id"]): row for row in _candidates.records(version.universe)
+    }
+    if neutralize:
+        benchmarks = {benchmark_id}.union(
+            asset for asset, row in universe_rows.items() if _candidates.flagged(row)
+        )
+        eligible = ~samples["asset_id"].astype(str).isin(benchmarks).to_numpy(bool)
+        groups = {
+            name: _labels.neutral_groups(samples, name, universe_rows)
+            for name in dict.fromkeys(neutralize)
         }
-        return labels
-
-    merged = samples[KEYS].copy()
-    for h in horizon_list:
-        part = _label_rows(samples, calendar, adjusted, benchmark_id, h, cutoff_day)
-        value_cols = [col for col in part.columns if col not in KEYS]
-        renamed = {col: f"h{h}_{col}" for col in value_cols}
-        merged = pd.concat([merged, part[value_cols].rename(columns=renamed)], axis=1)
-        merged[f"forward_excess_return_{h}d"] = part["excess_return_proxy"].array
-        merged[f"trainable_{h}d"] = part["pair_valid"].array
-    merged.attrs["parameters"] = {
+        labels = _labels.neutralize(labels, groups, horizon_list, eligible)
+    masks = _labels.mask_counts(labels, horizon_list, single, rule is None)
+    return_basis = labels.attrs["return_basis"]
+    labels.attrs["parameters"] = {
         "benchmark_id": benchmark_id,
         "horizons": horizon_list,
+        "sampling": sampling,
+        "universe_basis": universe_basis,
+        "universe_rule": rule,
+        "terminal_policy": policy,
+        "return_basis": return_basis,
+        "neutralize": list(dict.fromkeys(neutralize)),
     }
-    return merged
+    if single:
+        labels.attrs["parameters"]["horizon"] = horizon_list[0]
+    labels.attrs["masks"] = masks
+    labels.attrs["limitations"] = _labels.limitations(universe_basis, return_basis)
+    return labels
 
 
 def panel(
@@ -1420,7 +1450,14 @@ def panel(
     start: str | date | None = None,
     end: str | date | None = None,
     benchmark: str = "SPY",
-    horizons: int | Iterable[int] = (1, 5),
+    horizons: int | Iterable[int] = DEFAULT_HORIZONS,
+    sampling: str = "daily",
+    universe: str = "pit",
+    allow_static_universe: bool = False,
+    keep_non_members: bool = False,
+    terminal_policy: Mapping[str, Any] | None = None,
+    neutralize: Sequence[str] = (),
+    next_session: str | date | None = None,
     fundamental_time_policy: str | None = None,
     include_fundamentals: bool = True,
     include_ratios: bool = True,
@@ -1428,31 +1465,52 @@ def panel(
 ) -> pd.DataFrame:
     """Build a unified PIT research ``pd.DataFrame`` combining daily features, fundamentals, ratios, and forward returns.
 
+    Candidates are built once (sampling, point-in-time membership, default securities
+    without benchmarks); features are computed on the daily grid and kept for those
+    rows. A version without membership rows needs ``allow_static_universe=True``.
     Default quarterly columns omit operating cash flow, capex and free cash flow (10-Q
     cash flows are year-to-date); request them explicitly through ``fundamental_features``.
     """
     _policy(time_policy)
     fund_policy = _policy(fundamental_time_policy or time_policy)
-    daily = daily_features(
+    horizon_list, _ = _labels.horizons(horizons)
+    rule = _candidates.membership_rule(_membership_present(version), universe)
+    _candidates.require_pit(rule, allow_static_universe)
+    candidates = build_candidates(
         version,
         symbols,
         start=start,
         end=end,
+        sampling=sampling,
+        universe=universe,
+        keep_non_members=keep_non_members,
+        benchmark=benchmark,
+        next_session=next_session,
+    )
+    if candidates.empty:
+        raise ValueError("No candidate rows: no selected security is a member then")
+    daily = daily_features(
+        version,
+        list(dict.fromkeys(candidates["asset_id"])),
+        start=candidates["signal_session"].min(),
+        end=candidates["signal_session"].max(),
         time_policy=time_policy,
         benchmark=benchmark,
+        next_session=next_session,
     )
-    univ = version.universe
-    if isinstance(univ, pd.DataFrame) and "symbol" in univ.columns:
-        symbol_map = dict(zip(univ["asset_id"], univ["symbol"]))
-        daily.insert(1, "symbol", daily["asset_id"].map(symbol_map))
-
-    parts: list[pd.DataFrame] = [daily]
-    candidates = daily[KEYS + ["decision_at"]].copy()
+    rows = candidates.merge(
+        daily.drop(columns=["previous_decision_at", "decision_at"]),
+        on=KEYS,
+        how="left",
+        validate="one_to_one",
+    )
+    parts: list[pd.DataFrame] = [rows]
+    samples = rows[KEYS + ["decision_at"]]
 
     if include_fundamentals:
         fund = fundamental_features(
             version,
-            candidates,
+            samples,
             period_kind=("quarter", "annual", "instant"),
             time_policy=fund_policy,
         )
@@ -1461,7 +1519,7 @@ def panel(
     if include_ratios:
         ratios = fundamental_ratios(
             version,
-            candidates,
+            samples,
             period_kind=("quarter", "annual"),
             time_policy=fund_policy,
         )
@@ -1478,33 +1536,54 @@ def panel(
 
     labels = forward_returns(
         version,
-        candidates,
+        rows,
         benchmark=benchmark,
         horizons=horizons,
+        universe=universe,
+        allow_static_universe=allow_static_universe,
+        terminal_policy=terminal_policy,
+        neutralize=neutralize,
     )
-    parts.append(labels.drop(columns=KEYS))
+    parts.append(labels.drop(columns=[*KEYS, "in_universe"]))
 
     combined = pd.concat(parts, axis=1)
     daily_provenance = daily.attrs.get("provenance", {})
+    label_parameters = labels.attrs["parameters"]
     provenance = run_record(
         dataset_id=str(version.id),
         manifest_sha256=version.manifest_sha256,
         parameters={
             "symbols": symbols,
-            "start": str(start)
-            if start is not None
-            else str(daily["signal_session"].min()),
-            "end": str(end) if end is not None else str(daily["signal_session"].max()),
+            "start": str(candidates["signal_session"].min()),
+            "end": str(candidates["signal_session"].max()),
             "benchmark": benchmark,
-            "horizons": [horizons] if isinstance(horizons, int) else list(horizons),
+            "horizons": horizon_list,
             **_time_parameters(time_policy),
             "fundamental_time_policy": fund_policy,
             "include_fundamentals": include_fundamentals,
             "include_ratios": include_ratios,
+            "next_session": None if next_session is None else str(_day(next_session)),
+            **{
+                name: label_parameters[name]
+                for name in (
+                    "sampling",
+                    "universe_basis",
+                    "universe_rule",
+                    "terminal_policy",
+                    "return_basis",
+                    "neutralize",
+                )
+            },
         },
-        counts={"rows": len(combined), "columns": len(combined.columns)},
+        counts={
+            "rows": len(combined),
+            "columns": len(combined.columns),
+            **candidates.attrs.get("counts", {}),
+        },
         rows=len(combined),
         columns=len(combined.columns),
+        masks=labels.attrs["masks"],
+        label_overlap=labels.attrs["label_overlap"],
         **{
             name: daily_provenance.get(name, {})
             for name in (
@@ -1514,7 +1593,11 @@ def panel(
                 "rank_population",
             )
         },
-        limitations=LIMITATIONS + list(version.manifest.get("limitations", [])),
+        limitations=[
+            *LIMITATIONS,
+            *labels.attrs["limitations"],
+            *version.manifest.get("limitations", []),
+        ],
     )
     combined.attrs["provenance"] = provenance
     if output_dir is not None:

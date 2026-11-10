@@ -46,7 +46,9 @@ class PanelRegressionTest(unittest.TestCase):
                         drop=True
                     )
                     with self.subTest(index=samples.index.tolist()):
-                        labels = ds.forward_returns(samples, horizons=(1, 5))
+                        labels = ds.forward_returns(
+                            samples, horizons=(1, 5), allow_static_universe=True
+                        )
                         pd.testing.assert_frame_equal(
                             labels[research_datasets.KEYS], expected_keys
                         )
@@ -229,6 +231,7 @@ class ContractRegressionTest(unittest.TestCase):
                 start=ds.calendar[6],
                 end=ds.calendar[8],
                 time_policy="public_reconstructed",
+                allow_static_universe=True,
             )
             for prefix in (
                 "quarter_operating_cash_flow_",

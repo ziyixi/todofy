@@ -496,3 +496,166 @@ def features(
         "undatable_events": dict(sorted(index.undatable.items())),
     }
     return frame, summary
+
+
+# --- labels ------------------------------------------------------------------------
+
+FLAT = {"cash": "cash", "worthless": "worthless", "last_close_proxy": "cash_proxy"}
+STOCK = {"acquirer_close": "successor", "cash_and_acquirer_close": "cash_and_successor"}
+
+
+def _positive(value: Any) -> bool:
+    return value is not None and pd.notna(value) and value > 0
+
+
+def reference_labels(
+    days: Sequence[date],
+    cutoff: date,
+    samples: Iterable[tuple[str, date]],
+    horizon: int,
+    benchmark: str,
+    *,
+    daily: pd.DataFrame | None = None,
+    prices: pd.DataFrame | None = None,
+    delistings: pd.DataFrame | None = None,
+    policy: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """One label per (asset, signal): total return from ``daily`` rows (terminal rows
+    end the asset leg) or vendor-adjusted ``prices``; one plain loop per row."""
+    index = {value: position for position, value in enumerate(days)}
+    opens: dict[tuple[str, int], float] = {}
+    closes: dict[tuple[str, int], float] = {}
+    status: dict[tuple[str, int], str] = {}
+    raw: dict[tuple[str, int], float] = {}
+    exits: dict[str, dict[str, Any]] = {}
+    if daily is not None:
+        for row in daily.to_dict("records"):
+            day = clocks.day(row["date"])
+            if day not in index:
+                continue
+            key = (row["asset_id"], index[day])
+            if row["row_kind"] == "terminal":
+                exits[row["asset_id"]] = {"at": index[day], **row}
+                continue
+            status[key], raw[key] = row["tr_status"], row["close_raw"]
+            if _positive(row["tr_index"]) and _positive(row["close_raw"]):
+                closes[key] = row["tr_index"]
+                if _positive(row["open_raw"]):
+                    opens[key] = row["tr_index"] * row["open_raw"] / row["close_raw"]
+    else:
+        for row in prices.to_dict("records"):
+            key = (row["asset_id"], index[clocks.day(row["date"])])
+            if _positive(row["open"]):
+                opens[key] = row["open"]
+            if _positive(row["close"]):
+                closes[key] = row["close"]
+    latest: dict[str, dict[str, Any]] = {}
+    for row in (
+        []
+        if delistings is None
+        else delistings.sort_values("observation_sequence").to_dict("records")
+    ):
+        latest[row["asset_id"]] = row
+    last = max(position for position, value in enumerate(days) if value <= cutoff)
+    result = []
+    for asset, signal in samples:
+        i = index[signal]
+        t, e = i + 1, i + horizon
+        beyond, entry_known = e > last, t <= last
+        start = opens.get((asset, t)) if entry_known else None
+        entry_ok = entry_known and _positive(start)
+        level = closes.get((asset, e))
+        exit_ok = _positive(level)
+        info = exits.get(asset)
+        x = info["at"] if info else -1
+        delisted = not beyond and info is not None and t < x <= e
+        terminal, post, unknown = "", "", False
+        if delisted:
+            basis = info["terminal_basis"] or "unknown"
+            value = info["tr_index"]
+            terminal = basis
+            kind = (latest.get(asset) or {}).get("exit_type") or ""
+            heir = (latest.get(asset) or {}).get("successor_asset_id") or ""
+            if pd.notna(value) and value >= 0 and basis in FLAT:
+                level, post = value, FLAT[basis]
+            elif pd.notna(value) and value >= 0 and basis in STOCK:
+                share = 0.0
+                if basis != "acquirer_close":
+                    previous, close_raw = (
+                        closes.get((asset, x - 1)),
+                        raw.get((asset, x - 1)),
+                    )
+                    worth = (
+                        value / previous * close_raw
+                        if _positive(previous) and close_raw is not None
+                        else float("nan")
+                    )
+                    cash = info["cash_amount"]
+                    share = (
+                        min(max(cash / worth, 0.0), 1.0)
+                        if pd.notna(cash) and pd.notna(worth) and worth > 0
+                        else float("nan")
+                    )
+                a, b = closes.get((heir, x)), closes.get((heir, e))
+                if _positive(a) and _positive(b) and pd.notna(share):
+                    level, post = value * (share + (1 - share) * b / a), STOCK[basis]
+                else:
+                    level, post = value, "cash_proxy"
+            else:
+                rate = policy.get(kind, policy.get("unknown"))
+                previous = closes.get((asset, x - 1))
+                if rate is not None and _positive(previous):
+                    level, terminal, post = (
+                        previous * (1 + rate),
+                        "policy",
+                        "cash_proxy",
+                    )
+                else:
+                    unknown = True
+        asset_ok = entry_ok and not beyond and (not unknown if delisted else exit_ok)
+        exit_missing = not beyond and not delisted and not exit_ok
+        b0, b1 = opens.get((benchmark, t)), closes.get((benchmark, e))
+        bench_ok = _positive(b0) and _positive(b1)
+        bench_missing = not beyond and not bench_ok
+        pair = not beyond and entry_ok and not exit_missing and not bench_missing
+        pair = pair and not unknown
+        asset_return = level / start - 1 if asset_ok else float("nan")
+        bench_return = b1 / b0 - 1 if not beyond and bench_ok else float("nan")
+        stop = x if delisted else e
+        interior = sum((asset, k) not in closes for k in range(t, stop))
+        disputed = sum(
+            status.get((asset, k)) == "disputed" for k in range(t + 1, stop + 1)
+        )
+        vendor = sum(status.get((asset, k)) == "vendor" for k in range(t + 1, stop + 1))
+        state = (
+            ""
+            if beyond or daily is None
+            else "disputed"
+            if disputed
+            else "vendor"
+            if vendor
+            else "ok"
+        )
+        result.append(
+            {
+                "asset_id": asset,
+                "signal_session": signal,
+                "asset_return": asset_return,
+                "benchmark_return": bench_return,
+                "excess_return": asset_return - bench_return if pair else float("nan"),
+                "pair_valid": pair,
+                "horizon_beyond_material": beyond,
+                "entry_price_missing": entry_known and not entry_ok,
+                "exit_price_missing": exit_missing,
+                "benchmark_missing": bench_missing,
+                "interior_missing_sessions": None if beyond else interior,
+                "disputed_sessions": None if beyond else disputed,
+                "return_status": state,
+                "delisted_in_window": delisted,
+                "terminal_basis": terminal,
+                "terminal_unknown": unknown,
+                "post_exit_basis": post,
+                "post_exit_sessions": e - x if delisted else 0,
+            }
+        )
+    return result

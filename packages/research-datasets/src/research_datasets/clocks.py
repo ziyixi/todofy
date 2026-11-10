@@ -195,6 +195,12 @@ def nanos(values: Any) -> np.ndarray:
     return index.as_unit("ns").asi8.copy()
 
 
+def utc(values: np.ndarray) -> pd.DatetimeIndex:
+    """int64 nanoseconds (NAT for missing) as a UTC DatetimeIndex, without parsing."""
+    raw = np.asarray(values, dtype=np.int64).view("M8[ns]")
+    return pd.DatetimeIndex(raw).tz_localize("UTC")
+
+
 def _ns(value: pd.Timestamp | None) -> int:
     return NAT if value is None else int(value.as_unit("ns").value)
 
@@ -401,6 +407,14 @@ class Calendar:
         self.decisions = wall_instants([*self.days, *following], DECISION_TIME)
         if not following:
             self.decisions = np.append(self.decisions, np.int64(NAT))
+        # Label clocks per session: the 09:30 open and the frozen close (16:00 default).
+        self.opens = wall_instants(self.days, LABEL_OPEN_TIME)
+        self.closes = wall_instants(self.days, LABEL_CLOSE_TIME)
+        for value, close in self._closes.items():
+            if value in self._index:
+                self.closes[self._index[value]] = _ns(
+                    at(value, close.hour, close.minute)
+                )
 
     def __len__(self) -> int:
         return len(self.days)
@@ -423,9 +437,19 @@ class Calendar:
         return decision if pd.isna(decision) else decision + CAPTURE_GRACE
 
     def open_at(self, position: int) -> pd.Timestamp:
-        return at(self.days[position], LABEL_OPEN_TIME.hour, LABEL_OPEN_TIME.minute)
+        return pd.Timestamp(int(self.opens[position]), tz="UTC")
 
     def close_at(self, position: int) -> pd.Timestamp:
-        value = self.days[position]
-        close = self._closes.get(value, LABEL_CLOSE_TIME)
-        return at(value, close.hour, close.minute)
+        return pd.Timestamp(int(self.closes[position]), tz="UTC")
+
+    def positions(self, values: Any) -> np.ndarray:
+        """Calendar positions of session dates (date, string or timestamp); a value
+        that is not a frozen session raises."""
+        codes, uniques = pd.factorize(pd.Series(values, dtype=object))
+        found = np.array(
+            [self._index.get(day(value), -1) for value in uniques], dtype=np.int64
+        )
+        if (codes < 0).any() or (found < 0).any():
+            bad = "missing" if (codes < 0).any() else uniques[np.argmin(found)]
+            raise ValueError(f"{bad} is not a frozen session")
+        return found[codes]

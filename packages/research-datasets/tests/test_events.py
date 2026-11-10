@@ -151,6 +151,7 @@ def run(
         "benchmark_id": BENCHMARK,
         "time_policy": "public_reconstructed",
         "horizon": 5,
+        "allow_static_universe": True,
     }
     options.update(changes)
     features, _, _, record = research_datasets.prepare(material, **options)
@@ -1104,7 +1105,12 @@ class UnknownSourceTest(unittest.TestCase):
             # Two articles of one story count once; coverage is a complete read.
             self.assertEqual(news_day["alpaca_news_new_event_count"].tolist(), [1, 1])
             self.assertEqual(set(news_day["alpaca_news_coverage"]), {"read_complete"})
-            panel = ds.panel(["AAPL"], time_policy="public_reconstructed", **window)
+            panel = ds.panel(
+                ["AAPL"],
+                time_policy="public_reconstructed",
+                allow_static_universe=True,
+                **window,
+            )
             self.assertEqual(
                 panel.attrs["provenance"]["skipped_sources"], {"future_x": 1}
             )
@@ -1114,6 +1120,7 @@ class UnknownSourceTest(unittest.TestCase):
                 asset_ids=[bundle.ASSET_A],
                 benchmark_id=bundle.BENCH_SPY,
                 time_policy="observed_content",
+                allow_static_universe=True,
                 **window,
             )
             self.assertEqual(record["skipped_sources"], {"future_x": 1})

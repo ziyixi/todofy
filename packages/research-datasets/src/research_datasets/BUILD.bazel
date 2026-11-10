@@ -8,10 +8,12 @@ py_library(
     srcs = [
         "__init__.py",
         "asof.py",
+        "candidates.py",
         "client.py",
         "clocks.py",
         "constants.py",
         "events.py",
+        "labels.py",
         "panels.py",
         "provenance.py",
     ],

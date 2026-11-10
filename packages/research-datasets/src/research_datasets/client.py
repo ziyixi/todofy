@@ -32,6 +32,7 @@ import pyarrow.dataset as pads
 from .constants import (
     API,
     DATA_FAMILIES,
+    DEFAULT_HORIZONS,
     FAMILY_SPECS,
     FIELDS,
     MANIFEST_SCHEMA_MAX,
@@ -1574,9 +1575,24 @@ class Dataset:
         *,
         start: str | date | None = None,
         end: str | date | None = None,
+        sampling: str = "daily",
+        universe: str = "pit",
+        keep_non_members: bool = False,
+        benchmark: str | None = None,
+        next_session: str | date | None = None,
     ) -> pd.DataFrame:
-        """Return candidate ``(asset_id, symbol, signal_session, previous_decision_at, decision_at)`` rows."""
-        return build_candidates(self, symbols, start=start, end=end)
+        """Return candidate rows with decision clocks and point-in-time membership."""
+        return build_candidates(
+            self,
+            symbols,
+            start=start,
+            end=end,
+            sampling=sampling,
+            universe=universe,
+            keep_non_members=keep_non_members,
+            benchmark=benchmark,
+            next_session=next_session,
+        )
 
     def daily_features(
         self,
@@ -1587,6 +1603,8 @@ class Dataset:
         end: str | date | None = None,
         benchmark: str | None = None,
         specs: Sequence[EventSpec] | None = None,
+        sampling: str = "daily",
+        next_session: str | date | None = None,
     ) -> pd.DataFrame:
         """Return daily price/volume/event-count PIT features as a ``pd.DataFrame``."""
         return _daily_features(
@@ -1597,6 +1615,8 @@ class Dataset:
             time_policy=time_policy,
             benchmark=benchmark,
             specs=specs,
+            sampling=sampling,
+            next_session=next_session,
         )
 
     def fundamental_features(
@@ -1648,7 +1668,13 @@ class Dataset:
         start: str | date | None = None,
         end: str | date | None = None,
         benchmark: str = "SPY",
-        horizons: int | Iterable[int] = (1, 5),
+        horizons: int | Iterable[int] = DEFAULT_HORIZONS,
+        sampling: str = "daily",
+        universe: str = "pit",
+        allow_static_universe: bool = False,
+        keep_non_members: bool = False,
+        terminal_policy: Mapping[str, Any] | None = None,
+        neutralize: Sequence[str] = (),
     ) -> pd.DataFrame:
         """Return forward return labels as a ``pd.DataFrame`` without requiring split boundaries."""
         return _forward_returns(
@@ -1658,6 +1684,12 @@ class Dataset:
             end=end,
             benchmark=benchmark,
             horizons=horizons,
+            sampling=sampling,
+            universe=universe,
+            allow_static_universe=allow_static_universe,
+            keep_non_members=keep_non_members,
+            terminal_policy=terminal_policy,
+            neutralize=neutralize,
         )
 
     def panel(
@@ -1668,7 +1700,14 @@ class Dataset:
         start: str | date | None = None,
         end: str | date | None = None,
         benchmark: str = "SPY",
-        horizons: int | Iterable[int] = (1, 5),
+        horizons: int | Iterable[int] = DEFAULT_HORIZONS,
+        sampling: str = "daily",
+        universe: str = "pit",
+        allow_static_universe: bool = False,
+        keep_non_members: bool = False,
+        terminal_policy: Mapping[str, Any] | None = None,
+        neutralize: Sequence[str] = (),
+        next_session: str | date | None = None,
         fundamental_time_policy: str | None = None,
         include_fundamentals: bool = True,
         include_ratios: bool = True,
@@ -1682,6 +1721,13 @@ class Dataset:
             end=end,
             benchmark=benchmark,
             horizons=horizons,
+            sampling=sampling,
+            universe=universe,
+            allow_static_universe=allow_static_universe,
+            keep_non_members=keep_non_members,
+            terminal_policy=terminal_policy,
+            neutralize=neutralize,
+            next_session=next_session,
             time_policy=time_policy,
             fundamental_time_policy=fundamental_time_policy,
             include_fundamentals=include_fundamentals,

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import time, timedelta
+from types import MappingProxyType
 
 __version__ = "2.0.0rc1"
 API = "v1"
@@ -26,6 +28,23 @@ LABEL_CLOSE_TIME = time(16, 0)
 # Articles of one story (same story key) within this span count once per security.
 STORY_WINDOW = timedelta(hours=72)
 RANK_WINDOW_SESSIONS = 21
+
+# Candidates and labels.
+SAMPLINGS: tuple[str, ...] = ("daily", "weekly", "monthly")
+DEFAULT_HORIZONS: tuple[int, ...] = (5, 21, 63, 126)
+MAX_HORIZON = 756
+# Monthly point-in-time membership rule used when universe="pit".
+DEFAULT_UNIVERSE_RULE = "pit-largecap-v1"
+# Default candidate sets keep these security types when the universe records one.
+CANDIDATE_SECURITY_TYPES = frozenset({"common", "common_presumed"})
+# Reader assumption for an exit whose terminal value is not a stored fact: a performance
+# delisting loses 30 % from the last close (Shumway 1997); None masks the label.
+DEFAULT_TERMINAL_POLICY: Mapping[str, float | None] = MappingProxyType(
+    {"performance": -0.30, "unknown": None}
+)
+# Neutralized labels fall back to the session mean below this many group members.
+NEUTRAL_MIN_GROUP = 5
+SIZE_GROUPS = 5
 
 FIELDS: tuple[str, ...] = (
     "asset_id",
@@ -127,6 +146,10 @@ FAMILY_SPECS: dict[str, FamilySpec] = {
     "symbol_history": FamilySpec("asset_id", None, _V1),
     "issuer_history": FamilySpec("asset_id", None, _V1),
     "news_versions": FamilySpec("none", "observed_at", _V1),
+    # Label inputs: monthly membership, exits and total-return series.
+    "universe_membership": FamilySpec("asset_id", "effective_from", _V1),
+    "delistings": FamilySpec("asset_id", "observed_at", _V1),
+    "daily_returns": FamilySpec("asset_id", "date", _V1),
 }
 DATA_FAMILIES: tuple[str, ...] = tuple(FAMILY_SPECS)
 

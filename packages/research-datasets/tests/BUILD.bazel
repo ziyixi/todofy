@@ -66,11 +66,50 @@ unittest_test(
     ],
 )
 
+unittest_test(
+    name = "test_labels",
+    size = "small",
+    srcs = [
+        "reference.py",
+        "test_labels.py",
+        "test_sdk.py",
+    ],
+    imports = [".", "..", "../src"],
+    modules = ["tests.test_labels"],
+    deps = [
+        "//packages/research-datasets/src/research_datasets:library",
+        "@python_deps//numpy",
+        "@python_deps//pandas",
+        "@python_deps//pyarrow",
+    ],
+)
+
+unittest_test(
+    name = "test_candidates",
+    size = "small",
+    srcs = [
+        "reference.py",
+        "test_candidates.py",
+        "test_labels.py",
+        "test_sdk.py",
+    ],
+    imports = [".", "..", "../src"],
+    modules = ["tests.test_candidates"],
+    deps = [
+        "//packages/research-datasets/src/research_datasets:library",
+        "@python_deps//numpy",
+        "@python_deps//pandas",
+        "@python_deps//pyarrow",
+    ],
+)
+
 test_suite(
     name = "tests",
     tests = [
+        ":test_candidates",
         ":test_clocks",
         ":test_events",
+        ":test_labels",
         ":test_regressions",
         ":test_sdk",
     ],

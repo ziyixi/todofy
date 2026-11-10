@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .asof import asof_join
+from .candidates import build_candidates
 from .client import (
     Client,
     Dataset,
@@ -20,6 +21,9 @@ from .constants import (
     COUNT_SOURCES,
     DATA_FAMILIES,
     DECISION_TIME,
+    DEFAULT_HORIZONS,
+    DEFAULT_TERMINAL_POLICY,
+    DEFAULT_UNIVERSE_RULE,
     DURATION_METRICS,
     FAMILY_SPECS,
     FIELDS,
@@ -37,10 +41,10 @@ from .constants import (
     __version__,
 )
 from .events import EventSpec
+from .labels import split_membership
 from .panels import (
     KEYS,
     LIMITATIONS,
-    build_candidates,
     daily_features,
     forward_returns,
     fundamental_features,
@@ -60,6 +64,9 @@ __all__ = [
     "COUNT_SOURCES",
     "DATA_FAMILIES",
     "DECISION_TIME",
+    "DEFAULT_HORIZONS",
+    "DEFAULT_TERMINAL_POLICY",
+    "DEFAULT_UNIVERSE_RULE",
     "DURATION_METRICS",
     "FAMILY_SPECS",
     "FIELDS",
@@ -98,4 +105,5 @@ __all__ = [
     "prepare",
     "prepare_fundamental_features",
     "prepare_fundamental_ratios",
+    "split_membership",
 ]
