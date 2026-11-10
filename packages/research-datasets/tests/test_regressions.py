@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
+import numpy as np
 import pandas as pd
 
 import research_datasets
+from research_datasets import asof, provenance
 from tests import test_sdk as fixture
 
 
@@ -380,6 +383,92 @@ class ContractRegressionTest(unittest.TestCase):
                 with self.subTest(symbols=symbols):
                     frame = ds.family("linked_family", symbols, columns=["event_uid"])
                     self.assertEqual(frame["event_uid"].tolist(), expected)
+
+
+class ProvenanceAndAsofTest(unittest.TestCase):
+    def test_code_digest_changes_when_constants_change(self) -> None:
+        package = provenance.PACKAGE_DIRECTORY
+        with tempfile.TemporaryDirectory() as tmp:
+            copy = Path(tmp) / "research_datasets"
+            shutil.copytree(package, copy)
+            before = research_datasets.code_digest(copy)
+            self.assertEqual(before, research_datasets.code_digest())
+            (copy / "py.typed").write_text("not a module\n")
+            self.assertEqual(research_datasets.code_digest(copy), before)
+            constants = copy / "constants.py"
+            constants.write_text(constants.read_text() + "\nEXTRA = 1\n")
+            self.assertNotEqual(research_datasets.code_digest(copy), before)
+        record = provenance.run_record(
+            dataset_id="d",
+            manifest_sha256="0" * 64,
+            parameters={},
+            counts={},
+            limitations=[],
+        )
+        self.assertEqual(record["code_sha256"], research_datasets.code_digest())
+        self.assertEqual(record["package_version"], research_datasets.__version__)
+
+    def test_evaluation_only_family_refused_by_asof_join(self) -> None:
+        samples = pd.DataFrame(
+            {
+                "asset_id": ["a", "b", "a", "a"],
+                "decision_at": [
+                    "2026-03-09T10:00:00Z",
+                    "2026-03-09T10:00:00Z",
+                    "2026-03-06T11:00:00Z",
+                    None,
+                ],
+            },
+            index=[7, 7, 3, 1],
+        )
+        table = pd.DataFrame(
+            {
+                "asset_id": ["a", "a", "a", "b"],
+                "available_at": [
+                    "2026-03-06T11:00:00Z",
+                    "2026-03-09T10:00:00Z",
+                    None,
+                    "2026-03-09T10:00:01Z",
+                ],
+                "value": [1.0, 2.0, 3.0, 4.0],
+            }
+        )
+        joined = research_datasets.asof_join(
+            samples, table, by="asset_id", columns=["value"]
+        )
+        # Inclusive at the decision instant, in sample order, keeping the index.
+        self.assertEqual(joined.index.tolist(), [7, 7, 3, 1])
+        np.testing.assert_array_equal(joined["value"], [2.0, np.nan, 1.0, np.nan])
+        self.assertEqual(joined.attrs["unclocked_rows"], 1)
+        strict = research_datasets.asof_join(
+            samples, table, by="asset_id", columns=["value"], inclusive=False
+        )
+        np.testing.assert_array_equal(strict["value"], [1.0, np.nan, np.nan, np.nan])
+        spec = research_datasets.FamilySpec("none", None, frozenset({1}), True)
+        with mock.patch.dict(research_datasets.FAMILY_SPECS, {"factor_returns": spec}):
+            with self.assertRaisesRegex(ValueError, "EVALUATION_ONLY"):
+                research_datasets.asof_join(
+                    samples,
+                    table,
+                    by="asset_id",
+                    columns=["value"],
+                    family="factor_returns",
+                )
+            table.attrs["family"] = "factor_returns"
+            with self.assertRaisesRegex(ValueError, "EVALUATION_ONLY"):
+                research_datasets.asof_join(
+                    samples, table, by="asset_id", columns=["value"]
+                )
+        changes = pd.DataFrame(
+            {
+                "group": ["a", "a", "a", "a", "b"],
+                "time": [1, 2, 2, 3, 1],
+                "state": [1.0, 5.0, 2.0, 2.0, np.nan],
+            }
+        )
+        stream = asof.step_stream(changes, by="group", time="time", state=["state"])
+        self.assertEqual(stream["time"].tolist(), [1, 1, 2])
+        self.assertEqual(stream["group"].tolist(), ["a", "b", "a"])
 
 
 class TransportRegressionTest(unittest.TestCase):

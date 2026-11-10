@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .asof import asof_join
 from .client import (
     Client,
     Dataset,
@@ -11,6 +12,7 @@ from .client import (
     connect,
     load,
 )
+from .clocks import Calendar
 from .constants import (
     ALL_METRICS,
     API,
@@ -34,6 +36,7 @@ from .constants import (
     SourceContract,
     __version__,
 )
+from .events import EventSpec
 from .panels import (
     KEYS,
     LIMITATIONS,
@@ -48,6 +51,7 @@ from .panels import (
     prepare_fundamental_features,
     prepare_fundamental_ratios,
 )
+from .provenance import code_digest
 
 __all__ = [
     "ALL_METRICS",
@@ -70,15 +74,19 @@ __all__ = [
     "SOURCES",
     "SOURCE_CONTRACTS",
     "VETO_CODES",
+    "Calendar",
     "Client",
     "Dataset",
     "DatasetError",
+    "EventSpec",
     "FamilySpec",
     "SourceContract",
     "Version",
     "__version__",
+    "asof_join",
     "build_candidates",
     "check_manifest",
+    "code_digest",
     "connect",
     "daily_features",
     "forward_returns",

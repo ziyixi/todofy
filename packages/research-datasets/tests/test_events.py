@@ -4,21 +4,25 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 import pandas as pd
 from pandas.testing import assert_frame_equal
 
 import research_datasets
+from research_datasets import clocks
+from tests import reference
 from tests import test_sdk as bundle
 
 DATASET = "00000000-0000-4000-8000-000000000001"
 ASSET = "00000000-0000-4000-8000-000000000002"
 OTHER = "00000000-0000-4000-8000-000000000003"
 BENCHMARK = "00000000-0000-4000-8000-000000000004"
+THIRD = "00000000-0000-4000-8000-000000000005"
 EARLY = "2026-01-01T00:00:00Z"
 LATE = "2026-11-01T00:00:00Z"
 
@@ -527,13 +531,201 @@ class CountSpecTest(unittest.TestCase):
                         "ranked": True,
                     },
                 )
-        # A partial selection cannot rank against the universe: missing, not 1.0.
+        # A partial selection still ranks against the whole population.
         features, record = run(material, events, asset_ids=[ASSET])
-        self.assertTrue(features["sec_events_rank_21d"].isna().all())
+        self.assertEqual(row(features, first).sec_events_rank_21d, 1.0)
         self.assertEqual(row(features, first).sec_events_21d, 1)
         self.assertEqual(record["rank_population"]["selected"], 1)
-        self.assertFalse(record["rank_population"]["ranked"])
+        self.assertTrue(record["rank_population"]["ranked"])
         self.assertEqual(record["source_coverage"]["sec"]["assets_with_coverage"], 1)
+        alone, _ = run(material, events, asset_ids=[OTHER])
+        self.assertEqual(row(alone, first, OTHER).sec_events_rank_21d, 0.5)
+
+
+def random_material(seed: int) -> tuple[dict[str, Any], list[str]]:
+    """Version chains with adds, removals, missing and tied clocks, plus checks."""
+    rng = random.Random(seed)
+    calendar = [
+        day.date()
+        for day in pd.bdate_range("2026-02-16", "2026-04-17")
+        if day.date() != date(2026, 4, 3)
+    ]
+    pool = []
+    for day in rng.sample(calendar, 8):
+        decision = clocks.decision_at(day)
+        for seconds in (0, 1, -1, 10_800, 10_801):
+            pool.append(decision + timedelta(seconds=seconds))
+    span = (calendar[-1] - calendar[0]).days + 10
+    for _ in range(12):
+        pool.append(
+            pd.Timestamp(calendar[0], tz="UTC")
+            + timedelta(minutes=rng.randrange((span - 5) * 1440) - 5 * 1440)
+        )
+    pool.append(pd.Timestamp("2026-11-01T00:00:00Z"))
+
+    def instant() -> Any:
+        value, style = rng.choice(pool), rng.random()
+        if style < 0.05:
+            return rng.choice([None, "", "not a time", "2026-03-05T10:00:00"])
+        if style < 0.1:
+            return value
+        if style < 0.4:
+            return value.tz_convert("America/New_York").isoformat()
+        return value.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def day_text() -> Any:
+        return rng.choice(
+            [None, "", str(rng.choice(calendar) + timedelta(days=rng.randint(-3, 3)))]
+        )
+
+    assets = [ASSET, OTHER, THIRD, BENCHMARK]
+    rows: list[dict[str, Any]] = []
+    stories = []
+    for number in range(rng.randint(20, 40)):
+        source = rng.choice(
+            ["sec", "sec", "alpaca_news", "finnhub_news", "sec_earnings_release"]
+        )
+        uid = f"{source}-{number}"
+        if source == "alpaca_news" and rng.random() < 0.6:
+            stories.append((uid, rng.choice(["s1", "s2", "s3"])))
+        for sequence in rng.sample(range(10), rng.randint(1, 4)):
+            links = rng.sample(assets, rng.randint(0, 3))
+            first_seen = {asset: instant() for asset in links if rng.random() < 0.85}
+            row = {
+                "source": source,
+                "event_uid": uid,
+                "event_id": uid,
+                "observation_sequence": sequence,
+                "form": rng.choice(["8-K", "10-K/A", "4", None, "DEF 14A"])
+                if source == "sec"
+                else None,
+                "filing_date": rng.choice([day_text(), "2026-13-45"])
+                if source == "sec"
+                else None,
+                "event_date": day_text(),
+                "asset_ids": links,
+                "asset_first_seen_at": first_seen
+                if rng.random() < 0.5
+                else list(first_seen.items()),
+                "content_first_seen_at": instant(),
+                "observation_recorded_at": instant(),
+                "public_time_precision": rng.choice(
+                    ["second"] * 5 + ["date", "unknown", None]
+                ),
+                "public_at": instant(),
+                "public_date": day_text(),
+            }
+            if source == "alpaca_news" and rng.random() < 0.2:
+                row["story_key"] = rng.choice(["s1", "s2"])
+            rows.append(row)
+    for source in ("future_x", None, ""):
+        rows.append(event(f"skip-{source}", source=source))
+    checks = []
+    for asset in assets:
+        for source in ("sec", "alpaca_news", "finnhub_news"):
+            if rng.random() < 0.7:
+                code = rng.choice(["", "SOURCE_PUBLICATION_COVERAGE_UNKNOWN"])
+                checks.append(
+                    check(
+                        asset,
+                        source,
+                        checked_start=str(calendar[0]),
+                        checked_end=str(calendar[-1]),
+                        checked_at=instant(),
+                        status="partial" if code else rng.choice(["checked", "empty"]),
+                        error_code=code,
+                    )
+                )
+            for _ in range(rng.randint(0, 4)):
+                start = rng.choice(calendar) + timedelta(days=rng.randint(-4, 2))
+                bounded = rng.random() < 0.85
+                checks.append(
+                    check(
+                        asset,
+                        source,
+                        checked_start=str(start) if bounded else rng.choice([None, ""]),
+                        checked_end=str(start + timedelta(days=rng.randint(0, 20))),
+                        checked_at=instant(),
+                        status=rng.choice(
+                            ["checked", "empty", "not_changed", "partial", "partial"]
+                            + ["error", "odd"]
+                        ),
+                        error_code=rng.choice(
+                            ["", "", None, "SOURCE_HISTORY_LIMIT"]
+                            + ["SOURCE_PUBLICATION_COVERAGE_UNKNOWN"]
+                            + ["SOURCE_RESULT_BOUNDARY", "SOURCE_SYMBOL_UNVERIFIED"]
+                            + ["IDENTITY_NOT_LISTED", "SEC_PREDECESSOR_UNMAPPED"]
+                        ),
+                    )
+                )
+    material = fixture(checks)
+    material["calendar"] = list(map(str, calendar))
+    material["manifest"]["source_timezones"]["finnhub_news"] = rng.choice(
+        ["Asia/Tokyo", "Europe/London", "America/New_York"]
+    )
+    material["universe"] = pd.DataFrame(
+        {"asset_id": assets, "is_benchmark": [False, False, False, True]}
+    )
+    material["event_observations"] = pd.DataFrame(rows)
+    material["news_versions"] = (
+        pd.DataFrame(
+            [
+                {"event_id": uid, "story_key": story, "provider_updated_at": None}
+                for uid, story in stories
+            ]
+        )
+        if stories
+        else None
+    )
+    return material, rng.sample(assets[:3], rng.randint(1, 3))
+
+
+class ReferenceTest(unittest.TestCase):
+    def test_vectorized_events_and_coverage_match_reference(self) -> None:
+        for seed in range(50):
+            material, selection = random_material(seed)
+            options = {
+                "start": material["calendar"][25],
+                "end": material["calendar"][-1],
+            }
+            for policy in research_datasets.POLICIES:
+                with self.subTest(seed=seed, policy=policy):
+                    features, record = run(
+                        material,
+                        material["event_observations"].to_dict("records"),
+                        asset_ids=selection,
+                        time_policy=policy,
+                        **options,
+                    )
+                    expected, summary = reference.features(
+                        material,
+                        asset_ids=selection,
+                        population=[ASSET, OTHER, THIRD],
+                        policy=policy,
+                        **options,
+                    )
+                    actual = features[list(expected.columns)].copy()
+                    for name in actual:
+                        if name.endswith(("_coverage", "_coverage_basis")):
+                            actual[name] = actual[name].astype(str).astype(object)
+                    assert_frame_equal(actual, expected)
+                    self.assertEqual(
+                        record["skipped_sources"], summary["skipped_sources"]
+                    )
+                    self.assertEqual(
+                        record["undatable_events"], summary["undatable_events"]
+                    )
+                    shuffled = material["event_observations"].sample(
+                        frac=1, random_state=seed
+                    )
+                    again, _ = run(
+                        material,
+                        shuffled.to_dict("records"),
+                        asset_ids=selection,
+                        time_policy=policy,
+                        **options,
+                    )
+                    assert_frame_equal(again, features)
 
 
 class UnknownSourceTest(unittest.TestCase):
@@ -576,6 +768,10 @@ class UnknownSourceTest(unittest.TestCase):
             )
             self.assertEqual(record["skipped_sources"], {"future_x": 1})
             self.assertEqual(record["package_version"], research_datasets.__version__)
+            self.assertEqual(record["code_sha256"], research_datasets.code_digest())
+            # The reader loads only the observation columns it needs, when present.
+            projected = ds.event_observations(columns=["source", "event_uid", "nope"])
+            self.assertEqual(list(projected.columns), ["source", "event_uid"])
 
 
 if __name__ == "__main__":

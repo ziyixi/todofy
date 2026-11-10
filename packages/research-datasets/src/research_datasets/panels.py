@@ -2,29 +2,32 @@
 
 Every high-level function returns a ``pandas.DataFrame`` directly without requiring
 preset train/validation/test split boundaries. ``time_policy`` is always explicit.
+Clocks live in ``clocks``, event counts and coverage in ``events``, run records in
+``provenance``; this module orchestrates them.
 """
 
 from __future__ import annotations
 
-import hashlib
+import inspect
 import json
-import platform
-from bisect import bisect_right
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
-from dataclasses import field as _field
-from datetime import date, datetime, time, timedelta
+from datetime import date
 from decimal import Decimal, InvalidOperation
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from uuid import UUID
-from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
-import pyarrow
 
+from . import clocks
+from .clocks import CAPTURE_DEADLINE as _CAPTURE_DEADLINE
+from .clocks import at as _at
+from .clocks import clock as _clock
+from .clocks import day as _day
+from .clocks import decision_at as _decision_at
+from .clocks import policy as _policy
+from .clocks import public_clock as _public_clock
 from .constants import (
     ALL_METRICS,
     CAPTURE_GRACE,
@@ -36,25 +39,33 @@ from .constants import (
     LABEL_CLOSE_TIME,
     LABEL_OPEN_TIME,
     NEW_YORK_ZONE,
-    NOT_LISTED_CODES,
-    POLICIES,
     QUARTER_DEFAULT_EXCLUDED_METRICS,
     QUARTER_DEFAULT_EXCLUDED_RATIOS,
-    RANK_WINDOW_SESSIONS,
     RATIO_METRICS,
-    SEC_DISSEMINATION_START,
-    SOURCE_CONTRACTS,
-    STORY_WINDOW,
     TIME_POLICY_VERSION,
-    VETO_CODES,
-    SourceContract,
-    __version__,
 )
+from .events import WARMUP_SESSIONS, EventSpec, event_features
+from .provenance import run_record
 
-NEW_YORK = ZoneInfo(NEW_YORK_ZONE)
-_CAPTURE_DEADLINE = (
-    datetime.combine(date(2000, 1, 3), DECISION_TIME) + CAPTURE_GRACE
-).time()
+# Columns the event reduction reads; other observation columns are not loaded.
+OBSERVATION_COLUMNS = (
+    "source",
+    "event_uid",
+    "event_id",
+    "observation_sequence",
+    "form",
+    "items",
+    "filing_date",
+    "event_date",
+    "asset_ids",
+    "asset_first_seen_at",
+    "content_first_seen_at",
+    "observation_recorded_at",
+    "public_time_precision",
+    "public_at",
+    "public_date",
+    "story_key",
+)
 LIMITATIONS = [
     "Vendor-adjusted prices can be revised; this is not a strict price-PIT dataset.",
     "The frozen research universe is not a historical eligibility universe.",
@@ -65,606 +76,47 @@ LIMITATIONS = [
     "Under public_reconstructed, event links come from each event's latest saved version and coverage comes from saved check windows regardless of when they ran.",
     "Unverified-identity, not-listed and truncated check windows stay missing, never 0; source coverage describes saved checks, not publication completeness.",
     "sec counts keep the 8-K, 10-K, 10-Q, 6-K and 20-F forms; sources without a publication clock produce no count features.",
-    "21-session event ranks are percentiles over the universe's non-benchmark securities and stay missing unless the selection holds all of them.",
+    "21-session event ranks are percentiles over the universe's non-benchmark securities, whatever the selection.",
     "Quarterly cash-flow facts are year-to-date in 10-Q filings, so default quarterly columns omit operating cash flow, capex and free cash flow.",
 ]
 
 
-@lru_cache(maxsize=65536)
-def _day_str(value: str) -> date:
-    return date.fromisoformat(value[:10])
-
-
-def _day(value: Any) -> date:
-    if isinstance(value, date) and not isinstance(value, datetime):
-        return value
-    return _day_str(str(value))
-
-
-@lru_cache(maxsize=131072)
-def _clock_str(value: str) -> pd.Timestamp | None:
-    try:
-        parsed = pd.Timestamp(value)
-    except (TypeError, ValueError):
-        return None
-    if pd.isna(parsed) or parsed.tzinfo is None:
-        return None
-    return parsed.tz_convert("UTC")
-
-
-def _clock(value: Any) -> pd.Timestamp | None:
-    """Only offset-bearing timestamps establish an instant."""
-    if value is None or value is pd.NaT:
-        return None
-    if isinstance(value, str):
-        return _clock_str(value) if value else None
-    if pd.isna(value):
-        return None
-    if isinstance(value, pd.Timestamp):
-        if value.tzinfo is None:
-            return None
-        return value.tz_convert("UTC")
-    return _clock_str(str(value))
-
-
-@lru_cache(maxsize=16384)
-def _at(day: date, hour: int, minute: int = 0) -> pd.Timestamp:
-    return pd.Timestamp(datetime.combine(day, time(hour, minute), NEW_YORK)).tz_convert(
-        "UTC"
-    )
-
-
-def _decision_at(day: date) -> pd.Timestamp:
-    return _at(day, DECISION_TIME.hour, DECISION_TIME.minute)
-
-
-def _policy(time_policy: str) -> str:
-    if time_policy not in POLICIES:
-        raise ValueError(
-            "Choose an explicit supported time policy: " + " or ".join(POLICIES)
-        )
-    return time_policy
-
-
-def _mapping(value: Any) -> dict[str, Any]:
-    if isinstance(value, Mapping):
-        return dict(value)
-    if isinstance(value, (list, tuple, np.ndarray)):
-        return dict(
-            (item["key"], item["value"]) if isinstance(item, Mapping) else item
-            for item in value
-        )
-    return {}
-
-
-def _date_field(row: Mapping[str, Any], *names: str) -> date | None:
-    """The first present YYYY-MM-DD field; a malformed present value gives None."""
-    for name in names:
-        value = row.get(name)
-        if isinstance(value, str) and value:
-            try:
-                return _day_str(value)
-            except ValueError:
-                return None
-    return None
-
-
-def _source_zone(source: str, source_timezones: Mapping[str, str]) -> ZoneInfo:
-    contract = SOURCE_CONTRACTS.get(source)
-    for name in (
-        source_timezones.get(source),
-        contract.timezone if contract else NEW_YORK_ZONE,
-    ):
-        if name:
-            try:
-                return ZoneInfo(name)
-            except (ValueError, KeyError):
-                continue
-    return NEW_YORK
-
-
-def _public_clock(
-    row: Mapping[str, Any], source_timezones: Mapping[str, str]
-) -> pd.Timestamp | None:
-    precision = row.get("public_time_precision")
-    if not isinstance(precision, str):
-        return None
-    source = str(row.get("source", ""))
-    contract = SOURCE_CONTRACTS.get(source)
-    if precision == "second":
-        public = _clock(row.get("public_at"))
-        if (
-            public is not None
-            and contract is not None
-            and contract.clock == "sec_filing"
-        ):
-            # SEC assigns the next business day to filings accepted after 17:30 or on
-            # non-business days, and disseminates from 06:00 on the filing date.
-            filed = _date_field(row, "filing_date", "filed")
-            if filed is not None:
-                public = max(
-                    public,
-                    _at(
-                        filed,
-                        SEC_DISSEMINATION_START.hour,
-                        SEC_DISSEMINATION_START.minute,
-                    ),
-                )
-        return public
-    if precision != "date":
-        return None
-    public_date = row.get("public_date")
-    if public_date is None or pd.isna(public_date) or public_date == "":
-        return None
-    zone = source_timezones.get(source) or (contract.timezone if contract else None)
-    if not zone:
-        return None
-    try:
-        next_day = _day(public_date) + timedelta(days=1)
-        return pd.Timestamp(
-            datetime.combine(next_day, time(), ZoneInfo(zone))
-        ).tz_convert("UTC")
-    except (ValueError, KeyError):
-        return None
-
-
-@dataclass
-class _EventIndex:
-    """Count-source events reduced for one policy, plus what was left out."""
-
-    policy: str
-    # public_reconstructed: per (asset, source) sorted first public clocks and the
-    # [start, end) days of events without any public clock.
-    placed: dict[tuple[str, str], list[pd.Timestamp]] = _field(default_factory=dict)
-    missing: dict[tuple[str, str], list[tuple[pd.Timestamp, pd.Timestamp]]] = _field(
-        default_factory=dict
-    )
-    # observed_content: per (asset, source) version chains and first-known clocks.
-    histories: dict[tuple[str, str], list[tuple[Any, list[dict[str, Any]], Any]]] = (
-        _field(default_factory=dict)
-    )
-    first_known: dict[tuple[str, str, Any], pd.Timestamp] = _field(default_factory=dict)
-    skipped: dict[str, int] = _field(default_factory=dict)
-    undatable: dict[str, int] = _field(default_factory=dict)
-
-
-def _story_keys(news_versions: pd.DataFrame | None) -> dict[tuple[str, str], str]:
-    """(source, event_id) -> story key of the article's earliest saved text version."""
-    if (
-        news_versions is None
-        or news_versions.empty
-        or not {"event_id", "story_key"}.issubset(news_versions.columns)
-    ):
-        return {}
-    frame = news_versions
-    if "provider_updated_at" in frame.columns:
-        frame = frame.sort_values(
-            ["provider_updated_at", "story_key"], kind="stable", na_position="last"
-        )
-    keys: dict[tuple[str, str], str] = {}
-    sources = (
-        frame["source"] if "source" in frame.columns else [None] * len(frame.index)
-    )
-    for event_id, story, source in zip(frame["event_id"], frame["story_key"], sources):
-        if isinstance(story, str) and story and event_id is not None:
-            name = source if isinstance(source, str) and source else "alpaca_news"
-            keys.setdefault((name, str(event_id)), story)
-    return keys
-
-
-def _story(
-    row: Mapping[str, Any], source: str, stories: Mapping[tuple[str, str], str]
-) -> str | None:
-    value = row.get("story_key")
-    if isinstance(value, str) and value:
-        return value
-    event_id = row.get("event_id")
-    if isinstance(event_id, str) and event_id:
-        return stories.get((source, event_id))
-    return None
-
-
-def _first_of_story(
-    entries: list[tuple[pd.Timestamp, str | None, Any]],
-) -> list[tuple[pd.Timestamp, Any]]:
-    """Keep one entry per story key and STORY_WINDOW, anchored at the first entry."""
-    entries.sort(key=lambda entry: (entry[0], str(entry[2])))
-    anchors: dict[str, pd.Timestamp] = {}
-    kept = []
-    for instant, story, uid in entries:
-        if story:
-            anchor = anchors.get(story)
-            if anchor is not None and instant < anchor + STORY_WINDOW:
-                continue
-            anchors[story] = instant
-        kept.append((instant, uid))
-    return kept
-
-
-def _event_index(
-    observations: pd.DataFrame,
-    asset_ids: set[str],
-    policy: str,
-    source_timezones: Mapping[str, str],
-    stories: Mapping[tuple[str, str], str],
-) -> _EventIndex:
-    """Reduce observation versions of count sources; rows of unknown sources are counted."""
-    index = _EventIndex(policy)
-    chains: dict[tuple[str, Any], list[dict[str, Any]]] = {}
-    for row in observations.to_dict("records"):
-        source = row.get("source")
-        contract = SOURCE_CONTRACTS.get(source) if isinstance(source, str) else None
-        if contract is None:
-            name = source if isinstance(source, str) and source else "(missing)"
-            index.skipped[name] = index.skipped.get(name, 0) + 1
-            continue
-        if not contract.counts:
-            continue
-        event_uid = row.get("event_uid")
-        if not event_uid:
-            raise ValueError("Observation requires a logical event_uid")
-        sequence = row.get("observation_sequence")
-        if (
-            not isinstance(sequence, (int, np.integer))
-            or isinstance(sequence, bool)
-            or sequence < 0
-        ):
-            raise ValueError("Observation requires a nonnegative observation_sequence")
-        linked = row.get("asset_ids")
-        chains.setdefault((source, event_uid), []).append(
-            {
-                "row": row,
-                "sequence": int(sequence),
-                "public": _public_clock(row, source_timezones),
-                "links": [] if linked is None else [str(asset) for asset in linked],
-            }
-        )
-    placed: dict[tuple[str, str], list[tuple[pd.Timestamp, str | None, Any]]] = {}
-    for (source, event_uid), versions in chains.items():
-        versions.sort(key=lambda version: version["sequence"])
-        if len({version["sequence"] for version in versions}) != len(versions):
-            raise ValueError("Duplicate observation_sequence for one logical event")
-        contract = SOURCE_CONTRACTS[source]
-        latest = versions[-1]["row"]
-        if contract.count_forms is not None and "form" in latest:
-            _mark_count_forms(versions, contract.count_forms)
-            # Reconstruction reads the latest saved form; observed_content the selected one.
-            if not (
-                versions[-1]["counts"]
-                if policy == "public_reconstructed"
-                else any(version["counts"] for version in versions)
-            ):
-                continue
-        story = _story(latest, source, stories)
-        if policy == "public_reconstructed":
-            zone = _source_zone(source, source_timezones)
-            _place_reconstructed(
-                index, placed, (source, event_uid), versions, asset_ids, story, zone
-            )
-        else:
-            _place_observed(index, (source, event_uid), versions, asset_ids, story)
-    for key, entries in placed.items():
-        index.placed[key] = [instant for instant, _ in _first_of_story(entries)]
-    return index
-
-
-def _mark_count_forms(versions: list[dict[str, Any]], forms: frozenset[str]) -> None:
-    """Each version counts by its form, or by the latest earlier form when it has none."""
-    form = None
-    for version in versions:
-        value = version["row"].get("form")
-        if isinstance(value, str) and value:
-            form = value
-        version["counts"] = form is not None and form.removesuffix("/A") in forms
-
-
-def _place_reconstructed(
-    index: _EventIndex,
-    placed: dict[tuple[str, str], list[tuple[pd.Timestamp, str | None, Any]]],
-    chain: tuple[str, Any],
-    versions: list[dict[str, Any]],
-    asset_ids: set[str],
-    story: str | None,
-    zone: ZoneInfo,
-) -> None:
-    """Links of the latest version from the earliest public clock: order-independent."""
-    source, event_uid = chain
-    links = [
-        asset for asset in dict.fromkeys(versions[-1]["links"]) if asset in asset_ids
-    ]
-    if not links:
-        return
-    publics = [
-        version["public"] for version in versions if version["public"] is not None
-    ]
-    if publics:
-        first = min(publics)
-        for asset in links:
-            placed.setdefault((asset, source), []).append((first, story, event_uid))
-        return
-    day = _date_field(versions[-1]["row"], "event_date", "filing_date")
-    if day is None:
-        index.undatable[source] = index.undatable.get(source, 0) + 1
-        return
-    start = pd.Timestamp(datetime.combine(day, time(), zone)).tz_convert("UTC")
-    end = pd.Timestamp(
-        datetime.combine(day + timedelta(days=1), time(), zone)
-    ).tz_convert("UTC")
-    for asset in links:
-        index.missing.setdefault((asset, source), []).append((start, end))
-
-
-def _place_observed(
-    index: _EventIndex,
-    chain: tuple[str, Any],
-    versions: list[dict[str, Any]],
-    asset_ids: set[str],
-    story: str | None,
-) -> None:
-    """Keep the version chain with capture-bounded clocks and association times."""
-    source, event_uid = chain
-    history = []
-    for version in versions:
-        row, public = version["row"], version["public"]
-        content = _clock(row.get("content_first_seen_at"))
-        recorded = _clock(row.get("observation_recorded_at"))
-        invalid_public = (
-            row.get("public_time_precision") in {"second", "date"} and public is None
-        )
-        available = None
-        if content is not None and recorded is not None and not invalid_public:
-            available = max(
-                clock
-                for clock in (public, content - CAPTURE_GRACE, recorded - CAPTURE_GRACE)
-                if clock is not None
-            )
-        associations = _mapping(row.get("asset_first_seen_at"))
-        assets: dict[str, pd.Timestamp | None] = {}
-        for asset_id in set(version["links"]).intersection(asset_ids):
-            association = _clock(associations.get(asset_id))
-            assets[asset_id] = (
-                max(available, association - CAPTURE_GRACE)
-                if available is not None and association is not None
-                else None
-            )
-        history.append(
-            {
-                "sequence": version["sequence"],
-                "available": available,
-                "recorded": recorded,
-                "assets": assets,
-                "public_missing": public is None,
-                "counts": version.get("counts", True),
-            }
-        )
-    for version in history:
-        for asset, available in version["assets"].items():
-            key = (asset, source, event_uid)
-            if available is not None and (
-                key not in index.first_known or available < index.first_known[key]
-            ):
-                index.first_known[key] = available
-    for asset in set().union(*(version["assets"] for version in history)):
-        index.histories.setdefault((asset, source), []).append(
-            (event_uid, history, story)
-        )
-
-
-def _window_events(
-    index: _EventIndex,
-    asset_id: str,
-    source: str,
-    previous: pd.Timestamp,
-    decision: pd.Timestamp,
-) -> tuple[int, bool, bool]:
-    """Events first available in (previous, decision], clock gaps and missing publics."""
-    if pd.isna(decision):
-        return 0, False, False
-    key = (asset_id, source)
-    if index.policy == "public_reconstructed":
-        instants = index.placed.get(key, [])
-        count = bisect_right(instants, decision) - bisect_right(instants, previous)
-        clock_missing = any(
-            start <= decision and previous < end
-            for start, end in index.missing.get(key, [])
-        )
-        return count, clock_missing, False
-    clock_missing = False
-    # Articles linked to the security at this decision; stories dedupe among them only.
-    linked: list[tuple[pd.Timestamp, str | None, Any]] = []
-    missing_public: dict[Any, bool] = {}
-    for event_uid, versions, story in index.histories.get(key, []):
-        selected = next(
-            (
-                version
-                for version in reversed(versions)
-                if version["available"] is not None and version["available"] <= decision
-            ),
-            None,
-        )
-        selected_sequence = selected["sequence"] if selected is not None else -1
-        clock_missing |= any(
-            version["available"] is None
-            and version["sequence"] > selected_sequence
-            and (
-                version["recorded"] is None
-                or version["recorded"] - CAPTURE_GRACE <= decision
-            )
-            for version in versions
-        )
-        if (
-            selected is None
-            or not selected["counts"]
-            or asset_id not in selected["assets"]
-        ):
-            continue
-        available = selected["assets"][asset_id]
-        if available is None:
-            clock_missing = True
-            continue
-        if available > decision:
-            continue
-        linked.append(
-            (index.first_known[(asset_id, source, event_uid)], story, event_uid)
-        )
-        missing_public[event_uid] = selected["public_missing"]
-    count, public_missing = 0, False
-    for initial, event_uid in _first_of_story(linked):
-        public_missing |= missing_public[event_uid]
-        count += previous < initial <= decision
-    return int(count), bool(clock_missing), bool(public_missing)
-
-
-_COUNTABLE_STATUSES = frozenset({"checked", "empty", "not_changed"})
-_STRONG_CLASSES = frozenset({"countable", "veto", "na"})
-
-
-def _classify(status: str, code: str, contract: SourceContract) -> tuple[str, str]:
-    """Coverage class and label of one check (see constants.VETO_CODES)."""
-    if code in VETO_CODES:
-        return "veto", "mapping_missing"
-    if code in NOT_LISTED_CODES:
-        return "na", "not_listed"
-    if status in _COUNTABLE_STATUSES and not code:
-        return "countable", "empty" if status == "empty" else "checked"
-    if status == "partial" or status in _COUNTABLE_STATUSES:
-        if code in contract.read_complete_codes:
-            return "countable", "read_complete"
-        if code in contract.countable_partial:
-            return "countable", "checked"
-        return "soft", "partial"
-    return ("error" if status == "error" else "soft"), status or "unknown"
-
-
-def _parse_checks(
-    rows: Iterable[Mapping[str, Any]],
-) -> list[tuple[pd.Timestamp, date | None, date | None, str, str]]:
-    parsed = []
-    for row in rows:
-        checked = _clock(row.get("checked_at"))
-        if checked is None:
-            continue
-        status, code = row.get("status"), row.get("error_code")
-        status = status if isinstance(status, str) else "unknown"
-        code = code if isinstance(code, str) else ""
-        if not row.get("checked_start") or not row.get("checked_end"):
-            parsed.append((checked, None, None, status, code))
-        else:
-            start, end = _day(row["checked_start"]), _day(row["checked_end"])
-            parsed.append((checked, start, end, status, code))
-    parsed.sort(key=lambda item: item[0])
-    return parsed
-
-
-def _coverage(
-    checks: Sequence[tuple[pd.Timestamp, date | None, date | None, str, str]],
-    contract: SourceContract,
-    previous: pd.Timestamp,
-    decision: pd.Timestamp,
-    zone: ZoneInfo,
-    policy: str,
-) -> tuple[str, str]:
-    """Window label and basis ('' unless every day of (previous, decision] is countable).
-
-    public_reconstructed paints saved check windows in check order whenever they ran:
-    countable, veto and not-listed checks overwrite, other checks only fill days that
-    are not countable, and unbounded checks are ignored. observed_content keeps the
-    latest covering check captured by the decision plus CAPTURE_GRACE.
-    """
-    if pd.isna(decision):
-        return "unknown", ""
-    first = previous.tz_convert(zone).date()
-    last = decision.tz_convert(zone).date()
-    days = [first + timedelta(days=offset) for offset in range((last - first).days + 1)]
-    deadline = decision + CAPTURE_GRACE
-    states: dict[date, tuple[str, str, pd.Timestamp | None]] = {}
-    if policy == "observed_content":
-        visible = [check for check in checks if check[0] <= deadline]
-        windowed = [
-            check
-            for check in visible
-            if check[1] is not None and check[1] <= last and check[2] >= first
-        ]
-        unbounded = [check for check in visible if check[1] is None]
-        latest_unbounded = (
-            max(unbounded, key=lambda check: check[0]) if unbounded else None
-        )
-        if not windowed:
-            if latest_unbounded is None:
-                return "unknown", ""
-            cls, label = _classify(latest_unbounded[3], latest_unbounded[4], contract)
-            return (label, "observed") if cls == "countable" else (label, "")
-        if (
-            latest_unbounded is not None
-            and latest_unbounded[0] >= max(check[0] for check in windowed)
-            and latest_unbounded[3] not in {"checked", "empty"}
-        ):
-            return latest_unbounded[3], ""
-        for day in days:
-            covering = [check for check in windowed if check[1] <= day <= check[2]]
-            if covering:
-                checked, _, _, status, code = max(covering, key=lambda check: check[0])
-                cls, label = _classify(status, code, contract)
-                states[day] = (cls, label, checked)
-    else:
-        for checked, start, end, status, code in checks:
-            if start is None or start > last or end < first:
-                continue
-            cls, label = _classify(status, code, contract)
-            for day in days:
-                if not start <= day <= end:
-                    continue
-                current = states.get(day)
-                if cls in _STRONG_CLASSES:
-                    first_ok = None
-                    if cls == "countable":
-                        first_ok = (
-                            current[2]
-                            if current is not None and current[0] == "countable"
-                            else checked
-                        )
-                    states[day] = (cls, label, first_ok)
-                elif current is None or current[0] != "countable":
-                    states[day] = (cls, label, None)
-    labels = []
-    for day in days:
-        state = states.get(day)
-        if state is None:
-            return "unknown", ""
-        if state[0] != "countable":
-            return state[1], ""
-        labels.append(state[1])
-    label = (
-        "empty"
-        if all(value == "empty" for value in labels)
-        else "read_complete"
-        if "read_complete" in labels
-        else "checked"
-    )
-    if policy == "observed_content":
-        return label, "observed"
-    observed = all(
-        states[day][2] is not None and states[day][2] <= deadline for day in days
-    )
-    return label, "observed" if observed else "reconstructed"
-
-
-def _prices(frame: pd.DataFrame, calendar: Sequence[date]) -> dict[str, pd.DataFrame]:
+def _price_frame(frame: pd.DataFrame) -> pd.DataFrame:
     required = {"asset_id", "date", "open", "close", "volume"}
     if not required.issubset(frame.columns):
         raise ValueError(
             f"Price material lacks columns: {sorted(required - set(frame.columns))}"
         )
     result = frame.copy()
-    result["date"] = result["date"].map(_day)
+    result["asset_id"] = result["asset_id"].astype(str)
+    result["date"] = (
+        result["date"].dt.date
+        if pd.api.types.is_datetime64_any_dtype(result["date"])
+        else result["date"].map(_day)
+    )
     if result.duplicated(["asset_id", "date"]).any():
         raise ValueError("Duplicate security/session prices")
     for column in ("open", "close", "volume"):
         result[column] = pd.to_numeric(result[column], errors="coerce")
+    return result
+
+
+def _prices(frame: pd.DataFrame, calendar: Sequence[date]) -> dict[str, pd.DataFrame]:
+    """Per security, normalized price rows reindexed to the calendar."""
     return {
         str(asset): rows.set_index("date").reindex(calendar)
-        for asset, rows in result.groupby("asset_id", observed=True)
+        for asset, rows in frame.groupby("asset_id", observed=True)
     }
+
+
+def _wide(
+    frame: pd.DataFrame, calendar: Sequence[date], assets: Sequence[str], column: str
+) -> pd.DataFrame:
+    """Sessions x securities matrix of one normalized price column."""
+    if frame.empty:
+        return pd.DataFrame(np.nan, index=list(calendar), columns=list(assets))
+    wide = frame.pivot(index="date", columns="asset_id", values=column)
+    return wide.reindex(index=list(calendar), columns=list(assets)).astype("float64")
 
 
 def _families(version: Any) -> Mapping[str, Any]:
@@ -680,6 +132,16 @@ def _news_versions(version: Any) -> pd.DataFrame | None:
     return version.family(
         "news_versions", columns=["event_id", "story_key", "provider_updated_at"]
     )
+
+
+def _observations(version: Any) -> pd.DataFrame:
+    """Frozen observation versions, projected to the columns the reduction reads."""
+    reader = version.event_observations
+    try:
+        projected = "columns" in inspect.signature(reader).parameters
+    except (TypeError, ValueError):
+        projected = False
+    return reader(columns=list(OBSERVATION_COLUMNS)) if projected else reader()
 
 
 def _rank_population(universe: Any, benchmark_ids: Iterable[str]) -> frozenset[str]:
@@ -712,6 +174,10 @@ def material_from_version(
             [*asset_ids, *([benchmark_id] if benchmark_id is not None else [])]
         )
     )
+    # Ranks compare against the whole non-benchmark universe, so its checks are read too.
+    population = _rank_population(
+        version.universe, [benchmark_id] if benchmark_id is not None else []
+    )
     return {
         "manifest": version.manifest,
         "manifest_sha256": version.manifest_sha256,
@@ -719,8 +185,8 @@ def material_from_version(
         "universe": version.universe,
         "raw": version.prices(ids, adjusted=False),
         "all": version.prices(ids, adjusted=True),
-        "event_observations": version.event_observations(),
-        "source_checks": version.source_checks(asset_ids),
+        "event_observations": _observations(version),
+        "source_checks": version.source_checks(sorted(population.union(asset_ids))),
         "news_versions": _news_versions(version),
     }
 
@@ -729,127 +195,77 @@ def _feature_rows(
     calendar: Sequence[date],
     signals: Sequence[date],
     asset_ids: Sequence[str],
-    raw: Mapping[str, pd.DataFrame],
-    adjusted: Mapping[str, pd.DataFrame],
+    raw: pd.DataFrame,
+    adjusted: pd.DataFrame,
     observations: pd.DataFrame,
     checks: pd.DataFrame,
     policy: str,
     zones: Mapping[str, str],
     news_versions: pd.DataFrame | None = None,
     population: frozenset[str] = frozenset(),
+    specs: Sequence[EventSpec] | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    """Daily features for contiguous signal sessions and the event reduction summary."""
-    index = _event_index(
-        observations, set(asset_ids), policy, zones, _story_keys(news_versions)
+    """Daily features for contiguous signal sessions and the event reduction summary.
+
+    ``raw`` and ``adjusted`` are normalized price rows. Event counts and coverage are
+    computed for the selection and the rank population, over warm-up sessions that feed
+    the rolling counts of the first signals.
+    """
+    sessions = clocks.Calendar(calendar)
+    first, last = sessions.index(signals[0]), sessions.index(signals[-1])
+    start = max(0, first - WARMUP_SESSIONS)
+    assets = [*asset_ids, *sorted(population.difference(asset_ids))]
+    position = {asset: index for index, asset in enumerate(assets)}
+    events, summary = event_features(
+        observations,
+        checks,
+        assets=assets,
+        selected=len(asset_ids),
+        decisions=sessions.decisions[start : last + 2],
+        first_signal=first - start,
+        policy=policy,
+        zones=zones,
+        news_versions=news_versions,
+        population=[position[asset] for asset in sorted(population)],
+        specs=specs,
     )
-    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    for row in checks.to_dict("records"):
-        if row.get("source") in COUNT_SOURCES:
-            grouped.setdefault((str(row.get("asset_id")), row["source"]), []).append(
-                row
-            )
-    parsed = {key: _parse_checks(rows) for key, rows in grouped.items()}
-    zone_of = {source: _source_zone(source, zones) for source in COUNT_SOURCES}
-    cal_index = {day: idx for idx, day in enumerate(calendar)}
-    first, last = cal_index[signals[0]], cal_index[signals[-1]]
-    # Earlier sessions feed the rolling counts of the first signals and are dropped.
-    days = calendar[max(0, first - RANK_WINDOW_SESSIONS + 1) : last + 1]
-    result = []
-    for asset_id in asset_ids:
-        bars = adjusted.get(asset_id)
-        closes = pd.Series(np.nan, index=calendar) if bars is None else bars["close"]
-        closes = closes.where(np.isfinite(closes) & (closes > 0))
-        returns = closes / closes.shift(1) - 1
-        consecutive = closes.rolling(21, min_periods=21).count() == 21
-        momentum = (closes / closes.shift(20) - 1).where(consecutive)
-        volatility = returns.rolling(20, min_periods=20).std(ddof=1).where(consecutive)
-        nominal = raw.get(asset_id)
-        for signal in days:
-            position = cal_index[signal]
-            decision = (
-                _decision_at(calendar[position + 1])
-                if position + 1 < len(calendar)
-                else pd.NaT
-            )
-            previous = _decision_at(signal)
-            close = np.nan if nominal is None else nominal.at[signal, "close"]
-            volume = np.nan if nominal is None else nominal.at[signal, "volume"]
-            dollars = (
-                close * volume
-                if np.isfinite(close)
-                and close > 0
-                and np.isfinite(volume)
-                and volume >= 0
-                else np.nan
-            )
-            feature: dict[str, Any] = {
-                "asset_id": asset_id,
-                "signal_session": signal,
-                "previous_decision_at": previous,
-                "decision_at": decision,
-                "momentum20": momentum.loc[signal],
-                "volatility20": volatility.loc[signal],
-                "price_history_missing": not bool(consecutive.loc[signal]),
-                "raw_dollar_volume": float(dollars),
-                "raw_dollar_volume_missing": pd.isna(dollars),
-            }
-            for source in COUNT_SOURCES:
-                count, clock_missing, public_missing = _window_events(
-                    index, asset_id, source, previous, decision
-                )
-                coverage, basis = _coverage(
-                    parsed.get((asset_id, source), ()),
-                    SOURCE_CONTRACTS[source],
-                    previous,
-                    decision,
-                    zone_of[source],
-                    policy,
-                )
-                feature[f"{source}_new_event_count"] = (
-                    count if basis and not clock_missing else np.nan
-                )
-                feature[f"{source}_observed_new_event_count"] = count
-                feature[f"{source}_coverage"] = coverage
-                feature[f"{source}_coverage_basis"] = basis
-                feature[f"{source}_clock_missing"] = clock_missing
-                feature[f"{source}_public_clock_missing"] = public_missing
-            result.append(feature)
-    frame = pd.DataFrame(result)
-    owners = frame["asset_id"].to_numpy()
-    # A rank is a percentile over the whole non-benchmark universe, so it exists only
-    # when the selection holds every member; otherwise it would depend on the selection.
-    ranked = bool(population) and population.issubset(asset_ids)
-    for source in COUNT_SOURCES:
-        column = f"{source}_new_event_count"
-        frame[column] = frame[column].astype("Int64")
-        values = pd.Series(
-            frame[column].to_numpy(dtype="float64", na_value=np.nan), index=frame.index
-        )
-        # NaN unless every one of the 21 one-session windows is countable.
-        total = values.groupby(owners, sort=False).transform(
-            lambda series: series.rolling(
-                RANK_WINDOW_SESSIONS, min_periods=RANK_WINDOW_SESSIONS
-            ).sum()
-        )
-        frame[f"{source}_events_21d"] = total
-        frame[f"{source}_events_rank_21d"] = (
-            total.where(frame["asset_id"].isin(population))
-            .groupby(frame["signal_session"])
-            .rank(pct=True)
-            if ranked
-            else np.nan
-        )
-    frame = frame[frame["signal_session"] >= signals[0]].reset_index(drop=True)
-    summary = {
-        "skipped_sources": dict(sorted(index.skipped.items())),
-        "undatable_events": dict(sorted(index.undatable.items())),
-        "rank_population": {
-            "basis": "universe_non_benchmark",
-            "members": len(population),
-            "selected": len(population.intersection(asset_ids)),
-            "ranked": ranked,
-        },
-    }
+    closes = _wide(adjusted, calendar, asset_ids, "close")
+    closes = closes.where(np.isfinite(closes) & (closes > 0))
+    returns = closes / closes.shift(1) - 1
+    consecutive = closes.rolling(21, min_periods=21).count() == 21
+    momentum = (closes / closes.shift(20) - 1).where(consecutive)
+    volatility = returns.rolling(20, min_periods=20).std(ddof=1).where(consecutive)
+    close = _wide(raw, calendar, asset_ids, "close")
+    volume = _wide(raw, calendar, asset_ids, "volume")
+    dollars = (close * volume).where(
+        np.isfinite(close) & (close > 0) & np.isfinite(volume) & (volume >= 0)
+    )
+
+    def rows(frame: pd.DataFrame) -> np.ndarray:
+        return frame.iloc[first : last + 1].to_numpy().T.ravel()
+
+    count, length = len(asset_ids), last - first + 1
+    decisions = sessions.decisions
+    frame = pd.DataFrame(
+        {
+            "asset_id": np.repeat(np.array(asset_ids, dtype=object), length),
+            "signal_session": np.tile(
+                np.array(calendar[first : last + 1], dtype=object), count
+            ),
+            "previous_decision_at": pd.to_datetime(
+                np.tile(decisions[first : last + 1], count), utc=True
+            ),
+            "decision_at": pd.to_datetime(
+                np.tile(decisions[first + 1 : last + 2], count), utc=True
+            ),
+            "momentum20": rows(momentum),
+            "volatility20": rows(volatility),
+            "price_history_missing": ~rows(consecutive).astype(bool),
+            "raw_dollar_volume": rows(dollars),
+            "raw_dollar_volume_missing": np.isnan(rows(dollars)),
+            **events,
+        }
+    )
     return frame, summary
 
 
@@ -872,10 +288,7 @@ def _feature_provenance(
             if column.endswith("_missing")
         },
         "source_coverage_counts": {
-            source: {
-                str(key): int(value)
-                for key, value in features[f"{source}_coverage"].value_counts().items()
-            }
+            source: _value_counts(features[f"{source}_coverage"])
             for source in COUNT_SOURCES
         },
         "source_coverage": _coverage_summary(features),
@@ -883,6 +296,11 @@ def _feature_provenance(
         "undatable_events": dict(events["undatable_events"]),
         "rank_population": dict(events["rank_population"]),
     }
+
+
+def _value_counts(column: pd.Series) -> dict[str, int]:
+    counts = column.value_counts()
+    return {str(key): int(value) for key, value in counts.items() if value}
 
 
 def _coverage_summary(features: pd.DataFrame) -> dict[str, Any]:
@@ -893,14 +311,8 @@ def _coverage_summary(features: pd.DataFrame) -> dict[str, Any]:
         covered = features.loc[basis != "", "signal_session"]
         assets = features.loc[basis != "", "asset_id"]
         summary[source] = {
-            "states": {
-                str(key): int(value)
-                for key, value in features[f"{source}_coverage"].value_counts().items()
-            },
-            "basis": {
-                str(key): int(value)
-                for key, value in basis[basis != ""].value_counts().items()
-            },
+            "states": _value_counts(features[f"{source}_coverage"]),
+            "basis": _value_counts(basis[basis != ""]),
             "first_covered_session": str(covered.min()) if len(covered) else None,
             "assets_with_coverage": int(assets.nunique()),
         }
@@ -1087,10 +499,7 @@ def prepare(
         )
     ):
         raise ValueError("Each split must contain at least one frozen signal session")
-    raw, adjusted = (
-        _prices(material["raw"], calendar),
-        _prices(material["all"], calendar),
-    )
+    raw, adjusted = _price_frame(material["raw"]), _price_frame(material["all"])
     zones = manifest.get("source_timezones", {})
     features, events = _feature_rows(
         calendar,
@@ -1108,7 +517,7 @@ def prepare(
     labels = _label_rows(
         features,
         calendar,
-        adjusted,
+        _prices(adjusted, calendar),
         benchmark_id,
         horizon,
         _day(manifest["cutoff_date"]),
@@ -1141,23 +550,15 @@ def prepare(
     }
     if splits is not None:
         counts["purged"] = int(splits["purged"].sum())
-    run = {
-        "dataset_id": dataset_id,
-        "manifest_sha256": digest,
-        "package_version": __version__,
-        "code_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-        "environment": {
-            "python": platform.python_version(),
-            "numpy": np.__version__,
-            "pandas": pd.__version__,
-            "pyarrow": pyarrow.__version__,
-        },
-        "parameters": parameters,
-        "counts": counts,
-        "masks": {name: int(labels[name].sum()) for name in masks},
+    run = run_record(
+        dataset_id=dataset_id,
+        manifest_sha256=digest,
+        parameters=parameters,
+        counts=counts,
+        masks={name: int(labels[name].sum()) for name in masks},
         **_feature_provenance(features, events),
-        "limitations": LIMITATIONS + list(manifest.get("limitations", [])),
-    }
+        limitations=LIMITATIONS + list(manifest.get("limitations", [])),
+    )
     if output_dir is not None:
         destination = Path(output_dir)
         destination.mkdir(parents=True, exist_ok=True)
@@ -1761,11 +1162,13 @@ def daily_features(
     start: str | date | None = None,
     end: str | date | None = None,
     benchmark: str | None = None,
+    specs: Sequence[EventSpec] | None = None,
 ) -> pd.DataFrame:
     """Return daily price/volume/event-count PIT features as a ``pd.DataFrame`` (no split boundaries needed).
 
-    ``{source}_events_rank_21d`` ranks the universe's non-benchmark securities (flagged
-    ones and ``benchmark``); it stays missing unless the selection holds all of them.
+    ``{name}_events_rank_21d`` ranks among the universe's securities that are neither
+    flagged benchmarks nor ``benchmark``, whatever the selection. ``specs`` replaces the
+    default one-per-source event specifications.
     """
     _policy(time_policy)
     asset_ids = version.resolve(symbols)
@@ -1778,38 +1181,37 @@ def daily_features(
     signals = [day for day in calendar if start_d <= day <= end_d]
     if not signals:
         raise ValueError("No frozen signal sessions in [start, end]")
-    raw = _prices(version.prices(asset_ids, adjusted=False), calendar)
-    adjusted = _prices(version.prices(asset_ids, adjusted=True), calendar)
-    observations = version.event_observations()
-    checks = version.source_checks(asset_ids)
-    zones = version.manifest.get("source_timezones", {})
+    raw = _price_frame(version.prices(asset_ids, adjusted=False))
+    adjusted = _price_frame(version.prices(asset_ids, adjusted=True))
+    population = _rank_population(version.universe, benchmark_ids)
     features, events = _feature_rows(
         calendar,
         signals,
         asset_ids,
         raw,
         adjusted,
-        observations,
-        checks,
+        _observations(version),
+        version.source_checks(sorted(population.union(asset_ids))),
         time_policy,
-        zones,
+        version.manifest.get("source_timezones", {}),
         _news_versions(version),
-        _rank_population(version.universe, benchmark_ids),
+        population,
+        specs,
     )
-    features.attrs["provenance"] = {
-        "dataset_id": str(version.id),
-        "manifest_sha256": version.manifest_sha256,
-        "package_version": __version__,
-        "parameters": {
+    features.attrs["provenance"] = run_record(
+        dataset_id=str(version.id),
+        manifest_sha256=version.manifest_sha256,
+        parameters={
             "asset_ids": asset_ids,
             "start": str(start_d),
             "end": str(end_d),
             "benchmark_ids": benchmark_ids,
             **_time_parameters(time_policy),
         },
-        "counts": {"candidates": len(features)},
+        counts={"candidates": len(features)},
         **_feature_provenance(features, events),
-    }
+        limitations=LIMITATIONS + list(version.manifest.get("limitations", [])),
+    )
     return features
 
 
@@ -1972,7 +1374,7 @@ def forward_returns(
     benchmark_id = version.resolve(benchmark)[0]
     calendar = list(map(_day, version.calendar))
     all_ids = list(dict.fromkeys([*asset_ids, benchmark_id]))
-    adjusted = _prices(version.prices(all_ids, adjusted=True), calendar)
+    adjusted = _prices(_price_frame(version.prices(all_ids, adjusted=True)), calendar)
     cutoff_day = _day(version.manifest["cutoff_date"])
 
     if single_horizon:
@@ -2074,11 +1476,10 @@ def panel(
 
     combined = pd.concat(parts, axis=1)
     daily_provenance = daily.attrs.get("provenance", {})
-    provenance = {
-        "dataset_id": str(version.id),
-        "manifest_sha256": version.manifest_sha256,
-        "package_version": __version__,
-        "parameters": {
+    provenance = run_record(
+        dataset_id=str(version.id),
+        manifest_sha256=version.manifest_sha256,
+        parameters={
             "symbols": symbols,
             "start": str(start)
             if start is not None
@@ -2091,8 +1492,9 @@ def panel(
             "include_fundamentals": include_fundamentals,
             "include_ratios": include_ratios,
         },
-        "rows": len(combined),
-        "columns": len(combined.columns),
+        counts={"rows": len(combined), "columns": len(combined.columns)},
+        rows=len(combined),
+        columns=len(combined.columns),
         **{
             name: daily_provenance.get(name, {})
             for name in (
@@ -2102,8 +1504,8 @@ def panel(
                 "rank_population",
             )
         },
-        "limitations": LIMITATIONS + list(version.manifest.get("limitations", [])),
-    }
+        limitations=LIMITATIONS + list(version.manifest.get("limitations", [])),
+    )
     combined.attrs["provenance"] = provenance
     if output_dir is not None:
         destination = Path(output_dir)

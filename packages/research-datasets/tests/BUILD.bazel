@@ -38,7 +38,11 @@ unittest_test(
 unittest_test(
     name = "test_events",
     size = "small",
-    srcs = ["test_events.py", "test_sdk.py"],
+    srcs = [
+        "reference.py",
+        "test_events.py",
+        "test_sdk.py",
+    ],
     imports = [".", "..", "../src"],
     modules = ["tests.test_events"],
     deps = [
@@ -49,9 +53,27 @@ unittest_test(
     ],
 )
 
+unittest_test(
+    name = "test_clocks",
+    size = "small",
+    srcs = ["test_clocks.py"],
+    imports = [".", "..", "../src"],
+    modules = ["tests.test_clocks"],
+    deps = [
+        "//packages/research-datasets/src/research_datasets:library",
+        "@python_deps//numpy",
+        "@python_deps//pandas",
+    ],
+)
+
 test_suite(
     name = "tests",
-    tests = [":test_events", ":test_sdk", ":test_regressions"],
+    tests = [
+        ":test_clocks",
+        ":test_events",
+        ":test_regressions",
+        ":test_sdk",
+    ],
 )
 
 filegroup(

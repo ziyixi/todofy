@@ -955,6 +955,7 @@ class Dataset:
         end: str | date | None = None,
         metrics: Sequence[str] | None = None,
         columns: Sequence[str] | None = None,
+        optional_columns: bool = False,
     ) -> pd.DataFrame:
         spec = self._require_family(family)
         attrs: dict[str, Any] = {"dataset_version": self.id}
@@ -988,6 +989,7 @@ class Dataset:
             end_s,
             tuple(metrics) if metrics is not None else None,
             tuple(columns) if columns is not None else None,
+            optional_columns,
         )
         if cache_key in self._df_cache:
             return _copy_frame(self._df_cache[cache_key])
@@ -1014,6 +1016,8 @@ class Dataset:
         paths = [str(self._client._part(item)) for item in parts]
         ds = pads.dataset(paths, format="parquet")
         names = set(ds.schema.names)
+        if columns is not None and optional_columns:
+            columns = [name for name in columns if name in names]
         if columns is not None and not set(columns).issubset(names):
             raise DatasetError(
                 "BAD_REQUEST",
@@ -1271,13 +1275,20 @@ class Dataset:
         symbols: str | Sequence[str] | None = None,
         start: str | date | None = None,
         end: str | date | None = None,
+        *,
+        columns: Sequence[str] | None = None,
     ) -> pd.DataFrame:
-        """Frozen observation versions, including removed links, by observation_recorded_at date."""
+        """Frozen observation versions, including removed links, by observation_recorded_at date.
+
+        ``columns`` keeps only those of the requested columns this version has.
+        """
         return self._read_family(
             "event_observations",
             symbols=symbols,
             start=start,
             end=end,
+            columns=columns,
+            optional_columns=True,
         )
 
     def source_checks(self, symbols: str | Sequence[str] | None = None) -> pd.DataFrame:

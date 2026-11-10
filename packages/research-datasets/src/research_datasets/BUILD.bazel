@@ -7,9 +7,13 @@ py_library(
     name = "library",
     srcs = [
         "__init__.py",
+        "asof.py",
         "client.py",
+        "clocks.py",
         "constants.py",
+        "events.py",
         "panels.py",
+        "provenance.py",
     ],
     data = ["py.typed"],
     imports = [".."],
