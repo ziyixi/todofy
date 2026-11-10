@@ -23,8 +23,10 @@ Claude's hosted apps (web, Desktop, mobile) add the same `/mcp` URL as a custom 
 registration endpoint and no Client ID Metadata Document, so Claude registers through DCR with its one documented
 callback, `https://claude.ai/api/mcp/auth_callback`, which the Access app allows exactly. Claude Code uses that
 connector through the owner's claude.ai account; the Access app allows no loopback client. Claude does not subscribe
-to MCP events: it sees Work reports and source changes only when it reads them. The packaged skill belongs to the
-ChatGPT plugin; in Claude the tool descriptions carry the rules.
+to MCP events: it sees Work reports and source changes only when it reads them. Its skill is
+[`claude/skills/personal-cloud/SKILL.md`](../claude/skills/personal-cloud/SKILL.md), uploaded to the owner's claude.ai
+account, where Claude Duet also inherits account skills and connectors. The connector's tools are set to always allow,
+so that skill's write-authorization section carries the owner's confirmation rules. Re-upload it after a change.
 Reference: [Claude connector authentication](https://claude.com/docs/connectors/building/authentication).
 
 ## Subscription behavior

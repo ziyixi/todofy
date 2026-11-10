@@ -17,7 +17,8 @@ Read the root AGENTS, this app's README and docs/connection.md.
   dates, commitments, completion and deletion need owner instructions. Queue moves preserve dates and deadlines.
 - Dot-facing rules (when to register Work, resumption, checkpoints and reports, schedules, Watch reviews, cleanup)
   have one source: `plugin/skills/personal-cloud/SKILL.md` plus the tool descriptions. Change them there; other
-  docs point to them.
+  docs point to them. Claude's copy, `claude/skills/personal-cloud/SKILL.md`, differs only where Claude has no
+  events, Dots schedules or delegation; change both together.
 - Work memory belongs in the existing SQLite DO, with only `active`, `waiting`, `done`, `cancelled`. Business facts
   stay in their source; refs link Task, Codex, Watch, Recall, schedule and artifact identities. A checkpoint is silent;
   only a report requests a Work notification. `done` refuses unhandled reports, and a finished Work needs its owned
