@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from collections.abc import Mapping, Sequence
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -349,6 +351,45 @@ class HorizonTest(unittest.TestCase):
                     self.assertTrue(frame["h21_pair_valid"].any())
                     self.assertTrue((frame["h63_disputed_sessions"] > 0).any())
 
+    def test_total_return_includes_ex_dates_after_entry_only(self) -> None:
+        # Signal 3, entry open of session 4, exit close of session 7. A 2.00 dividend
+        # goes ex on the entry session (bought ex: excluded) or on the next session
+        # (held through it: included, reinvested at that close).
+        for ex, included in ((4, False), (5, True)):
+            with self.subTest(ex=ex):
+                closes = [100.0, 101.0, 99.0, 100.0, 100.5, 98.0, 99.5, 101.0, 100.0]
+                opens = [close - 0.25 for close in closes]
+                closes[ex:] = [close - 2.0 for close in closes[ex:]]
+                opens[ex:] = [value - 2.0 for value in opens[ex:]]
+                level, rows = 1.0, []
+                for index, close in enumerate(closes):
+                    if index:
+                        paid = 2.0 if index == ex else 0.0
+                        level *= (close + paid) / closes[index - 1]
+                    rows.append(
+                        {
+                            **session_rows(A, [close], days=[SESSIONS[index]])[0],
+                            "row_kind": "first" if index == 0 else "session",
+                            "open_raw": opens[index],
+                            "tr_index": level,
+                            "tr_status": "first" if index == 0 else "ok",
+                        }
+                    )
+                days = SESSIONS[: len(closes)]
+                version = LabelVersion(
+                    [A, BENCH],
+                    days=days,
+                    families={"daily_returns": rows + benchmark_rows(days)},
+                )
+                row = labels_for(version, [(A, 3)], 4).iloc[0]
+                value = closes[7] / opens[4]
+                if included:
+                    value = closes[ex - 1] / opens[4]
+                    value *= (closes[ex] + 2.0) / closes[ex - 1]
+                    value *= closes[7] / closes[ex]
+                self.assertAlmostEqual(row.asset_return, value - 1)
+                self.assertTrue(row.pair_valid)
+
     def test_interior_gap_counted_exit_gap_masked(self) -> None:
         closes = [100.0 + i for i in range(len(SESSIONS))]
         version = LabelVersion(
@@ -437,6 +478,13 @@ class ExitTest(unittest.TestCase):
             row.asset_return, 1.2 * (0.5 + 0.5 * growth) / self.entry() - 1
         )
         self.assertEqual(row.post_exit_basis, "cash_and_successor")
+        # A mixed exit whose cash amount is unset (0) has an unknown split: flat.
+        row = self.run_exit(
+            "cash_and_acquirer_close", 1.2, kind="stock_and_cash_merger"
+        )
+        self.assertAlmostEqual(row.asset_return, 1.2 / self.entry() - 1)
+        self.assertEqual(row.post_exit_basis, "cash_proxy")
+        self.assertFalse(row.return_reliable)
         row = self.run_exit("unknown", float("nan"), kind="unknown")
         self.assertTrue(row.terminal_unknown)
         self.assertFalse(row.pair_valid or row.trainable_8d)
@@ -471,6 +519,8 @@ class ExitTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "terminal_policy"):
             self.run_exit("cash", 1.0, terminal_policy={"unknown": -2})
+        with self.assertRaisesRegex(ValueError, "perfomance"):
+            self.run_exit("cash", 1.0, terminal_policy={"perfomance": -0.3})
 
     def test_stock_merger_label_follows_successor_after_exit(self) -> None:
         row = self.run_exit("acquirer_close", 1.3, kind="stock_merger")
@@ -526,6 +576,40 @@ class ExitTest(unittest.TestCase):
         self.assertTrue(frame["pair_valid"].all())
         self.assertFalse(frame.iloc[0].return_reliable)
         self.assertEqual(frame.attrs["masks"]["5"]["disputed_return"], 1)
+        # A disputed benchmark session inside (entry, exit] counts as well.
+        bench = [400.0 + 2 * i for i in range(len(SESSIONS))]
+        version = LabelVersion(
+            [A, BENCH],
+            families={
+                "daily_returns": session_rows(A, closes)
+                + session_rows(BENCH, bench, status={20: "disputed"})
+            },
+        )
+        frame = labels_for(version, [(A, 15), (A, 20)], 5)
+        self.assertEqual(frame["disputed_sessions"].tolist(), [1, 0])
+        self.assertEqual(frame["trainable_5d"].tolist(), [False, True])
+
+    def test_disputed_successor_session_after_exit_excludes_label(self) -> None:
+        exits = ExitTest
+        rows = session_rows(A, list(exits.CLOSES)) + benchmark_rows()
+        rows.append(terminal_row(A, exits.EXIT, "acquirer_close", 1.3))
+        heir = list(exits.HEIR_CLOSES)
+        families = {"delistings": [exit_row(A, "stock_merger", HEIR)]}
+        for disputed_at, count in ((12, 1), (exits.EXIT, 0), (14, 0)):
+            with self.subTest(disputed_at=disputed_at):
+                version = LabelVersion(
+                    [A, BENCH, HEIR],
+                    families={
+                        **families,
+                        "daily_returns": rows
+                        + session_rows(HEIR, heir, status={disputed_at: "disputed"}),
+                    },
+                )
+                # Window 6..13, exit at 10: the successor counts over (10, 13].
+                row = labels_for(version, [(A, 5)], 8).iloc[0]
+                self.assertEqual(row.post_exit_basis, "successor")
+                self.assertEqual(row.disputed_sessions, count)
+                self.assertEqual(row.trainable_8d, count == 0)
 
 
 class SplitTest(unittest.TestCase):
@@ -622,6 +706,31 @@ class NeutralizeTest(unittest.TestCase):
         self.assertAlmostEqual(
             neutral.iloc[13], excess.iloc[13] - population.iloc[:6].mean()
         )
+        self.assertFalse(
+            any("Neutralization" in line for line in frame.attrs["limitations"])
+        )
+        # The same groups read from the universe entries are flagged as not PIT.
+        universe = [
+            {"asset_id": item, "symbol": f"S{n}", "sector": sector}
+            for n, (item, sector) in enumerate(zip([*ids, BENCH], [*sectors, "a"]))
+        ]
+        version = LabelVersion(
+            [*ids, BENCH], families={"daily_returns": rows}, universe=universe
+        )
+        from_universe = research_datasets.forward_returns(
+            version,
+            samples.drop(columns="sector"),
+            benchmark=BENCH,
+            horizons=5,
+            allow_static_universe=True,
+            neutralize=["sector"],
+        )
+        np.testing.assert_allclose(from_universe["excess_return_5d_sector"], neutral)
+        self.assertIn(
+            "Neutralization groups sector use the frozen universe entries' current "
+            "values, not point-in-time values.",
+            from_universe.attrs["limitations"],
+        )
         with self.assertRaisesRegex(ValueError, "size"):
             research_datasets.forward_returns(
                 version,
@@ -633,63 +742,71 @@ class NeutralizeTest(unittest.TestCase):
             )
 
 
+def membership_bundle() -> dict[str, bytes]:
+    """Synthetic bundle objects: AAPL leaves pit-largecap-v1 in February, GOOG exits
+    for cash at session 20, AAPL has a disputed session 4."""
+    sessions = bundle.SESSIONS
+    rows: list[dict[str, Any]] = []
+    for item, base in (
+        (bundle.ASSET_A, 100.0),
+        (bundle.ASSET_G1, 150.0),
+        (bundle.BENCH_SPY, 500.0),
+    ):
+        closes = [base + i * 1.25 for i in range(len(sessions))]
+        last = 20 if item == bundle.ASSET_G1 else len(sessions)
+        rows += session_rows(
+            item,
+            closes[:last],
+            days=[date.fromisoformat(day) for day in sessions],
+            status={4: "disputed"} if item == bundle.ASSET_A else None,
+        )
+    rows.append(
+        {
+            **terminal_row(bundle.ASSET_G1, 0, "cash", 1.5, 200.0),
+            "date": sessions[20],
+        }
+    )
+    membership = [
+        {
+            "rule_version": rule,
+            "effective_month": month,
+            "effective_from": f"{month}-01",
+            "asset_id": item,
+            "member": member,
+            "warmup": False,
+            "observation_sequence": 1,
+        }
+        for rule in ("pit-largecap-v1", "pit-liquid-v1")
+        for month, item, member in (
+            ("2026-01", bundle.ASSET_A, True),
+            ("2026-01", bundle.ASSET_G1, True),
+            ("2026-02", bundle.ASSET_A, rule == "pit-liquid-v1"),
+            ("2026-02", bundle.ASSET_G1, True),
+        )
+    ]
+    delistings = [
+        {
+            "asset_id": bundle.ASSET_G1,
+            "exit_type": "cash_merger",
+            "successor_asset_id": "",
+            "observation_sequence": 1,
+            "observed_at": f"{sessions[21]}T00:00:00Z",
+        }
+    ]
+    objects, _ = bundle._build_synthetic_bundle(
+        extra_families={
+            "universe_membership": membership,
+            "daily_returns": rows,
+            "delistings": delistings,
+        }
+    )
+    return objects
+
+
 class FamilyLabelTest(unittest.TestCase):
     def test_panel_reads_membership_returns_and_exits_from_a_bundle(self) -> None:
         sessions = bundle.SESSIONS
-        rows: list[dict[str, Any]] = []
-        for item, base in (
-            (bundle.ASSET_A, 100.0),
-            (bundle.ASSET_G1, 150.0),
-            (bundle.BENCH_SPY, 500.0),
-        ):
-            closes = [base + i * 1.25 for i in range(len(sessions))]
-            last = 20 if item == bundle.ASSET_G1 else len(sessions)
-            rows += session_rows(
-                item,
-                closes[:last],
-                days=[date.fromisoformat(day) for day in sessions],
-                status={4: "disputed"} if item == bundle.ASSET_A else None,
-            )
-        rows.append(
-            {
-                **terminal_row(bundle.ASSET_G1, 0, "cash", 1.5, 200.0),
-                "date": sessions[20],
-            }
-        )
-        membership = [
-            {
-                "rule_version": rule,
-                "effective_month": month,
-                "effective_from": f"{month}-01",
-                "asset_id": item,
-                "member": member,
-                "warmup": False,
-                "observation_sequence": 1,
-            }
-            for rule in ("pit-largecap-v1", "pit-liquid-v1")
-            for month, item, member in (
-                ("2026-01", bundle.ASSET_A, True),
-                ("2026-01", bundle.ASSET_G1, True),
-                ("2026-02", bundle.ASSET_A, rule == "pit-liquid-v1"),
-                ("2026-02", bundle.ASSET_G1, True),
-            )
-        ]
-        delistings = [
-            {
-                "asset_id": bundle.ASSET_G1,
-                "exit_type": "cash_merger",
-                "successor_asset_id": "",
-                "observation_sequence": 1,
-                "observed_at": f"{sessions[21]}T00:00:00Z",
-            }
-        ]
-        objects, _ = bundle._build_synthetic_bundle(
-            extra_families={
-                "universe_membership": membership,
-                "daily_returns": rows,
-                "delistings": delistings,
-            }
-        )
+        objects = membership_bundle()
         with (
             bundle.SyntheticDatasetServer(objects) as server,
             tempfile.TemporaryDirectory() as tmp,
@@ -789,6 +906,83 @@ class FamilyLabelTest(unittest.TestCase):
                     "not_in_universe",
                     "return_unreliable",
                 },
+            )
+
+    def test_panel_single_horizon_weekly_sampling_and_membership_masks(self) -> None:
+        sessions = bundle.SESSIONS
+        with (
+            bundle.SyntheticDatasetServer(membership_bundle()) as server,
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as out,
+        ):
+            ds = research_datasets.load(
+                bundle.DATASET_ID,
+                key=bundle.TOKEN,
+                base_url=server.base_url,
+                cache_dir=tmp,
+            )
+            window = {"start": sessions[2], "end": sessions[24]}
+            frame = ds.panel(
+                ["AAPL", "GOOG"],
+                time_policy="public_reconstructed",
+                horizons=5,
+                sampling="weekly",
+                output_dir=out,
+                **window,
+            )
+            # One int horizon: unprefixed label columns next to the candidate clocks.
+            self.assertFalse(frame.columns.duplicated().any())
+            for name in (
+                "entry_session",
+                "label_start",
+                "exit_session",
+                "trainable_5d",
+            ):
+                self.assertIn(name, frame)
+            written = pd.read_parquet(Path(out) / "panel.parquet")
+            self.assertEqual(list(written.columns), list(frame.columns))
+            self.assertEqual(
+                {day.weekday() for day in frame["signal_session"]}, {4}
+            )  # completed weeks end on Fridays
+            provenance = json.loads((Path(out) / "provenance.json").read_text())
+            self.assertEqual(provenance["parameters"]["sampling"], "weekly")
+            # AAPL's last weekly signal enters in February, where it is no member.
+            self.assertEqual(provenance["counts"]["not_in_universe_dropped"], 1)
+            self.assertEqual(provenance["masks"]["5"]["not_in_universe"], 1)
+            labels = ds.forward_returns(["AAPL", "GOOG"], horizons=5, **window)
+            self.assertEqual(labels.attrs["counts"]["not_in_universe_dropped"], 5)
+            self.assertEqual(labels.attrs["masks"]["5"]["not_in_universe"], 5)
+            _, _, _, run = research_datasets.prepare(
+                ds,
+                dataset_id=bundle.DATASET_ID,
+                asset_ids=[bundle.ASSET_A, bundle.ASSET_G1],
+                benchmark_id=bundle.BENCH_SPY,
+                time_policy="public_reconstructed",
+                horizon=5,
+                **window,
+            )
+            self.assertEqual(run["counts"]["not_in_universe_dropped"], 5)
+            self.assertEqual(run["masks"]["not_in_universe"], 5)
+            # A live session in a month without frozen membership (March) carries
+            # February: GOOG stays a member, AAPL stays out.
+            live = ds.panel(
+                ["AAPL", "GOOG"],
+                time_policy="public_reconstructed",
+                horizons=5,
+                start=sessions[-1],
+                end=sessions[-1],
+                next_session="2026-03-02",
+                include_fundamentals=False,
+                include_ratios=False,
+            )
+            self.assertEqual(live["asset_id"].tolist(), [bundle.ASSET_G1])
+            self.assertTrue(live["membership_carried"].all())
+            self.assertTrue(live["in_universe"].all())
+            self.assertTrue(pd.isna(live["asset_return"]).all())
+            provenance = live.attrs["provenance"]
+            self.assertEqual(provenance["counts"]["membership_carried"], 1)
+            self.assertTrue(
+                any("membership_carried" in line for line in provenance["limitations"])
             )
 
 

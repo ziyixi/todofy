@@ -22,6 +22,7 @@ import pandas as pd
 from . import clocks
 from .constants import (
     DEFAULT_TERMINAL_POLICY,
+    EXIT_TYPES,
     KEYS,
     MAX_HORIZON,
     NEUTRAL_MIN_GROUP,
@@ -102,6 +103,12 @@ class ReturnSeries:
 def terminal_policy(overrides: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Default terminal assumptions updated by ``overrides``: a return from the last
     close per exit type, or None to mask the label."""
+    unknown_types = set(overrides or {}) - EXIT_TYPES
+    if unknown_types:
+        raise ValueError(
+            f"terminal_policy keys must be exit types {sorted(EXIT_TYPES)}, "
+            f"not {sorted(map(str, unknown_types))}"
+        )
     policy = {**DEFAULT_TERMINAL_POLICY, **(overrides or {})}
     for kind, value in policy.items():
         if value is not None and (
@@ -326,11 +333,10 @@ def _terminal_exits(
         raw = raw_last.get((at - 1) * width + col, np.nan) if at > 0 else np.nan
         # Value of the whole consideration per share: V / tr_index(L) * close_raw(L).
         worth = value / previous * raw if previous > 0 else np.nan
-        exits["cash_share"][col] = (
-            min(max(cash / worth, 0.0), 1.0)
-            if np.isfinite(cash) and np.isfinite(worth) and worth > 0
-            else np.nan
-        )
+        share = cash / worth if np.isfinite(worth) and worth > 0 else np.nan
+        # A mixed consideration has a cash and a stock part: a share outside (0, 1),
+        # e.g. an unset cash amount, is unknown and the exit value is held flat.
+        exits["cash_share"][col] = share if 0.0 < share < 1.0 else np.nan
 
 
 def horizon_labels(
@@ -348,7 +354,9 @@ def horizon_labels(
 
     Entry is the open of session ``signal + 1``, exit the close of ``signal + horizon``
     (the last usable session is ``last``). Interior sessions without a close are counted,
-    never masking; a missing entry or exit price masks the pair.
+    never masking; a missing entry or exit price masks the pair. ``disputed_sessions``
+    and ``return_status`` cover every leg: the asset until its exit, the successor it
+    follows after the exit and the benchmark.
     """
     n = len(cal)
     entry, end = signal + 1, signal + horizon
@@ -411,8 +419,19 @@ def horizon_labels(
     stop = np.where(delisted, exit_at, end)
     sc = np.clip(stop, 0, n - 1)
     interior = series.missing[sc, asset] - series.missing[tc, asset]
-    disputed = series.disputed[sc + 1, asset] - series.disputed[tc + 1, asset]
-    vendor = series.vendor[sc + 1, asset] - series.vendor[tc + 1, asset]
+
+    def sessions(flags: np.ndarray) -> np.ndarray:
+        """Flagged sessions of every leg: the asset over (t, stop], the successor it
+        follows over (x, e] and the benchmark over (t, e]."""
+        total = flags[sc + 1, asset] - flags[tc + 1, asset]
+        hc = np.maximum(heir, 0)
+        total += np.where(follow, flags[ec + 1, hc] - flags[xc + 1, hc], 0)
+        if benchmark >= 0:
+            bench = flags[ec + 1, benchmark] - flags[tc + 1, benchmark]
+            total += np.where(asset != benchmark, bench, 0)
+        return total
+
+    disputed, vendor = sessions(series.disputed), sessions(series.vendor)
     if series.basis == "total_return":
         status = np.select([disputed > 0, vendor > 0], ["disputed", "vendor"], "ok")
         status = np.where(beyond, "", status)
@@ -499,9 +518,14 @@ def label_frame(
 
 
 def mask_counts(
-    frame: pd.DataFrame, horizon_list: Sequence[int], single: bool, static: bool
+    frame: pd.DataFrame,
+    horizon_list: Sequence[int],
+    single: bool,
+    static: bool,
+    dropped: int = 0,
 ) -> dict[str, Any]:
-    """Masks per horizon: price gaps, disputed windows, unknown exits, non-members."""
+    """Masks per horizon: price gaps, disputed windows, unknown exits, non-members
+    (the frame's rows outside the universe plus ``dropped`` rows removed before)."""
     member = np.asarray(frame["in_universe"].fillna(static), dtype=bool)
     result: dict[str, Any] = {}
     for horizon in horizon_list:
@@ -514,7 +538,7 @@ def mask_counts(
         counts["disputed_return"] = int(
             (frame[f"{prefix}disputed_sessions"].fillna(0) > 0).sum()
         )
-        counts["not_in_universe"] = int((~member).sum())
+        counts["not_in_universe"] = int((~member).sum()) + dropped
         counts["pair_valid"] = int(frame[f"{prefix}pair_valid"].sum())
         counts["trainable"] = int(frame[f"trainable_{horizon}d"].sum())
         counts["return_unreliable"] = int(
@@ -636,7 +660,9 @@ def neutralize(
     return result
 
 
-def limitations(universe_basis: str, return_basis: str) -> list[str]:
+def limitations(
+    universe_basis: str, return_basis: str, universe_groups: Sequence[str] = ()
+) -> list[str]:
     lines = [
         (
             "Labels run from the entry session's open to the exit session's close at "
@@ -651,8 +677,8 @@ def limitations(universe_basis: str, return_basis: str) -> list[str]:
             "cash is held flat and stock consideration follows the successor when it is "
             "frozen (else flat, cash_proxy); exits without a stored terminal value use "
             "terminal_policy (performance delistings -30 % from the last close by "
-            "default, unknown exits masked); disputed sessions exclude the label from "
-            "training."
+            "default, unknown exits masked); a disputed session of the asset, the "
+            "successor it follows or the benchmark excludes the label from training."
         )
     else:
         lines.append(
@@ -668,5 +694,10 @@ def limitations(universe_basis: str, return_basis: str) -> list[str]:
         lines.append(
             "Universe basis pit: a row is a member when the monthly membership of its "
             "entry session's month says so."
+        )
+    if universe_groups:
+        lines.append(
+            f"Neutralization groups {', '.join(universe_groups)} use the frozen "
+            "universe entries' current values, not point-in-time values."
         )
     return lines

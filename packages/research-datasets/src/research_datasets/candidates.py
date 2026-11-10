@@ -1,9 +1,9 @@
 """Candidate rows: securities x sampled signal sessions with point-in-time membership.
 
 A security is in the universe for a signal session T when the latest monthly membership
-observation of the rule for the month of its entry session t (warm-up rows excluded)
-says member. Versions without membership rows have a static universe: labels then need
-an explicit ``allow_static_universe=True``.
+observation of the rule for the month of its entry session t says member (unknown when
+that observation is a warm-up row). Versions without membership rows have a static
+universe: labels then need an explicit ``allow_static_universe=True``.
 """
 
 from __future__ import annotations
@@ -157,38 +157,65 @@ def entry_days(cal: clocks.Calendar, positions: np.ndarray) -> np.ndarray:
     return np.array([following[p] for p in positions], dtype=object)
 
 
-def in_universe(
-    assets: Sequence[str],
-    entries: Sequence[date | None],
+def latest_membership(
     membership: pd.DataFrame | None,
     rule: str,
-    months: Mapping[str, Any] | None = None,
-) -> pd.arrays.BooleanArray:
-    """``member`` of the latest non-warm-up observation for (rule, month of the entry
-    session, security). Inside the rule's known months a missing row is False; outside
-    them, a warm-up-only month or an unknown entry session gives NA."""
+    rule_info: Mapping[str, Any] | None = None,
+) -> pd.DataFrame:
+    """The latest observation per (month, security) of ``rule``, with a boolean
+    ``warmup``. A named rule (not the default) needs rows or the manifest's
+    ``export_rules``."""
     frame = membership if membership is not None else pd.DataFrame()
     missing = set(MEMBERSHIP_COLUMNS) - set(frame.columns)
     if missing and not frame.empty:
         raise ValueError(f"universe_membership lacks columns: {sorted(missing)}")
     if frame.empty:
         frame = pd.DataFrame(columns=list(MEMBERSHIP_COLUMNS))
-    frame = frame[frame["rule_version"].astype(str) == rule].assign(
-        asset_id=lambda f: f["asset_id"].astype(str),
-        effective_month=lambda f: f["effective_month"].astype(str),
-    )
-    warm = pd.array(frame["warmup"], dtype="boolean").fillna(False).to_numpy(bool)
-    regular = (
-        frame[~warm]
+    frame = frame[frame["rule_version"].astype(str) == rule]
+    exported = (rule_info or {}).get("export_rules")
+    if (
+        frame.empty
+        and rule != DEFAULT_UNIVERSE_RULE
+        and not (isinstance(exported, (list, tuple)) and rule in exported)
+    ):
+        raise ValueError(f"Universe rule {rule!r} has no membership in this version")
+    latest = (
+        frame.assign(
+            asset_id=frame["asset_id"].astype(str),
+            effective_month=frame["effective_month"].astype(str),
+        )
         .sort_values("observation_sequence", kind="stable")
         .drop_duplicates(["asset_id", "effective_month"], keep="last")
     )
-    warm_pairs = frame.loc[warm, ["asset_id", "effective_month"]].drop_duplicates()
-    bounds = list(regular["effective_month"])
+    warm = pd.array(latest["warmup"], dtype="boolean").fillna(False)
+    return latest.assign(warmup=warm.to_numpy(dtype=bool))
+
+
+def known_months(
+    latest: pd.DataFrame, rule_info: Mapping[str, Any] | None = None
+) -> list[str]:
+    """Months with a regular latest observation and the manifest's first and last
+    effective months of the rule."""
+    found = list(latest.loc[~latest["warmup"], "effective_month"])
     for key in ("first_effective_month", "last_effective_month"):
-        value = (months or {}).get(key)
+        value = (rule_info or {}).get(key)
         if isinstance(value, str) and value:
-            bounds.append(value)
+            found.append(value)
+    return found
+
+
+def in_universe(
+    assets: Sequence[str],
+    entries: Sequence[date | None],
+    membership: pd.DataFrame | None,
+    rule: str,
+    rule_info: Mapping[str, Any] | None = None,
+) -> pd.arrays.BooleanArray:
+    """``member`` of the latest observation for (rule, month of the entry session,
+    security). Inside the rule's known months a missing row is False; outside them,
+    when the latest observation is a warm-up row, or without an entry session it is NA."""
+    latest = latest_membership(membership, rule, rule_info)
+    bounds = known_months(latest, rule_info)
     codes, uniques = pd.factorize(pd.Series(entries, dtype=object))
     labels = np.array([f"{value:%Y-%m}" for value in uniques] + [None], dtype=object)
     rows = pd.DataFrame(
@@ -198,14 +225,11 @@ def in_universe(
         }
     )
     found = rows.merge(
-        regular[["asset_id", "effective_month", "member"]],
-        on=["asset_id", "effective_month"],
-        how="left",
-    ).merge(
-        warm_pairs.assign(warm_only=True),
+        latest[["asset_id", "effective_month", "member", "warmup"]],
         on=["asset_id", "effective_month"],
         how="left",
     )
+    warm = found["warmup"].eq(True).to_numpy(dtype=bool)
     result = pd.array(found["member"].astype(object), dtype="boolean")
     month = found["effective_month"]
     inside = (
@@ -213,10 +237,9 @@ def in_universe(
         if bounds
         else np.zeros(len(found), dtype=bool)
     )
-    inside &= found["warm_only"].isna().to_numpy()
     absent = found["member"].isna().to_numpy()
     result[absent & inside] = False
-    result[absent & ~inside] = pd.NA
+    result[warm | (absent & ~inside)] = pd.NA
     return result
 
 
@@ -253,7 +276,10 @@ def build_candidates(
     session of each completed week or month. With membership rows (``universe="pit"``
     or a rule version), rows outside the universe are dropped unless
     ``keep_non_members``; ``in_universe`` is NA for a static universe.
-    ``next_session`` gives the last frozen session a live decision instant.
+    ``next_session`` gives the last frozen session a live decision instant; when its
+    month is after the rule's last known month (ranked on that month's first session,
+    so a version frozen at the month end lacks it), that row takes the last known
+    month's membership and ``membership_carried`` is True.
     """
     benchmark_ids = (
         list(map(str, version.resolve(benchmark))) if benchmark is not None else []
@@ -270,12 +296,20 @@ def build_candidates(
     frame = candidate_frame(cal, asset_ids, positions, version.universe)
     total = len(frame)
     if rule is not None:
-        frame["in_universe"] = in_universe(
-            frame["asset_id"],
-            frame["entry_session"],
+        membership, rule_info = (
             read_membership(version, asset_ids),
-            rule,
             membership_months(version),
+        )
+        entries = frame["entry_session"].to_numpy(dtype=object)
+        known = known_months(latest_membership(membership, rule, rule_info), rule_info)
+        live = cal.next_session
+        if live is not None and known and f"{live:%Y-%m}" > max(known):
+            carried = entries == live
+            year, month = map(int, max(known).split("-"))
+            entries = np.where(carried, date(year, month, 1), entries)
+            frame["membership_carried"] = carried
+        frame["in_universe"] = in_universe(
+            frame["asset_id"], entries, membership, rule, rule_info
         )
         if not keep_non_members:
             frame = frame[frame["in_universe"].fillna(False).to_numpy(dtype=bool)]
@@ -293,6 +327,7 @@ def build_candidates(
     frame.attrs["counts"] = {
         "grid": total,
         "not_in_universe_dropped": total - len(frame),
+        "membership_carried": int(frame["membership_carried"].sum()),
     }
     return frame
 
@@ -331,6 +366,7 @@ def candidate_frame(
             "entry_session": entry_days(cal, tiled),
             "label_start": clocks.utc(opens),
             "in_universe": unknown(len(tiled)),
+            "membership_carried": np.zeros(len(tiled), dtype=bool),
             "is_benchmark": np.repeat(np.array(benchmarks, dtype=bool), length),
         }
     )

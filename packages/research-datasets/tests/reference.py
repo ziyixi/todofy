@@ -569,7 +569,7 @@ def reference_labels(
         info = exits.get(asset)
         x = info["at"] if info else -1
         delisted = not beyond and info is not None and t < x <= e
-        terminal, post, unknown = "", "", False
+        terminal, post, unknown, heir = "", "", False, ""
         if delisted:
             basis = info["terminal_basis"] or "unknown"
             value = info["tr_index"]
@@ -592,10 +592,12 @@ def reference_labels(
                     )
                     cash = info["cash_amount"]
                     share = (
-                        min(max(cash / worth, 0.0), 1.0)
+                        cash / worth
                         if pd.notna(cash) and pd.notna(worth) and worth > 0
                         else float("nan")
                     )
+                    if not 0 < share < 1:  # a mixed consideration has both parts
+                        share = float("nan")
                 a, b = closes.get((heir, x)), closes.get((heir, e))
                 if _positive(a) and _positive(b) and pd.notna(share):
                     level, post = value * (share + (1 - share) * b / a), STOCK[basis]
@@ -623,10 +625,20 @@ def reference_labels(
         bench_return = b1 / b0 - 1 if not beyond and bench_ok else float("nan")
         stop = x if delisted else e
         interior = sum((asset, k) not in closes for k in range(t, stop))
-        disputed = sum(
-            status.get((asset, k)) == "disputed" for k in range(t + 1, stop + 1)
+        # Every leg: the asset to its exit, the successor it follows, the benchmark.
+        legs = [(asset, t, stop)]
+        if post in ("successor", "cash_and_successor"):
+            legs.append((heir, x, e))
+        if asset != benchmark:
+            legs.append((benchmark, t, e))
+        disputed, vendor = (
+            sum(
+                status.get((who, k)) == state
+                for who, first, final in legs
+                for k in range(first + 1, final + 1)
+            )
+            for state in ("disputed", "vendor")
         )
-        vendor = sum(status.get((asset, k)) == "vendor" for k in range(t + 1, stop + 1))
         state = (
             ""
             if beyond or daily is None

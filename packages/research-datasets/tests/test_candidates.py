@@ -39,8 +39,10 @@ def member(
 def membership_version(**options: Any) -> LabelVersion:
     rows = [
         member(A, "2026-01", True),
+        member(B, "2026-01", True, warmup=True, sequence=0),  # superseded warm-up
         member(B, "2026-01", False),
-        member(B, "2026-01", True, warmup=True, sequence=2),  # warm-up: ignored
+        member(C, "2026-01", False),
+        member(C, "2026-01", True, warmup=True, sequence=2),  # latest is a warm-up
         member(A, "2026-02", True),
         member(A, "2026-02", False, sequence=2),  # the latest observation wins
         member(B, "2026-02", True),
@@ -70,10 +72,9 @@ class MembershipTest(unittest.TestCase):
         thursday, friday = date(2026, 1, 29), date(2026, 1, 30)
         # Signal Thursday enters Friday (January); signal Friday enters Monday (February).
         self.assertEqual(rows(frame, A).loc[thursday, "entry_session"], friday)
-        self.assertEqual(
-            [rows(frame, item).loc[thursday, "in_universe"] for item in (A, B, C)],
-            [True, False, False],
-        )
+        january = [rows(frame, item).loc[thursday, "in_universe"] for item in (A, B, C)]
+        self.assertEqual(january[:2], [True, False])
+        self.assertTrue(pd.isna(january[2]))  # unknown: the latest row is a warm-up
         self.assertEqual(
             [rows(frame, item).loc[friday, "in_universe"] for item in (A, B, C)],
             [False, True, False],
@@ -99,6 +100,16 @@ class MembershipTest(unittest.TestCase):
             version, [A], universe="pit-liquid-v1", keep_non_members=True
         )
         self.assertFalse(rows(liquid, A).loc[thursday, "in_universe"])
+        # A rule version without rows must be one the version exports.
+        with self.assertRaisesRegex(ValueError, "pit-typo-v1"):
+            research_datasets.build_candidates(version, [A], universe="pit-typo-v1")
+        exported = membership_version(
+            manifest={"universe_rule": {"export_rules": ["pit-other-v1"]}}
+        )
+        other = research_datasets.build_candidates(
+            exported, [A], universe="pit-other-v1", keep_non_members=True
+        )
+        self.assertTrue(other["in_universe"].isna().all())
         # Labels: membership gates trainable; a static universe needs the opt-in.
         labels = research_datasets.forward_returns(
             version, frame, benchmark=BENCH, horizons=1
@@ -216,6 +227,44 @@ class ClockTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "next_session"):
             research_datasets.build_candidates(version, [A], next_session="2026-01-31")
+
+    def test_live_row_at_month_end_carries_last_known_membership(self) -> None:
+        # Frozen through Friday 01-30 with January membership only; the next session
+        # is in February, whose membership is ranked on its first session.
+        january = [member(A, "2026-01", True), member(B, "2026-01", False)]
+        version = LabelVersion(
+            [A, B, BENCH], days=DAYS[:5], families={"universe_membership": january}
+        )
+        live = research_datasets.build_candidates(
+            version, [A, B], next_session="2026-02-02", keep_non_members=True
+        )
+        last = live[live["signal_session"] == DAYS[4]].set_index("asset_id")
+        self.assertEqual(last["in_universe"].tolist(), [True, False])
+        self.assertEqual(last["membership_carried"].tolist(), [True, True])
+        self.assertFalse(
+            live.loc[live["signal_session"] < DAYS[4], "membership_carried"].any()
+        )
+        kept = research_datasets.build_candidates(
+            version, [A, B], start=DAYS[4], end=DAYS[4], next_session="2026-02-02"
+        )
+        self.assertEqual(kept["asset_id"].tolist(), [A])
+        self.assertEqual(kept.attrs["counts"]["membership_carried"], 1)
+        # Without a live session nothing is carried: the last signal has no entry.
+        frozen = research_datasets.build_candidates(version, [A], keep_non_members=True)
+        self.assertTrue(pd.isna(frozen.iloc[-1]["in_universe"]))
+        self.assertFalse(frozen["membership_carried"].any())
+        # A known February (manifest) without a row for A is not carried: A is out.
+        ranked = LabelVersion(
+            [A, B, BENCH],
+            days=DAYS[:5],
+            families={"universe_membership": january},
+            manifest={"universe_rule": {"last_effective_month": "2026-02"}},
+        )
+        live = research_datasets.build_candidates(
+            ranked, [A], next_session="2026-02-02", keep_non_members=True
+        )
+        self.assertFalse(live.iloc[-1]["in_universe"])
+        self.assertFalse(live["membership_carried"].any())
 
     def test_half_day_label_end_uses_frozen_close_and_defaults_to_1600(self) -> None:
         closes = [10.0 + i for i in range(len(DAYS))]

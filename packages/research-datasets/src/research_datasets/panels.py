@@ -76,6 +76,11 @@ LIMITATIONS = [
     "21-session event ranks are percentiles over the universe's non-benchmark securities, whatever the selection.",
     "Quarterly cash-flow facts are year-to-date in 10-Q filings, so default quarterly columns omit operating cash flow, capex and free cash flow.",
 ]
+# Added by panel when a live row's month has no frozen membership.
+CARRIED_LIMITATION = (
+    "The live session's month has no frozen membership yet: its rows use the last "
+    "known month (membership_carried)."
+)
 
 
 def _price_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -570,10 +575,12 @@ def prepare(
     if has_splits and train_d is not None and val_d is not None:
         parameters["train_end"] = str(train_d)
         parameters["validation_end"] = str(val_d)
-    masks = _labels.mask_counts(labels, horizon_list, True, rule is None)[str(horizon)]
+    dropped = grid - len(features)
+    masks = _labels.mask_counts(labels, horizon_list, True, rule is None, dropped)
+    masks = masks[str(horizon)]
     counts: dict[str, int] = {
         "candidates": len(features),
-        "not_in_universe_dropped": grid - len(features),
+        "not_in_universe_dropped": dropped,
         "pair_valid": masks.pop("pair_valid"),
         "trainable": masks.pop("trainable"),
     }
@@ -1367,7 +1374,9 @@ def forward_returns(
     ``trainable_{H}d``. Symbols build candidates (sampling, membership); a candidate
     DataFrame keeps its rows and gets ``in_universe``. A version without membership rows
     needs ``allow_static_universe=True``. ``neutralize`` names groups ("size", a sample
-    column or a universe field) for ``excess_return_{H}d_{group}``.
+    column or a universe field) for ``excess_return_{H}d_{group}``. Masks count rows
+    outside the universe, including those dropped when candidates are built here
+    (their counts are in ``attrs["counts"]``).
     """
     horizon_list, single = _labels.horizons(horizons)
     policy = _labels.terminal_policy(terminal_policy)
@@ -1413,6 +1422,11 @@ def forward_returns(
     universe_rows = {
         str(row["asset_id"]): row for row in _candidates.records(version.universe)
     }
+    groups_from_universe = [
+        name
+        for name in dict.fromkeys(neutralize)
+        if name != "size" and name not in samples
+    ]
     if neutralize:
         benchmarks = {benchmark_id}.union(
             asset for asset, row in universe_rows.items() if _candidates.flagged(row)
@@ -1423,7 +1437,11 @@ def forward_returns(
             for name in dict.fromkeys(neutralize)
         }
         labels = _labels.neutralize(labels, groups, horizon_list, eligible)
-    masks = _labels.mask_counts(labels, horizon_list, single, rule is None)
+    # Candidates built here: rows outside the universe were dropped before labelling.
+    built = not isinstance(candidates_or_symbols, pd.DataFrame)
+    counts = dict(samples.attrs.get("counts", {})) if built else {}
+    dropped = counts.get("not_in_universe_dropped", 0)
+    masks = _labels.mask_counts(labels, horizon_list, single, rule is None, dropped)
     return_basis = labels.attrs["return_basis"]
     labels.attrs["parameters"] = {
         "benchmark_id": benchmark_id,
@@ -1438,7 +1456,11 @@ def forward_returns(
     if single:
         labels.attrs["parameters"]["horizon"] = horizon_list[0]
     labels.attrs["masks"] = masks
-    labels.attrs["limitations"] = _labels.limitations(universe_basis, return_basis)
+    if counts:
+        labels.attrs["counts"] = counts
+    labels.attrs["limitations"] = _labels.limitations(
+        universe_basis, return_basis, groups_from_universe
+    )
     return labels
 
 
@@ -1539,12 +1561,20 @@ def panel(
         rows,
         benchmark=benchmark,
         horizons=horizons,
+        sampling=sampling,
         universe=universe,
         allow_static_universe=allow_static_universe,
+        keep_non_members=keep_non_members,
         terminal_policy=terminal_policy,
         neutralize=neutralize,
     )
-    parts.append(labels.drop(columns=[*KEYS, "in_universe"]))
+    # Candidate columns (keys, clocks, membership) win over the label's copies.
+    parts.append(labels.drop(columns=[c for c in labels.columns if c in rows]))
+    dropped = candidates.attrs["counts"]["not_in_universe_dropped"]
+    masks = {
+        horizon: {**counts, "not_in_universe": counts["not_in_universe"] + dropped}
+        for horizon, counts in labels.attrs["masks"].items()
+    }
 
     combined = pd.concat(parts, axis=1)
     daily_provenance = daily.attrs.get("provenance", {})
@@ -1563,6 +1593,7 @@ def panel(
             "include_fundamentals": include_fundamentals,
             "include_ratios": include_ratios,
             "next_session": None if next_session is None else str(_day(next_session)),
+            "keep_non_members": keep_non_members,
             **{
                 name: label_parameters[name]
                 for name in (
@@ -1582,7 +1613,7 @@ def panel(
         },
         rows=len(combined),
         columns=len(combined.columns),
-        masks=labels.attrs["masks"],
+        masks=masks,
         label_overlap=labels.attrs["label_overlap"],
         **{
             name: daily_provenance.get(name, {})
@@ -1596,6 +1627,11 @@ def panel(
         limitations=[
             *LIMITATIONS,
             *labels.attrs["limitations"],
+            *(
+                [CARRIED_LIMITATION]
+                if candidates.attrs["counts"]["membership_carried"]
+                else []
+            ),
             *version.manifest.get("limitations", []),
         ],
     )

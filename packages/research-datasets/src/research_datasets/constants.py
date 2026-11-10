@@ -42,6 +42,18 @@ CANDIDATE_SECURITY_TYPES = frozenset({"common", "common_presumed"})
 DEFAULT_TERMINAL_POLICY: Mapping[str, float | None] = MappingProxyType(
     {"performance": -0.30, "unknown": None}
 )
+# Exit types of the delistings family: the keys terminal_policy accepts.
+EXIT_TYPES = frozenset(
+    {
+        "cash_merger",
+        "stock_merger",
+        "stock_and_cash_merger",
+        "worthless",
+        "performance",
+        "merger_terms_unknown",
+        "unknown",
+    }
+)
 # Neutralized labels fall back to the session mean below this many group members.
 NEUTRAL_MIN_GROUP = 5
 SIZE_GROUPS = 5
