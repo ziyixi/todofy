@@ -20,6 +20,7 @@ py_library(
         "labels.py",
         "panels.py",
         "provenance.py",
+        "sec_events.py",
         "valuation.py",
     ],
     data = ["py.typed"],

@@ -209,6 +209,23 @@ unittest_test(
     ],
 )
 
+unittest_test(
+    name = "test_sec_events",
+    size = "small",
+    srcs = [
+        "test_sdk.py",
+        "test_sec_events.py",
+    ],
+    imports = [".", "..", "../src"],
+    modules = ["tests.test_sec_events"],
+    deps = [
+        "//packages/research-datasets/src/research_datasets:library",
+        "@python_deps//numpy",
+        "@python_deps//pandas",
+        "@python_deps//pyarrow",
+    ],
+)
+
 py_binary(
     name = "bench_fundamentals",
     srcs = ["bench_fundamentals.py"],
@@ -236,6 +253,7 @@ test_suite(
         ":test_prepare",
         ":test_regressions",
         ":test_sdk",
+        ":test_sec_events",
         ":test_valuation",
     ],
 )

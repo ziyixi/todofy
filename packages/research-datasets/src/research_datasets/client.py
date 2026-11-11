@@ -88,6 +88,12 @@ from .panels import (
 from .panels import (
     prepare as _prepare,
 )
+from .sec_events import (
+    earnings_calendar_asof as _earnings_calendar_asof,
+)
+from .sec_events import (
+    sec_event_specs as _sec_event_specs,
+)
 from .valuation import (
     valuation as _valuation,
 )
@@ -1382,10 +1388,61 @@ class Dataset:
         start: str | date | None = None,
         end: str | date | None = None,
     ) -> pd.DataFrame:
-        """All frozen earnings observation versions by observed_at date; no latest/as-of selection."""
+        """All frozen earnings observation versions by observed_at date; no latest/as-of selection.
+
+        For point-in-time calendar snapshots use ``earnings_calendar(asof=...)``; for
+        filing-derived announcement timing and volume confirmation use ``earnings_announcements()``.
+        """
         return self._read_family(
             "earnings_observations", symbols=symbols, start=start, end=end
         )
+
+    def earnings_announcements(
+        self,
+        symbols: str | Sequence[str] | None = None,
+        start: str | date | None = None,
+        end: str | date | None = None,
+        *,
+        columns: Sequence[str] | None = None,
+    ) -> pd.DataFrame:
+        """Frozen earnings announcement rows derived from SEC filings and dollar-volume reaction."""
+        return self._read_family(
+            "earnings_announcements",
+            symbols=symbols,
+            start=start,
+            end=end,
+            columns=columns,
+        )
+
+    def earnings_calendar(
+        self,
+        symbols: str | Sequence[str] | None = None,
+        *,
+        asof: Any = None,
+        include_unlinked: bool = False,
+    ) -> pd.DataFrame:
+        """Latest earnings calendar row per ``(asset_id, fiscal_year, fiscal_quarter)`` as of ``asof``."""
+        frame = _earnings_calendar_asof(
+            self.event_observations(symbols),
+            self.earnings(symbols),
+            asof,
+            include_unlinked=include_unlinked,
+        )
+        if not frame.empty and symbols is not None and symbols != "all":
+            wanted = {str(aid) for aid in self.resolve(symbols)}
+            frame = frame[frame["asset_id"].astype(str).isin(wanted)].reset_index(
+                drop=True
+            )
+        return frame
+
+    def sec_event_specs(
+        self,
+        *,
+        prefix: str = "sec_kind_",
+        fallback: bool = False,
+    ) -> tuple[EventSpec, ...]:
+        """Build typed SEC ``EventSpec`` definitions from this dataset's manifest vocabulary."""
+        return _sec_event_specs(self, prefix=prefix, fallback=fallback)
 
     def _expand_by_asset(
         self, frame: pd.DataFrame, symbols: str | Sequence[str] | None
@@ -2076,6 +2133,8 @@ class Dataset:
         fundamentals: str = "derived",
         include_fundamentals: bool = True,
         include_ratios: bool = True,
+        include_sec_events: bool = True,
+        include_earnings: bool = True,
         provenance_columns: bool = False,
         output_dir: str | Path | None = None,
     ) -> pd.DataFrame:
@@ -2099,6 +2158,8 @@ class Dataset:
             fundamentals=fundamentals,
             include_fundamentals=include_fundamentals,
             include_ratios=include_ratios,
+            include_sec_events=include_sec_events,
+            include_earnings=include_earnings,
             provenance_columns=provenance_columns,
             output_dir=output_dir,
         )

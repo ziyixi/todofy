@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import time, timedelta
 from types import MappingProxyType
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 API = "v1"
 
 # The newest manifest layout this SDK reads; client_min_version is checked separately.
@@ -119,6 +119,7 @@ SOURCE_CONTRACTS: dict[str, SourceContract] = {
 }
 # Readable sources. Rows of any other source are skipped and counted, never fatal.
 SOURCES: tuple[str, ...] = tuple(SOURCE_CONTRACTS)
+SEC_SOURCES: tuple[str, ...] = ("sec", "sec_earnings_release")
 COUNT_SOURCES: tuple[str, ...] = tuple(
     name for name, contract in SOURCE_CONTRACTS.items() if contract.counts
 )
@@ -216,4 +217,26 @@ QUARTER_DEFAULT_EXCLUDED_METRICS: tuple[str, ...] = ("operating_cash_flow", "cap
 QUARTER_DEFAULT_EXCLUDED_RATIOS: tuple[str, ...] = (
     "free_cash_flow",
     "free_cash_flow_margin",
+)
+
+EARNINGS_FEATURES: tuple[str, ...] = (
+    "earn_days_since",
+    "earn_sessions_since",
+    "earn_last_kind",
+    "earn_candidates_in_period",
+    "earn_volume_ratio",
+    "earn_ear",
+    "earn_ear_pending",
+    "earn_ear_prev",
+    "earn_days_until_next_est",
+    "earn_next_basis",
+    "earn_next_overdue",
+    "earn_sue_eps",
+    "earn_sue_eps_price",
+    "earn_sue_revenue",
+    "earn_sue_period_end",
+    "earn_sue_age_days",
+    "earn_sue_basis",
+    "earn_sue_approximate",
+    "earn_sue_stale",
 )

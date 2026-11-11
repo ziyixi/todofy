@@ -54,9 +54,16 @@ def flagged(row: Mapping[str, Any]) -> bool:
 
 
 def calendar(version_or_manifest: Any, sessions: Sequence[Any], **options: Any):
-    """A ``clocks.Calendar`` with the manifest's early closes, when it has them."""
+    """A ``clocks.Calendar`` with the manifest's early closes, falling back to NYSE
+    half-day rules when ``calendar_closes_complete`` is absent or False."""
     manifest = getattr(version_or_manifest, "manifest", version_or_manifest)
     closes = manifest.get("calendar_closes") if isinstance(manifest, Mapping) else None
+    complete = (
+        bool(manifest.get("calendar_closes_complete"))
+        if isinstance(manifest, Mapping)
+        else False
+    )
+    options.setdefault("infer_early_closes", not complete)
     return clocks.Calendar(
         sessions, closes if isinstance(closes, Mapping) else None, **options
     )

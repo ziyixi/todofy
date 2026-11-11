@@ -359,9 +359,12 @@ class ContractRegressionTest(unittest.TestCase):
             ("2.0.0rc1", True),
             ("2.0.0b9", True),
             ("2.0.0", True),
-            ("2.0.1", False),
-            ("2.0.1rc1", False),
-            ("2.1.0", False),
+            ("2.0.1", True),
+            ("2.1.0rc1", True),
+            ("2.1.0", True),
+            ("2.1.1", False),
+            ("2.1.1rc1", False),
+            ("2.2.0", False),
             ("next", False),
         ):
             manifest = {"schema_version": 2, "client_min_version": minimum}

@@ -25,6 +25,7 @@ from . import fundamentals as _fundamentals
 from . import fundamentals_derived as _fundamentals_derived
 from . import industry as _industry
 from . import labels as _labels
+from . import sec_events as _sec_events
 from . import valuation as _valuation
 from .candidates import build_candidates
 from .clocks import CAPTURE_DEADLINE as _CAPTURE_DEADLINE
@@ -80,6 +81,8 @@ OBSERVATION_COLUMNS = (
     "public_time_precision",
     "public_at",
     "public_date",
+    "public_time_basis",
+    "event_kinds",
     "story_key",
 )
 LIMITATIONS = [
@@ -925,6 +928,8 @@ def panel(
     fundamentals: str = "derived",
     include_fundamentals: bool = True,
     include_ratios: bool = True,
+    include_sec_events: bool = True,
+    include_earnings: bool = True,
     provenance_columns: bool = False,
     output_dir: str | Path | None = None,
 ) -> pd.DataFrame:
@@ -977,8 +982,74 @@ def panel(
     )
     parts: list[pd.DataFrame] = [rows]
     samples = rows[KEYS + ["decision_at"]]
+    sec_cov_cols = ["sec_coverage"] if "sec_coverage" in rows.columns else []
+    sec_samples = rows[KEYS + ["decision_at", *sec_cov_cols]]
+    families = _candidates.families(version)
+    cal_full = _candidates.calendar(
+        version, version.calendar, next_session=next_session
+    )
+    selected_assets = list(dict.fromkeys(candidates["asset_id"].astype(str)))
     derived_limitations: list[str] = []
     label_rows_input = rows
+
+    if (
+        include_sec_events
+        and "event_observations" in families
+        and isinstance(version.manifest.get("sec_event_kinds"), Mapping)
+        and version.manifest.get("sec_event_kinds")
+    ):
+        sec_specs = _sec_events.sec_event_specs(version)
+        sec_kinds = [kind for spec in sec_specs for kind in spec.kinds_any]
+        if sec_kinds:
+            typed = _sec_events.typed_event_features(
+                _observations(version, sec_specs),
+                sec_samples,
+                kinds=sec_kinds,
+                calendar=cal_full,
+                time_policy=time_policy,
+                zones=version.manifest.get("source_timezones", {}),
+                vocabulary=version.manifest.get("sec_event_kinds"),
+            )
+            parts.append(typed.drop(columns=KEYS))
+
+    ann_df: pd.DataFrame | None = None
+    primary_periods: Any = None
+    if include_earnings and "earnings_announcements" in families:
+        ann_df = version.family("earnings_announcements", selected_assets)
+        bench_id = str(version.resolve(benchmark)[0]) if benchmark is not None else None
+        price_ids = list(
+            dict.fromkeys([*selected_assets, *([bench_id] if bench_id else [])])
+        )
+        dr_df = (
+            version.family("daily_returns", price_ids)
+            if "daily_returns" in families
+            else None
+        )
+        adj_df = _price_frame(version.prices(price_ids, adjusted=True))
+        ev_obs_cal = (
+            _observations(version)
+            if "earnings_observations" in families and "event_observations" in families
+            else None
+        )
+        earn_obs_cal = (
+            version.family("earnings_observations", selected_assets)
+            if "earnings_observations" in families
+            else None
+        )
+        earn_df = _sec_events.earnings_features(
+            ann_df,
+            sec_samples,
+            calendar=cal_full,
+            adjusted=adj_df,
+            benchmark_id=bench_id,
+            daily_returns=dr_df,
+            time_policy=time_policy,
+            event_observations=ev_obs_cal,
+            earnings_observations=earn_obs_cal,
+            horizons=horizon_list,
+        )
+        primary_periods = earn_df.attrs.get("primary_period_end")
+        parts.append(earn_df.drop(columns=KEYS))
 
     if fundamentals == "derived" and (include_fundamentals or include_ratios):
         derived = _fundamentals_derived.derived_fundamentals(
@@ -1030,6 +1101,34 @@ def panel(
                 for col in ("ff12", "sic_division", "sic_major_group", "sic"):
                     if col in ind.columns:
                         label_rows_input[col] = ind[col].to_numpy()
+        if include_earnings and include_fundamentals and "fundamentals" in families:
+            ciks_series = _fundamentals_derived.cik_at(
+                version,
+                samples["asset_id"].astype(str).tolist(),
+                samples["signal_session"].tolist(),
+            )
+            unique_ciks = [
+                c for c in dict.fromkeys(ciks_series.dropna().astype(str).tolist()) if c
+            ]
+            q_ledger = (
+                _fundamentals_derived.fiscal_quarters(
+                    version,
+                    time_policy=fund_policy,
+                    concepts=("eps_diluted", "eps_basic", "revenue"),
+                    ciks=unique_ciks,
+                )
+                if unique_ciks
+                else pd.DataFrame()
+            )
+            raw_prices = _price_frame(version.prices(selected_assets, adjusted=False))
+            sue_df = _sec_events.sue_features(
+                q_ledger,
+                sec_samples,
+                raw=raw_prices,
+                asset_ciks=ciks_series,
+                primary_period_end=primary_periods,
+            )
+            parts.append(sue_df.drop(columns=KEYS))
     elif fundamentals == "legacy" and (include_fundamentals or include_ratios):
         # One read of the facts and one prepared engine serve features and ratios.
         metrics = {
@@ -1100,6 +1199,14 @@ def panel(
     # labels' calendar has no live session, so non-members are counted from the
     # candidates' membership (it includes the live row's) plus the rows dropped.
     parts.append(labels.drop(columns=[c for c in labels.columns if c in rows]))
+    if ann_df is not None:
+        lflags = _sec_events.label_announcement_flags(
+            ann_df,
+            rows[KEYS],
+            calendar=cal_full,
+            horizons=horizon_list,
+        )
+        parts.append(lflags.drop(columns=KEYS))
     member = np.asarray(rows["in_universe"].fillna(rule is None), dtype=bool)
     outside = (
         int((~member).sum()) + candidates.attrs["counts"]["not_in_universe_dropped"]
@@ -1131,6 +1238,8 @@ def panel(
             ),
             "include_fundamentals": include_fundamentals,
             "include_ratios": include_ratios,
+            "include_sec_events": include_sec_events,
+            "include_earnings": include_earnings,
             "provenance_columns": provenance_columns,
             "next_session": None if next_session is None else str(_day(next_session)),
             "membership_carried_from": candidates.attrs["parameters"][
