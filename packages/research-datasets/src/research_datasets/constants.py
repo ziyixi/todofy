@@ -148,20 +148,28 @@ class FamilySpec:
 _V1 = frozenset({1})
 FAMILY_SPECS: dict[str, FamilySpec] = {
     "events": FamilySpec("asset_id", "event_date", frozenset({1, 2})),
-    "event_observations": FamilySpec("asset_id", "observation_recorded_at", _V1),
+    "event_observations": FamilySpec(
+        "asset_id", "observation_recorded_at", frozenset({1, 2})
+    ),
     "source_checks": FamilySpec("asset_id", "checked_at", _V1),
     "price_coverage": FamilySpec("asset_id", None, _V1),
     "security_history": FamilySpec("asset_id", "observed_at", _V1),
     "earnings_observations": FamilySpec("asset_id", "observed_at", _V1),
+    "earnings_announcements": FamilySpec("asset_id", "public_at", _V1),
     "fundamentals": FamilySpec("cik", None, _V1),
     "financial_checks": FamilySpec("cik", "checked_at", _V1),
+    "issuer_profiles": FamilySpec("cik", "observed_at", _V1),
+    "share_classes": FamilySpec("cik", None, _V1),
+    "share_class_checks": FamilySpec("cik", "checked_at", _V1),
     "symbol_history": FamilySpec("asset_id", None, _V1),
     "issuer_history": FamilySpec("asset_id", None, _V1),
     "news_versions": FamilySpec("none", "observed_at", _V1),
-    # Label inputs: monthly membership, exits and total-return series.
+    # Label and corporate-action inputs: monthly membership, exits, actions and returns.
     "universe_membership": FamilySpec("asset_id", "effective_from", _V1),
     "delistings": FamilySpec("asset_id", "observed_at", _V1),
+    "corporate_actions": FamilySpec("asset_id", "effect_date", _V1),
     "daily_returns": FamilySpec("asset_id", "date", _V1),
+    "return_reconciliation": FamilySpec("asset_id", "date", _V1),
 }
 DATA_FAMILIES: tuple[str, ...] = tuple(FAMILY_SPECS)
 
