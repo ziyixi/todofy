@@ -226,6 +226,23 @@ unittest_test(
     ],
 )
 
+unittest_test(
+    name = "test_extra_features",
+    size = "small",
+    srcs = [
+        "test_extra_features.py",
+        "test_sdk.py",
+    ],
+    imports = [".", "..", "../src"],
+    modules = ["tests.test_extra_features"],
+    deps = [
+        "//packages/research-datasets/src/research_datasets:library",
+        "@python_deps//numpy",
+        "@python_deps//pandas",
+        "@python_deps//pyarrow",
+    ],
+)
+
 py_binary(
     name = "bench_fundamentals",
     srcs = ["bench_fundamentals.py"],
@@ -245,6 +262,7 @@ test_suite(
         ":test_candidates",
         ":test_clocks",
         ":test_events",
+        ":test_extra_features",
         ":test_fundamental_features",
         ":test_fundamental_ratios",
         ":test_fundamentals_derived",

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import time, timedelta
 from types import MappingProxyType
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 API = "v1"
 
 # The newest manifest layout this SDK reads; client_min_version is checked separately.
@@ -140,7 +140,7 @@ NOT_LISTED_CODES = frozenset({"IDENTITY_NOT_LISTED"})
 class FamilySpec:
     """How the reader filters one frozen data family."""
 
-    identity: str  # "asset_id" | "cik" | "none"
+    identity: str  # "asset_id" | "cik" | "series_id" | "none"
     part_clock: str | None  # clock indexed in part_index for date pruning
     schema_versions: frozenset[int]
     evaluation_only: bool = False  # never joinable as a feature
@@ -171,6 +171,16 @@ FAMILY_SPECS: dict[str, FamilySpec] = {
     "corporate_actions": FamilySpec("asset_id", "effect_date", _V1),
     "daily_returns": FamilySpec("asset_id", "date", _V1),
     "return_reconciliation": FamilySpec("asset_id", "date", _V1),
+    "index_holdings": FamilySpec("none", "filed_date", _V1),
+    # Reference, alternative, identifier, and evaluation-only data families.
+    "reference_series": FamilySpec("series_id", "available_at", _V1),
+    "reference_checks": FamilySpec("none", "checked_at", _V1),
+    "short_interest": FamilySpec("asset_id", "available_at", _V1),
+    "insider_transactions": FamilySpec("cik", "available_at", _V1),
+    "borrow_availability": FamilySpec("asset_id", "available_at", _V1),
+    "security_identifiers": FamilySpec("asset_id", None, _V1),
+    "factor_returns": FamilySpec("none", "date", _V1, evaluation_only=True),
+    "text_changes": FamilySpec("cik", "available_at", _V1),
 }
 DATA_FAMILIES: tuple[str, ...] = tuple(FAMILY_SPECS)
 
@@ -239,4 +249,87 @@ EARNINGS_FEATURES: tuple[str, ...] = (
     "earn_sue_basis",
     "earn_sue_approximate",
     "earn_sue_stale",
+)
+
+EXTRA_GROUPS: tuple[str, ...] = (
+    "reference",
+    "market_etf",
+    "insider",
+    "short_interest",
+    "text_change",
+    "borrow",
+)
+DEFAULT_EXTRA_GROUPS: tuple[str, ...] = EXTRA_GROUPS[:-1]
+
+REFERENCE_ETFS: tuple[str, ...] = (
+    "SPY",
+    "IWB",
+    "IWM",
+    "QQQ",
+    "MDY",
+    "RSP",
+    "IWD",
+    "IWF",
+    "XLB",
+    "XLC",
+    "XLE",
+    "XLF",
+    "XLI",
+    "XLK",
+    "XLP",
+    "XLRE",
+    "XLU",
+    "XLV",
+    "XLY",
+)
+
+
+def _series_meta(group: str, units: str, transform: str) -> Mapping[str, str]:
+    return MappingProxyType({"group": group, "units": units, "transform": transform})
+
+
+REFERENCE_SERIES: Mapping[str, Mapping[str, str]] = MappingProxyType(
+    {
+        # Rates (percent -> divide by 100).
+        "DGS3MO": _series_meta("rates", "percent", "divide_100"),
+        "DGS1": _series_meta("rates", "percent", "divide_100"),
+        "DGS2": _series_meta("rates", "percent", "divide_100"),
+        "DGS5": _series_meta("rates", "percent", "divide_100"),
+        "DGS10": _series_meta("rates", "percent", "divide_100"),
+        "DGS30": _series_meta("rates", "percent", "divide_100"),
+        "DTB3": _series_meta("rates", "percent", "divide_100"),
+        "DFF": _series_meta("rates", "percent", "divide_100"),
+        "DFII10": _series_meta("rates", "percent", "divide_100"),
+        "T10YIE": _series_meta("rates", "percent", "divide_100"),
+        # Credit spreads (percent -> divide by 100).
+        "BAA10Y": _series_meta("credit", "percent", "divide_100"),
+        "AAA10Y": _series_meta("credit", "percent", "divide_100"),
+        # Volatility indices (index level).
+        "VIXCLS": _series_meta("vol", "index", "level"),
+        "VXVCLS": _series_meta("vol", "index", "level"),
+        # Macro market levels (21-observation log return).
+        "DTWEXBGS": _series_meta("macro_market", "index", "log_return"),
+        "DCOILWTICO": _series_meta("macro_market", "usd_per_barrel", "log_return"),
+        # Foreign exchange spot series (USD per unit for DEXUS**, units per USD for DEX**US).
+        "DEXUSEU": _series_meta("fx", "usd_per_unit", "log_return"),
+        "DEXUSUK": _series_meta("fx", "usd_per_unit", "log_return"),
+        "DEXJPUS": _series_meta("fx", "units_per_usd", "log_return"),
+        "DEXCAUS": _series_meta("fx", "units_per_usd", "log_return"),
+        "DEXSZUS": _series_meta("fx", "units_per_usd", "log_return"),
+        "DEXCHUS": _series_meta("fx", "units_per_usd", "log_return"),
+        "DEXUSAL": _series_meta("fx", "usd_per_unit", "log_return"),
+        "DEXHKUS": _series_meta("fx", "units_per_usd", "log_return"),
+        "DEXKOUS": _series_meta("fx", "units_per_usd", "log_return"),
+        "DEXINUS": _series_meta("fx", "units_per_usd", "log_return"),
+        "DEXBZUS": _series_meta("fx", "units_per_usd", "log_return"),
+        "DEXMXUS": _series_meta("fx", "units_per_usd", "log_return"),
+        "DEXSDUS": _series_meta("fx", "units_per_usd", "log_return"),
+        "DEXNOUS": _series_meta("fx", "units_per_usd", "log_return"),
+        "DEXDNUS": _series_meta("fx", "units_per_usd", "log_return"),
+        "DEXSIUS": _series_meta("fx", "units_per_usd", "log_return"),
+        "DEXTAUS": _series_meta("fx", "units_per_usd", "log_return"),
+        "DEXSFUS": _series_meta("fx", "units_per_usd", "log_return"),
+        "DEXUSNZ": _series_meta("fx", "usd_per_unit", "log_return"),
+        "DEXTHUS": _series_meta("fx", "units_per_usd", "log_return"),
+    }
 )

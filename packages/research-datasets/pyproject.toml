@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "todofy-research-datasets"
-version = "2.1.0"
+version = "2.2.0"
 description = "Pandas readers and point-in-time panels for frozen research datasets"
 requires-python = ">=3.11"
 dependencies = ["numpy>=1.26", "pandas>=2.2", "pyarrow>=17"]

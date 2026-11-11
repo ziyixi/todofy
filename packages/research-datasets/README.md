@@ -169,3 +169,36 @@ panel = ds.panel(
 - Calendar holiday and half-day helpers (`us_federal_holidays`, `nyse_holidays`, `nyse_early_closes`,
   `is_sec_business_day`, `next_sec_business_day`, `sec_public_fallback`) provide deterministic SEC business-day and NYSE
   13:00 early-close rules when a manifest omits explicit close times.
+
+### 2.2.0
+
+- Reference and alternative feature builders (`extra_features`, `ds.extra_features`, and per-group functions
+  `reference_features`, `market_etf_features`, `insider_features`, `short_interest_features`, `text_change_features`,
+  and opt-in `borrow_features`) align to candidate decisions at 06:00 America/New_York under `time_policy`:
+  - `reference`: `ref_rf_3m`, `ref_term_10y_3m`, `ref_term_10y_2y`, `ref_real_10y`, `ref_breakeven_10y`,
+    `ref_credit_baa`, `ref_vix`, `ref_vix_term`, `ref_d10y_21d`, `ref_dvix_21d`, `ref_usd_ret_21d`, `ref_oil_ret_21d`,
+    `ref_age_days` (one-session publication lag; inputs older than 10 calendar days become `NaN`).
+  - `market_etf`: `etf_mkt_ret_21d`, `etf_mkt_ret_63d`, `etf_size_ret_63d`, `etf_breadth_ret_63d`, `etf_value_ret_63d`
+    from frozen total-return or adjusted closes through signal session T across `REFERENCE_ETFS`.
+  - `insider`: Form 4 open-market purchase/sale counts, dollar totals, net ratios, market-cap-scaled net value, officer
+    purchase flags (`ins_*_{90d,180d}`), and `ins_coverage` (`covered` requires at least 95 % weekday check coverage).
+  - `short_interest`: `si_shares`, `si_days_to_cover`, `si_pct_shares`, `si_change`, `si_age_sessions`,
+    `si_split_flag`, and `si_coverage` (`covered`, `stale`, `unlinked`, `before_archive`; unverified symbol links are
+    excluded unless `allow_unverified_links=True`).
+  - `text_change`: year-over-year 10-K/10-Q similarity and length-change features (`txt_sim_full`, `txt_jac_full`,
+    `txt_sim_rf`, `txt_sim_mdna`, `txt_len_change_full`, `txt_age_days`, `txt_form`, `txt_status`, `txt_sim_full_10k`).
+  - `borrow` (opt-in, excluded from `DEFAULT_EXTRA_GROUPS`): `brw_shortable`, `brw_easy_to_borrow`, `brw_observed`
+    within a 3-day observation window.
+  - `ranks=True` adds cross-sectional session percentiles (`_rank`) over in-universe non-benchmark rows for
+    `si_pct_shares`, `si_days_to_cover`, `ins_net_ratio_180d`, and `txt_sim_full`. Missing families produce no columns
+    and are listed in `df.attrs["extra_missing"]`.
+- `panel(..., include_extra=True)` (and `ds.panel`) accepts `bool` or a sequence from `EXTRA_GROUPS`, wires derived
+  share counts and issuer market value into `extra_features`, records `provenance["extra"]`, and adds zero columns on
+  dataset versions without extra families.
+- Evaluation helpers: `factor_matrix` (`ds.factor_matrix`) pivots `factor_returns` into a `date x factor` table while
+  `asof_join` refuses `evaluation_only` families; `risk_free_daily` (`ds.risk_free_daily`) compounds
+  `(1 + y/100)^(1/252) - 1` at each session's 06:00 America/New_York decision instant.
+- Universe readers and reused-symbol resolution: `ds.universe_membership(rule_version=None)`, `ds.delistings()`, and
+  `ds.index_holdings()` read frozen universe and exit tables; when a reused ticker matches multiple securities and
+  exactly one is `active`, `ds.resolve()` emits a `UserWarning` and selects the active holder (zero or multiple active
+  matches still raise `SYMBOL_AMBIGUOUS`).
