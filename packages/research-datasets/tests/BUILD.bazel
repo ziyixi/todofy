@@ -38,7 +38,11 @@ unittest_test(
 unittest_test(
     name = "test_events",
     size = "small",
-    srcs = ["test_events.py", "test_sdk.py"],
+    srcs = [
+        "reference.py",
+        "test_events.py",
+        "test_sdk.py",
+    ],
     imports = [".", "..", "../src"],
     modules = ["tests.test_events"],
     deps = [
@@ -49,9 +53,124 @@ unittest_test(
     ],
 )
 
+unittest_test(
+    name = "test_clocks",
+    size = "small",
+    srcs = ["test_clocks.py"],
+    imports = [".", "..", "../src"],
+    modules = ["tests.test_clocks"],
+    deps = [
+        "//packages/research-datasets/src/research_datasets:library",
+        "@python_deps//numpy",
+        "@python_deps//pandas",
+    ],
+)
+
+unittest_test(
+    name = "test_labels",
+    size = "small",
+    srcs = [
+        "reference.py",
+        "test_labels.py",
+        "test_sdk.py",
+    ],
+    imports = [".", "..", "../src"],
+    modules = ["tests.test_labels"],
+    deps = [
+        "//packages/research-datasets/src/research_datasets:library",
+        "@python_deps//numpy",
+        "@python_deps//pandas",
+        "@python_deps//pyarrow",
+    ],
+)
+
+unittest_test(
+    name = "test_candidates",
+    size = "small",
+    srcs = [
+        "reference.py",
+        "test_candidates.py",
+        "test_labels.py",
+        "test_sdk.py",
+    ],
+    imports = [".", "..", "../src"],
+    modules = ["tests.test_candidates"],
+    deps = [
+        "//packages/research-datasets/src/research_datasets:library",
+        "@python_deps//numpy",
+        "@python_deps//pandas",
+        "@python_deps//pyarrow",
+    ],
+)
+
+unittest_test(
+    name = "test_prepare",
+    size = "small",
+    srcs = [
+        "reference.py",
+        "test_events.py",
+        "test_prepare.py",
+        "test_sdk.py",
+    ],
+    imports = [".", "..", "../src"],
+    modules = ["tests.test_prepare"],
+    deps = [
+        "//packages/research-datasets/src/research_datasets:library",
+        "@python_deps//numpy",
+        "@python_deps//pandas",
+        "@python_deps//pyarrow",
+    ],
+)
+
+unittest_test(
+    name = "test_fundamental_features",
+    size = "small",
+    srcs = [
+        "reference.py",
+        "test_fundamental_features.py",
+    ],
+    imports = [".", "..", "../src"],
+    modules = ["tests.test_fundamental_features"],
+    deps = [
+        "//packages/research-datasets/src/research_datasets:library",
+        "@python_deps//numpy",
+        "@python_deps//pandas",
+        "@python_deps//pyarrow",
+    ],
+)
+
+unittest_test(
+    name = "test_fundamental_ratios",
+    # About 20 s locally (320 reference runs); medium keeps headroom on shared runners.
+    size = "medium",
+    srcs = [
+        "reference.py",
+        "test_fundamental_features.py",
+        "test_fundamental_ratios.py",
+    ],
+    imports = [".", "..", "../src"],
+    modules = ["tests.test_fundamental_ratios"],
+    deps = [
+        "//packages/research-datasets/src/research_datasets:library",
+        "@python_deps//numpy",
+        "@python_deps//pandas",
+        "@python_deps//pyarrow",
+    ],
+)
+
 test_suite(
     name = "tests",
-    tests = [":test_events", ":test_sdk", ":test_regressions"],
+    tests = [
+        ":test_candidates",
+        ":test_clocks",
+        ":test_events",
+        ":test_fundamental_features",
+        ":test_fundamental_ratios",
+        ":test_labels",
+        ":test_prepare",
+        ":test_regressions",
+        ":test_sdk",
+    ],
 )
 
 filegroup(

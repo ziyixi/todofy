@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
+import numpy as np
 import pandas as pd
 
 import research_datasets
+from research_datasets import asof, provenance
 from tests import test_sdk as fixture
 
 
@@ -43,7 +46,9 @@ class PanelRegressionTest(unittest.TestCase):
                         drop=True
                     )
                     with self.subTest(index=samples.index.tolist()):
-                        labels = ds.forward_returns(samples, horizons=(1, 5))
+                        labels = ds.forward_returns(
+                            samples, horizons=(1, 5), allow_static_universe=True
+                        )
                         pd.testing.assert_frame_equal(
                             labels[research_datasets.KEYS], expected_keys
                         )
@@ -226,6 +231,7 @@ class ContractRegressionTest(unittest.TestCase):
                 start=ds.calendar[6],
                 end=ds.calendar[8],
                 time_policy="public_reconstructed",
+                allow_static_universe=True,
             )
             for prefix in (
                 "quarter_operating_cash_flow_",
@@ -252,6 +258,47 @@ class ContractRegressionTest(unittest.TestCase):
                 time_policy="public_reconstructed",
             )
             self.assertIn("operating_cash_flow_value", explicit.columns)
+
+    def test_panel_fundamentals_are_lean_unless_provenance_columns(self) -> None:
+        objects, _ = fixture._build_synthetic_bundle()
+        with (
+            fixture.SyntheticDatasetServer(objects) as server,
+            tempfile.TemporaryDirectory() as tmp,
+        ):
+            ds = _load(server, tmp)
+            options = {
+                "start": ds.calendar[6],
+                "end": ds.calendar[8],
+                "time_policy": "public_reconstructed",
+                "allow_static_universe": True,
+            }
+            lean = ds.panel(["AAPL", "GOOG"], **options)
+            full = ds.panel(["AAPL", "GOOG"], provenance_columns=True, **options)
+        for name in ("quarter_revenue_status", "quarter_gross_margin_status"):
+            self.assertIsInstance(lean[name].dtype, pd.CategoricalDtype)
+            self.assertEqual(lean[name].astype(object).tolist(), full[name].tolist())
+        self.assertIn("ok", set(lean["quarter_revenue_status"]))
+        pd.testing.assert_series_equal(
+            lean["quarter_revenue_value"], full["quarter_revenue_value"]
+        )
+        for name in (
+            "quarter_revenue_fact_id",
+            "quarter_revenue_available_at",
+            "quarter_source_revenue_fact_id",
+            "annual_prior_revenue_period_end",
+        ):
+            self.assertNotIn(name, lean.columns)
+            self.assertIn(name, full.columns)
+        # Only fundamental columns differ; the lean columns keep the full panel's order.
+        extra = [name for name in full if name not in lean]
+        self.assertTrue(
+            extra
+            and all(
+                name.startswith(("quarter_", "annual_", "instant_")) for name in extra
+            )
+        )
+        self.assertEqual([name for name in full if name in lean], list(lean.columns))
+        self.assertFalse(lean.attrs["provenance"]["parameters"]["provenance_columns"])
 
     def test_manifest_schema_newer_than_client_is_refused(self) -> None:
         newest = research_datasets.MANIFEST_SCHEMA_MAX
@@ -280,8 +327,9 @@ class ContractRegressionTest(unittest.TestCase):
             ("1.0.0", True),
             ("2.0.0rc1", True),
             ("2.0.0b9", True),
-            ("2.0.0", False),
-            ("2.0.0rc2", False),
+            ("2.0.0", True),
+            ("2.0.1", False),
+            ("2.0.1rc1", False),
             ("2.1.0", False),
             ("next", False),
         ):
@@ -380,6 +428,111 @@ class ContractRegressionTest(unittest.TestCase):
                 with self.subTest(symbols=symbols):
                     frame = ds.family("linked_family", symbols, columns=["event_uid"])
                     self.assertEqual(frame["event_uid"].tolist(), expected)
+
+
+class ProvenanceAndAsofTest(unittest.TestCase):
+    def test_code_digest_changes_when_constants_change(self) -> None:
+        package = provenance.PACKAGE_DIRECTORY
+        with tempfile.TemporaryDirectory() as tmp:
+            copy = Path(tmp) / "research_datasets"
+            shutil.copytree(package, copy)
+            before = research_datasets.code_digest(copy)
+            self.assertEqual(before, research_datasets.code_digest())
+            (copy / "py.typed").write_text("not a module\n")
+            self.assertEqual(research_datasets.code_digest(copy), before)
+            constants = copy / "constants.py"
+            constants.write_text(constants.read_text() + "\nEXTRA = 1\n")
+            self.assertNotEqual(research_datasets.code_digest(copy), before)
+        record = provenance.run_record(
+            dataset_id="d",
+            manifest_sha256="0" * 64,
+            parameters={},
+            counts={},
+            limitations=[],
+        )
+        self.assertEqual(record["code_sha256"], research_datasets.code_digest())
+        self.assertEqual(record["package_version"], research_datasets.__version__)
+
+    def test_evaluation_only_family_refused_by_asof_join(self) -> None:
+        samples = pd.DataFrame(
+            {
+                "asset_id": ["a", "b", "a", "a"],
+                "decision_at": [
+                    "2026-03-09T10:00:00Z",
+                    "2026-03-09T10:00:00Z",
+                    "2026-03-06T11:00:00Z",
+                    None,
+                ],
+            },
+            index=[7, 7, 3, 1],
+        )
+        table = pd.DataFrame(
+            {
+                "asset_id": ["a", "a", "a", "b"],
+                "available_at": [
+                    "2026-03-06T11:00:00Z",
+                    "2026-03-09T10:00:00Z",
+                    None,
+                    "2026-03-09T10:00:01Z",
+                ],
+                "value": [1.0, 2.0, 3.0, 4.0],
+            }
+        )
+        joined = research_datasets.asof_join(
+            samples, table, by="asset_id", columns=["value"]
+        )
+        # Inclusive at the decision instant, in sample order, keeping the index.
+        self.assertEqual(joined.index.tolist(), [7, 7, 3, 1])
+        np.testing.assert_array_equal(joined["value"], [2.0, np.nan, 1.0, np.nan])
+        self.assertEqual(joined.attrs["unclocked_rows"], 1)
+        strict = research_datasets.asof_join(
+            samples, table, by="asset_id", columns=["value"], inclusive=False
+        )
+        np.testing.assert_array_equal(strict["value"], [1.0, np.nan, np.nan, np.nan])
+        # Categorical keys match plain or categorical keys on the other side.
+        categorical = samples.assign(asset_id=pd.Categorical(samples["asset_id"]))
+        for right in (table, table.assign(asset_id=pd.Categorical(table["asset_id"]))):
+            with self.subTest(right=str(right["asset_id"].dtype)):
+                keyed = research_datasets.asof_join(
+                    categorical, right, by="asset_id", columns=["value"]
+                )
+                np.testing.assert_array_equal(keyed["value"], joined["value"])
+        # Clocks without an offset are not instants: such rows and samples are unclocked.
+        decisions = ["2026-03-09T10:00:00", *samples["decision_at"].tolist()[1:]]
+        clocks = ["2026-03-06T11:00:00", *table["available_at"].tolist()[1:]]
+        naive = research_datasets.asof_join(
+            samples.assign(decision_at=decisions),
+            table.assign(available_at=clocks),
+            by="asset_id",
+            columns=["value"],
+        )
+        np.testing.assert_array_equal(naive["value"], [np.nan, np.nan, np.nan, np.nan])
+        self.assertEqual(naive.attrs["unclocked_rows"], 2)
+        spec = research_datasets.FamilySpec("none", None, frozenset({1}), True)
+        with mock.patch.dict(research_datasets.FAMILY_SPECS, {"factor_returns": spec}):
+            with self.assertRaisesRegex(ValueError, "EVALUATION_ONLY"):
+                research_datasets.asof_join(
+                    samples,
+                    table,
+                    by="asset_id",
+                    columns=["value"],
+                    family="factor_returns",
+                )
+            table.attrs["family"] = "factor_returns"
+            with self.assertRaisesRegex(ValueError, "EVALUATION_ONLY"):
+                research_datasets.asof_join(
+                    samples, table, by="asset_id", columns=["value"]
+                )
+        changes = pd.DataFrame(
+            {
+                "group": ["a", "a", "a", "a", "b"],
+                "time": [1, 2, 2, 3, 1],
+                "state": [1.0, 5.0, 2.0, 2.0, np.nan],
+            }
+        )
+        stream = asof.step_stream(changes, by="group", time="time", state=["state"])
+        self.assertEqual(stream["time"].tolist(), [1, 1, 2])
+        self.assertEqual(stream["group"].tolist(), ["a", "b", "a"])
 
 
 class TransportRegressionTest(unittest.TestCase):

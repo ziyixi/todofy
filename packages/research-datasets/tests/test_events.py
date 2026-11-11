@@ -4,21 +4,27 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 import pandas as pd
 from pandas.testing import assert_frame_equal
 
 import research_datasets
+from research_datasets import EventSpec, clocks
+from research_datasets.events import default_specs
+from research_datasets.panels import OBSERVATION_COLUMNS
+from tests import reference
 from tests import test_sdk as bundle
 
 DATASET = "00000000-0000-4000-8000-000000000001"
 ASSET = "00000000-0000-4000-8000-000000000002"
 OTHER = "00000000-0000-4000-8000-000000000003"
 BENCHMARK = "00000000-0000-4000-8000-000000000004"
+THIRD = "00000000-0000-4000-8000-000000000005"
 EARLY = "2026-01-01T00:00:00Z"
 LATE = "2026-11-01T00:00:00Z"
 
@@ -38,8 +44,10 @@ def check(asset: str = ASSET, source: str = "sec", **changes: Any) -> dict[str, 
     return values
 
 
-def fixture(checks: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    calendar = [day.date() for day in pd.bdate_range("2026-02-02", "2026-03-27")]
+def fixture(
+    checks: list[dict[str, Any]] | None = None, first: str = "2026-02-02"
+) -> dict[str, Any]:
+    calendar = [day.date() for day in pd.bdate_range(first, "2026-03-27")]
     manifest = {
         "dataset_id": DATASET,
         "cutoff_date": str(calendar[-1]),
@@ -143,6 +151,7 @@ def run(
         "benchmark_id": BENCHMARK,
         "time_policy": "public_reconstructed",
         "horizon": 5,
+        "allow_static_universe": True,
     }
     options.update(changes)
     features, _, _, record = research_datasets.prepare(material, **options)
@@ -154,6 +163,64 @@ def row(frame: pd.DataFrame, day: str = "2026-03-06", asset: str = ASSET) -> Any
         (frame["signal_session"] == date.fromisoformat(day))
         & (frame["asset_id"] == asset)
     ].iloc[0]
+
+
+class MaterialVersion:
+    """A frozen version over in-memory material, projecting reads like the client."""
+
+    def __init__(self, material: dict[str, Any]) -> None:
+        self.material = material
+        self.id = DATASET
+        families = (
+            {"news_versions": {}} if material.get("news_versions") is not None else {}
+        )
+        self.manifest = {**material["manifest"], "data_families": families}
+        self.manifest_sha256 = material["manifest_sha256"]
+        self.calendar = material["calendar"]
+        self.universe = material["universe"]
+
+    def resolve(self, symbols: Any) -> list[str]:
+        if symbols is None:
+            return list(self.universe["asset_id"])
+        return [symbols] if isinstance(symbols, str) else list(symbols)
+
+    def prices(self, asset_ids: list[str], adjusted: bool) -> pd.DataFrame:
+        frame = self.material["all" if adjusted else "raw"]
+        return frame[frame["asset_id"].isin(asset_ids)]
+
+    @staticmethod
+    def _project(frame: pd.DataFrame, columns: Any) -> pd.DataFrame:
+        if columns is None:
+            return frame.copy()
+        return frame[[name for name in columns if name in frame.columns]].copy()
+
+    def event_observations(self, *, columns: Any = None) -> pd.DataFrame:
+        return self._project(self.material["event_observations"], columns)
+
+    def source_checks(self, asset_ids: list[str]) -> pd.DataFrame:
+        frame = self.material["source_checks"]
+        return frame[frame["asset_id"].isin(asset_ids)].copy()
+
+    def family(self, name: str, *, columns: Any = None) -> pd.DataFrame:
+        return self._project(self.material[name], columns)
+
+
+def daily(
+    material: dict[str, Any], events: list[dict[str, Any]] = (), **options: Any
+) -> pd.DataFrame:
+    """daily_features over ``material`` with ``events`` (default window 03-02..03-23)."""
+    material = {**material, "event_observations": pd.DataFrame(list(events))}
+    options = {
+        "start": material["calendar"][20],
+        "end": material["calendar"][35],
+        "time_policy": "public_reconstructed",
+        "benchmark": BENCHMARK,
+        **options,
+    }
+    symbols = options.pop("symbols", [ASSET, OTHER])
+    return research_datasets.daily_features(
+        MaterialVersion(material), symbols, **options
+    )
 
 
 class LinkTest(unittest.TestCase):
@@ -264,6 +331,47 @@ class ClockTest(unittest.TestCase):
         self.assertEqual(row(features, asset=OTHER).sec_new_event_count, 1)
         self.assertEqual(row(features, "2026-03-05", OTHER).sec_new_event_count, 0)
 
+    def test_unknown_clock_event_flags_its_date_window(self) -> None:
+        dated = event(
+            "dated",
+            public_time_precision="unknown",
+            event_date="2026-03-10",
+            filing_date="2026-03-10",
+        )
+        features, record = run(fixture(), [dated])
+        # The New York day 03-10 overlaps the windows of signals 03-09 and 03-10.
+        for day, flagged in (
+            ("2026-03-06", False),
+            ("2026-03-09", True),
+            ("2026-03-10", True),
+            ("2026-03-11", False),
+        ):
+            with self.subTest(day=day):
+                self.assertEqual(row(features, day).sec_clock_missing, flagged)
+                self.assertEqual(pd.isna(row(features, day).sec_events_1d), flagged)
+                self.assertEqual(row(features, day).sec_observed_events_1d, 0)
+        self.assertEqual(record["undatable_events"], {})
+        # observed_content places it at its capture and flags the missing public clock.
+        observed, _ = run(fixture(), [dated], time_policy="observed_content")
+        self.assertEqual(row(observed).sec_events_1d, 1)
+        self.assertTrue(row(observed).sec_public_clock_missing)
+        # An event without clock or date counts as undatable only for the selection.
+        undatable = event(
+            "undatable",
+            public_time_precision="unknown",
+            event_date="",
+            filing_date="",
+            asset_ids=[OTHER],
+        )
+        for selection, expected in (
+            ([ASSET], {}),
+            ([ASSET, OTHER], {"sec": 1}),
+            ([OTHER], {"sec": 1}),
+        ):
+            with self.subTest(selection=selection):
+                _, record = run(fixture(), [undatable], asset_ids=selection)
+                self.assertEqual(record["undatable_events"], expected)
+
 
 class CoverageTest(unittest.TestCase):
     def test_m3_reconstructed_coverage_ignores_check_clock(self) -> None:
@@ -358,8 +466,226 @@ class CoverageTest(unittest.TestCase):
         self.assertNotIn("mapping_missing", states)
         self.assertEqual(states["not_listed"], 16)
 
+    def test_first_covered_session_and_info_regime_in_run_record(self) -> None:
+        checks = [
+            check(checked_end="2026-03-10"),
+            check(source="alpaca_news", checked_start="2026-03-05", checked_at=LATE),
+        ]
+        regimes = {
+            "public_reconstructed": {
+                "2026-03-04": "observed",
+                "2026-03-05": "mixed",
+                "2026-03-09": "mixed",
+                "2026-03-10": "reconstructed",
+                "2026-03-23": "reconstructed",
+            },
+            # A check saved after the decision is invisible to observed_content.
+            "observed_content": {
+                "2026-03-04": "observed",
+                "2026-03-09": "observed",
+                "2026-03-10": "",
+            },
+        }
+        firsts = {
+            "public_reconstructed": ("2026-03-02", "2026-03-05"),
+            "observed_content": ("2026-03-02", None),
+        }
+        for policy, expected in regimes.items():
+            with self.subTest(policy=policy):
+                features, record = run(fixture(checks), time_policy=policy)
+                for day, regime in expected.items():
+                    self.assertEqual(row(features, day).info_regime, regime)
+                    self.assertEqual(row(features, day, OTHER).info_regime, "")
+                coverage = record["source_coverage"]
+                self.assertEqual(
+                    (
+                        coverage["sec"]["first_covered_session"],
+                        coverage["alpaca_news"]["first_covered_session"],
+                    ),
+                    firsts[policy],
+                )
+                self.assertEqual(coverage["sec"]["basis"], {"observed": 6})
+                self.assertEqual(coverage["sec"]["assets_with_coverage"], 1)
+                self.assertIsNone(coverage["finnhub_news"]["first_covered_session"])
+        self.assertEqual(coverage["alpaca_news"]["basis"], {})
+        self.assertEqual(
+            record["source_coverage"]["alpaca_news"]["states"], {"unknown": 32}
+        )
+
+    def test_inverted_check_window_is_ignored(self) -> None:
+        # A window ending before it starts is malformed; the unbounded check decides.
+        material = fixture(
+            [
+                check(checked_start=None, checked_end=None, status="checked"),
+                check(checked_start="2026-03-10", checked_end="2026-03-09"),
+            ]
+        )
+        window = {"start": material["calendar"][20], "end": material["calendar"][35]}
+        for policy, label in (
+            ("public_reconstructed", "unknown"),
+            ("observed_content", "checked"),
+        ):
+            with self.subTest(policy=policy):
+                features, _ = run(
+                    material, time_policy=policy, asset_ids=[ASSET], **window
+                )
+                self.assertEqual(row(features, "2026-03-09").sec_coverage, label)
+                expected, _ = reference.features(
+                    material,
+                    asset_ids=[ASSET],
+                    population=[ASSET, OTHER],
+                    policy=policy,
+                    **window,
+                )
+                self.assertEqual(
+                    features["sec_coverage"].astype(str).tolist(),
+                    expected["sec_coverage"].tolist(),
+                )
+
 
 class CountSpecTest(unittest.TestCase):
+    def test_event_spec_filters_latest_attributes_and_items(self) -> None:
+        later = {"observation_sequence": 2}
+        filings = [
+            event("results", items="2.02,9.01", type="current"),
+            event("officer", items="5.02", type="current"),
+            event("quarterly", form="10-Q", items="2.02"),
+            # A later version names another item: reconstruction reads the latest
+            # version, observed_content the one selected at the decision.
+            event("revised", items="2.02"),
+            event(
+                "revised",
+                items="5.02",
+                observation_recorded_at="2026-03-20T12:00:00Z",
+                **later,
+            ),
+            # A later version without items keeps the earlier list.
+            event("kept", items="2.02"),
+            event(
+                "kept",
+                items=None,
+                observation_recorded_at="2026-03-07T12:00:00Z",
+                **later,
+            ),
+        ]
+        specs = [
+            EventSpec("sec_results", "sec", {"form": {"8-K"}}, {"2.02"}),
+            EventSpec("sec_current", "sec", {"type": {"current"}}),
+        ]
+        for policy, results in (("public_reconstructed", 2), ("observed_content", 3)):
+            with self.subTest(policy=policy):
+                features = daily(fixture(), filings, time_policy=policy, specs=specs)
+                self.assertEqual(row(features).sec_results_events_1d, results)
+                self.assertEqual(row(features).sec_current_events_1d, 2)
+                self.assertEqual(row(features, asset=OTHER).sec_results_events_1d, 0)
+                record = features.attrs["provenance"]
+                self.assertEqual(list(record["source_coverage"]), ["sec"])
+                self.assertEqual(list(record["source_coverage_counts"]), ["sec"])
+                self.assertEqual(
+                    record["parameters"]["event_specs"][0],
+                    {
+                        "name": "sec_results",
+                        "source": "sec",
+                        "where": {"form": ["8-K"]},
+                        "items_any": ["2.02"],
+                    },
+                )
+        names = [name for name in features if name.startswith("sec")]
+        self.assertIn("sec_results_events_rank_21d", names)
+        self.assertIn("sec_current_events_63d", names)
+        self.assertFalse(
+            [
+                name
+                for name in names
+                if not name.startswith(("sec_results", "sec_current"))
+            ]
+        )
+        # Default specs: every legacy form counts, items are not filtered.
+        defaults = daily(fixture(), filings, symbols=[ASSET, ASSET])
+        self.assertEqual(row(defaults).sec_events_1d, 5)
+        self.assertEqual(len(defaults), 16)
+        # A filter on a column the observations lack is refused, except the legacy
+        # form filter of bundles saved before form.
+        with self.assertRaisesRegex(ValueError, "CAPABILITY_MISSING"):
+            daily(fixture(), filings, specs=[EventSpec("x", "sec", {"kind": {"a"}})])
+        proxy = [*filings, event("proxy", form="DEF 14A")]
+        self.assertEqual(row(daily(fixture(), proxy)).sec_events_1d, 5)
+        formless = [
+            {key: value for key, value in item.items() if key != "form"}
+            for item in proxy
+        ]
+        self.assertEqual(row(daily(fixture(), formless)).sec_events_1d, 6)
+        with self.assertRaisesRegex(ValueError, "CAPABILITY_MISSING"):
+            daily(fixture(), formless, specs=specs[:1])
+        for broken in ({"form": "8-K"}, {"form": [1]}):
+            with self.subTest(where=broken), self.assertRaises(ValueError):
+                EventSpec("broken", "sec", broken)
+        with self.assertRaisesRegex(ValueError, "unique"):
+            daily(fixture(), filings, specs=[specs[0], specs[0]])
+
+    def test_rolling_counts_nan_unless_every_window_countable(self) -> None:
+        cal = [str(day.date()) for day in pd.bdate_range("2025-12-01", "2026-03-27")]
+        clocked = "2025-11-01T00:00:00Z"
+        # Day cal[8] is not covered: windows 7 and 8 are not countable.
+        checks = [
+            check(checked_start=cal[0], checked_end=cal[7], checked_at=clocked),
+            check(checked_start=cal[9], checked_end=cal[-1], checked_at=clocked),
+        ]
+        filings = [
+            event(f"e{index}", public_at=f"{cal[index]}T15:00:00Z")
+            for index in (10, 68, 72)
+        ]
+        # Under public_reconstructed a clock-less event dated cal[76] leaves windows
+        # 75 and 76 unknown.
+        dateonly = event(
+            "dateonly",
+            public_time_precision="unknown",
+            event_date=cal[76],
+            filing_date=cal[76],
+        )
+        common = {
+            # signal: (5d, 21d, 63d); warm-up windows before the first signal count.
+            70: (1, 1, None),
+            71: (1, 1, 2),
+            72: (2, 2, 3),
+            73: (1, 2, 2),
+            74: (1, 2, 2),
+        }
+        cases = {
+            "public_reconstructed": (
+                [*filings, dateonly],
+                {75: (None,) * 3, 80: (None,) * 3, 81: (0, None, None)},
+            ),
+            "observed_content": (
+                filings,
+                {75: (1, 2, 2), 80: (0, 2, 2), 81: (0, 2, 2)},
+            ),
+        }
+        material = fixture(checks, first=cal[0])
+        for policy, (items, tail) in cases.items():
+            window = {"time_policy": policy, "end": cal[-2], "symbols": [ASSET]}
+            features = daily(material, items, start=cal[70], **window)
+            for index, sums in {**common, **tail}.items():
+                with self.subTest(policy=policy, signal=cal[index]):
+                    current = row(features, cal[index])
+                    for size, value in zip((5, 21, 63), sums):
+                        total = current[f"sec_events_{size}d"]
+                        if value is None:
+                            self.assertTrue(pd.isna(total), size)
+                        else:
+                            self.assertEqual(total, value, size)
+            # Warm-up gives the sums of a run over the whole calendar.
+            full = daily(material, items, start=cal[0], **window)
+            later = full["signal_session"] >= date.fromisoformat(cal[70])
+            assert_frame_equal(
+                features,
+                full[later].reset_index(drop=True),
+                check_categorical=False,
+            )
+            # Fewer windows than the sum needs leave it missing.
+            self.assertTrue(pd.isna(row(full, cal[3]).sec_events_5d))
+            self.assertEqual(row(full, cal[4]).sec_events_5d, 0)
+
     def test_story_key_dedupes_counts(self) -> None:
         articles = [
             article("n1", "2026-03-06T15:00:00Z", [ASSET]),
@@ -527,13 +853,230 @@ class CountSpecTest(unittest.TestCase):
                         "ranked": True,
                     },
                 )
-        # A partial selection cannot rank against the universe: missing, not 1.0.
+        # A partial selection still ranks against the whole population.
         features, record = run(material, events, asset_ids=[ASSET])
-        self.assertTrue(features["sec_events_rank_21d"].isna().all())
+        self.assertEqual(row(features, first).sec_events_rank_21d, 1.0)
         self.assertEqual(row(features, first).sec_events_21d, 1)
         self.assertEqual(record["rank_population"]["selected"], 1)
-        self.assertFalse(record["rank_population"]["ranked"])
+        self.assertTrue(record["rank_population"]["ranked"])
         self.assertEqual(record["source_coverage"]["sec"]["assets_with_coverage"], 1)
+        alone, _ = run(material, events, asset_ids=[OTHER])
+        self.assertEqual(row(alone, first, OTHER).sec_events_rank_21d, 0.5)
+
+
+RANDOM_SPECS = (
+    *default_specs(),
+    EventSpec("sec_results", "sec", {"form": {"8-K"}}, {"2.02"}),
+    EventSpec("news_typed", "alpaca_news", {"type": {"x", "z"}}),
+)
+
+
+def random_material(seed: int) -> tuple[dict[str, Any], list[str], int]:
+    """Version chains with adds, removals, missing and tied clocks, plus checks
+    (some with inverted windows), over more sessions than the 63-session sums."""
+    rng = random.Random(seed)
+    calendar = [
+        day.date()
+        for day in pd.bdate_range("2026-01-05", "2026-04-17")
+        if day.date() != date(2026, 4, 3)
+    ]
+    pool = []
+    for day in rng.sample(calendar, 8):
+        decision = clocks.decision_at(day)
+        for seconds in (0, 1, -1, 10_800, 10_801):
+            pool.append(decision + timedelta(seconds=seconds))
+    span = (calendar[-1] - calendar[0]).days + 10
+    for _ in range(12):
+        pool.append(
+            pd.Timestamp(calendar[0], tz="UTC")
+            + timedelta(minutes=rng.randrange((span - 5) * 1440) - 5 * 1440)
+        )
+    pool.append(pd.Timestamp("2026-11-01T00:00:00Z"))
+
+    def instant() -> Any:
+        value, style = rng.choice(pool), rng.random()
+        if style < 0.05:
+            return rng.choice([None, "", "not a time", "2026-03-05T10:00:00"])
+        if style < 0.1:
+            return value
+        if style < 0.4:
+            return value.tz_convert("America/New_York").isoformat()
+        return value.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def day_text() -> Any:
+        return rng.choice(
+            [None, "", str(rng.choice(calendar) + timedelta(days=rng.randint(-3, 3)))]
+        )
+
+    assets = [ASSET, OTHER, THIRD, BENCHMARK]
+    rows: list[dict[str, Any]] = []
+    stories = []
+    for number in range(rng.randint(20, 40)):
+        source = rng.choice(
+            ["sec", "sec", "alpaca_news", "finnhub_news", "sec_earnings_release"]
+        )
+        uid = f"{source}-{number}"
+        if source == "alpaca_news" and rng.random() < 0.6:
+            stories.append((uid, rng.choice(["s1", "s2", "s3"])))
+        for sequence in rng.sample(range(10), rng.randint(1, 4)):
+            links = rng.sample(assets, rng.randint(0, 3))
+            first_seen = {asset: instant() for asset in links if rng.random() < 0.85}
+            row = {
+                "source": source,
+                "event_uid": uid,
+                "event_id": uid,
+                "observation_sequence": sequence,
+                "form": rng.choice(["8-K", "10-K/A", "4", None, "DEF 14A"])
+                if source == "sec"
+                else None,
+                "filing_date": rng.choice([day_text(), "2026-13-45"])
+                if source == "sec"
+                else None,
+                "event_date": day_text(),
+                "items": rng.choice([None, "", "2.02", "9.01, 2.02", "5.02"]),
+                "type": rng.choice([None, "", "x", "y", "z"]),
+                "asset_ids": links,
+                "asset_first_seen_at": first_seen
+                if rng.random() < 0.5
+                else list(first_seen.items()),
+                "content_first_seen_at": instant(),
+                "observation_recorded_at": instant(),
+                "public_time_precision": rng.choice(
+                    ["second"] * 5 + ["date", "unknown", None]
+                ),
+                "public_at": instant(),
+                "public_date": day_text(),
+            }
+            if source == "alpaca_news" and rng.random() < 0.2:
+                row["story_key"] = rng.choice(["s1", "s2"])
+            rows.append(row)
+    for source in ("future_x", None, ""):
+        rows.append(event(f"skip-{source}", source=source))
+    checks = []
+    for asset in assets:
+        for source in ("sec", "alpaca_news", "finnhub_news"):
+            if rng.random() < 0.7:
+                code = rng.choice(["", "SOURCE_PUBLICATION_COVERAGE_UNKNOWN"])
+                checks.append(
+                    check(
+                        asset,
+                        source,
+                        checked_start=str(calendar[0]),
+                        checked_end=str(calendar[-1]),
+                        checked_at=rng.choice([instant(), EARLY]),
+                        status="partial" if code else rng.choice(["checked", "empty"]),
+                        error_code=code,
+                    )
+                )
+            for _ in range(rng.randint(0, 4)):
+                start = rng.choice(calendar) + timedelta(days=rng.randint(-4, 2))
+                bounded = rng.random() < 0.85
+                checks.append(
+                    check(
+                        asset,
+                        source,
+                        checked_start=str(start) if bounded else rng.choice([None, ""]),
+                        checked_end=str(start + timedelta(days=rng.randint(-2, 20))),
+                        checked_at=instant(),
+                        status=rng.choice(
+                            ["checked", "empty", "not_changed", "partial", "partial"]
+                            + ["error", "odd"]
+                        ),
+                        error_code=rng.choice(
+                            ["", "", None, "SOURCE_HISTORY_LIMIT"]
+                            + ["SOURCE_PUBLICATION_COVERAGE_UNKNOWN"]
+                            + ["SOURCE_RESULT_BOUNDARY", "SOURCE_SYMBOL_UNVERIFIED"]
+                            + ["IDENTITY_NOT_LISTED", "SEC_PREDECESSOR_UNMAPPED"]
+                        ),
+                    )
+                )
+    material = fixture(checks)
+    material["calendar"] = list(map(str, calendar))
+    material["manifest"]["source_timezones"]["finnhub_news"] = rng.choice(
+        ["Asia/Tokyo", "Europe/London", "America/New_York"]
+    )
+    material["universe"] = pd.DataFrame(
+        {"asset_id": assets, "is_benchmark": [False, False, False, True]}
+    )
+    material["event_observations"] = pd.DataFrame(rows)
+    material["news_versions"] = (
+        pd.DataFrame(
+            [
+                {"event_id": uid, "story_key": story, "provider_updated_at": None}
+                for uid, story in stories
+            ]
+        )
+        if stories
+        else None
+    )
+    return material, rng.sample(assets[:3], rng.randint(1, 3)), rng.choice([3, 30, 66])
+
+
+class ReferenceTest(unittest.TestCase):
+    def test_vectorized_events_and_coverage_match_reference(self) -> None:
+        seen = dict.fromkeys(
+            ["inverted", "sec_results", "news_typed", *research_datasets.POLICIES], 0
+        )
+        for seed in range(50):
+            material, selection, first = random_material(seed)
+            checks = material["source_checks"]
+            bounded = checks["checked_start"].fillna("") != ""
+            seen["inverted"] += int(
+                (
+                    checks["checked_start"][bounded] > checks["checked_end"][bounded]
+                ).sum()
+            )
+            options = {
+                "start": material["calendar"][first],
+                "end": material["calendar"][-1],
+            }
+            for policy in research_datasets.POLICIES:
+                with self.subTest(seed=seed, policy=policy):
+                    features = research_datasets.daily_features(
+                        MaterialVersion(material),
+                        selection,
+                        time_policy=policy,
+                        benchmark=BENCHMARK,
+                        specs=RANDOM_SPECS,
+                        **options,
+                    )
+                    record = features.attrs["provenance"]
+                    expected, summary = reference.features(
+                        material,
+                        asset_ids=selection,
+                        population=[ASSET, OTHER, THIRD],
+                        policy=policy,
+                        specs=RANDOM_SPECS,
+                        **options,
+                    )
+                    actual = features[list(expected.columns)].copy()
+                    for name in actual:
+                        if isinstance(actual[name].dtype, pd.CategoricalDtype):
+                            actual[name] = actual[name].astype(str).astype(object)
+                    assert_frame_equal(actual, expected)
+                    self.assertEqual(
+                        record["skipped_sources"], summary["skipped_sources"]
+                    )
+                    self.assertEqual(
+                        record["undatable_events"], summary["undatable_events"]
+                    )
+                    seen[policy] += int(features["sec_events_63d"].notna().sum())
+                    for name in ("sec_results", "news_typed"):
+                        seen[name] += int(features[f"{name}_observed_events_1d"].sum())
+                    shuffled = material["event_observations"].sample(
+                        frac=1, random_state=seed
+                    )
+                    again = research_datasets.daily_features(
+                        MaterialVersion({**material, "event_observations": shuffled}),
+                        selection,
+                        time_policy=policy,
+                        benchmark=BENCHMARK,
+                        specs=RANDOM_SPECS,
+                        **options,
+                    )
+                    assert_frame_equal(again, features)
+        # The comparison is not vacuous: long sums, malformed windows and filters occur.
+        self.assertTrue(all(seen.values()), seen)
 
 
 class UnknownSourceTest(unittest.TestCase):
@@ -562,7 +1105,12 @@ class UnknownSourceTest(unittest.TestCase):
             # Two articles of one story count once; coverage is a complete read.
             self.assertEqual(news_day["alpaca_news_new_event_count"].tolist(), [1, 1])
             self.assertEqual(set(news_day["alpaca_news_coverage"]), {"read_complete"})
-            panel = ds.panel(["AAPL"], time_policy="public_reconstructed", **window)
+            panel = ds.panel(
+                ["AAPL"],
+                time_policy="public_reconstructed",
+                allow_static_universe=True,
+                **window,
+            )
             self.assertEqual(
                 panel.attrs["provenance"]["skipped_sources"], {"future_x": 1}
             )
@@ -572,10 +1120,75 @@ class UnknownSourceTest(unittest.TestCase):
                 asset_ids=[bundle.ASSET_A],
                 benchmark_id=bundle.BENCH_SPY,
                 time_policy="observed_content",
+                allow_static_universe=True,
                 **window,
             )
             self.assertEqual(record["skipped_sources"], {"future_x": 1})
             self.assertEqual(record["package_version"], research_datasets.__version__)
+            self.assertEqual(record["code_sha256"], research_datasets.code_digest())
+            # The reader loads only the observation columns it needs, when present.
+            projected = ds.event_observations(columns=["source", "event_uid", "nope"])
+            self.assertEqual(list(projected.columns), ["source", "event_uid"])
+
+
+class ProjectionTest(unittest.TestCase):
+    def test_filtered_projected_observation_read_keeps_removal_versions(self) -> None:
+        sessions = bundle.SESSIONS
+        public = f"{sessions[3]}T15:00:00Z"
+        removal = bundle.observation(
+            "rel-1",
+            "sec",
+            [],
+            public,
+            observation_sequence=2,
+            observation_recorded_at=f"{sessions[9]}T12:00:00Z",
+            asset_first_seen_at={bundle.ASSET_A: public},
+        )
+        observations = [
+            *bundle.default_observations(),
+            bundle.observation("rel-1", "sec", [bundle.ASSET_A], public),
+            removal,
+        ]
+        objects, _ = bundle._build_synthetic_bundle(observations=observations)
+        with (
+            bundle.SyntheticDatasetServer(objects) as server,
+            tempfile.TemporaryDirectory() as tmp,
+        ):
+            ds = research_datasets.load(
+                bundle.DATASET_ID,
+                key=bundle.TOKEN,
+                base_url=server.base_url,
+                cache_dir=tmp,
+            )
+            wanted = list(OBSERVATION_COLUMNS)
+            full = ds.event_observations(["AAPL"])
+            projected = ds.event_observations(["AAPL"], columns=wanted)
+            # Requested columns the version has, in request order, with full rows.
+            self.assertEqual(
+                list(projected.columns), [name for name in wanted if name in full]
+            )
+            assert_frame_equal(projected, full[list(projected.columns)])
+            chain = projected[projected["event_uid"] == "rel-1"]
+            self.assertEqual(chain["observation_sequence"].tolist(), [1, 2])
+            self.assertEqual(len(chain["asset_ids"].iloc[1]), 0)
+            self.assertEqual(
+                clocks.mapping(chain["asset_first_seen_at"].iloc[1]),
+                {bundle.ASSET_A: public},
+            )
+            other = ds.event_observations(["GOOG"], columns=wanted)
+            self.assertNotIn("rel-1", other["event_uid"].tolist())
+            # The removal is retroactive under public_reconstructed only.
+            window = {"start": sessions[2], "end": sessions[4]}
+            for policy, expected in (
+                ("public_reconstructed", 0),
+                ("observed_content", 1),
+            ):
+                with self.subTest(policy=policy):
+                    daily = ds.daily_features(["AAPL"], time_policy=policy, **window)
+                    self.assertEqual(
+                        row(daily, sessions[3], bundle.ASSET_A).sec_events_1d,
+                        expected,
+                    )
 
 
 if __name__ == "__main__":

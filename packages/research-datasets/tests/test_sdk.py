@@ -732,17 +732,22 @@ class DatasetSdkTest(unittest.TestCase):
             self.assertIn("gross_margin_value", ratios_q.columns)
             self.assertIn("revenue_yoy_value", ratios_q.columns)
 
+            with self.assertRaisesRegex(ValueError, "UNIVERSE_NOT_PIT"):
+                ds.forward_returns(symbols, start=start, end=end, horizons=(1, 5))
             fwd = ds.forward_returns(
                 symbols,
                 start=start,
                 end=end,
                 benchmark="SPY",
                 horizons=(1, 5),
+                allow_static_universe=True,
             )
             self.assertIn("forward_excess_return_1d", fwd.columns)
             self.assertIn("forward_excess_return_5d", fwd.columns)
             self.assertIn("trainable_1d", fwd.columns)
             self.assertIn("trainable_5d", fwd.columns)
+            self.assertEqual(set(fwd["h5_return_basis"]), {"vendor_adjusted"})
+            self.assertTrue(fwd["in_universe"].isna().all())
 
             out_dir = Path(tmp) / "panel_out"
             panel_df = ds.panel(
@@ -753,6 +758,7 @@ class DatasetSdkTest(unittest.TestCase):
                 horizons=(1, 5),
                 time_policy="observed_content",
                 fundamental_time_policy="public_reconstructed",
+                allow_static_universe=True,
                 output_dir=out_dir,
             )
             self.assertIsInstance(panel_df, pd.DataFrame)
@@ -771,6 +777,8 @@ class DatasetSdkTest(unittest.TestCase):
             self.assertEqual(provenance["skipped_sources"], {"future_x": 1})
             self.assertIn(LIMITATION_PREFIX, " ".join(provenance["limitations"]))
             self.assertEqual(provenance["parameters"]["time_policy_version"], 2)
+            self.assertEqual(provenance["parameters"]["universe_basis"], "static")
+            self.assertIn("5", provenance["masks"])
 
             # Backward-compatible prepare() works both with and without train_end/validation_end
             features_no_split, labels_no_split, splits_none, _ = (
@@ -783,6 +791,7 @@ class DatasetSdkTest(unittest.TestCase):
                     benchmark_id=ds.resolve("SPY")[0],
                     horizon=5,
                     time_policy="observed_content",
+                    allow_static_universe=True,
                 )
             )
             self.assertEqual(len(features_no_split), len(daily))
@@ -798,6 +807,7 @@ class DatasetSdkTest(unittest.TestCase):
                 benchmark_id=ds.resolve("SPY")[0],
                 horizon=5,
                 time_policy="observed_content",
+                allow_static_universe=True,
                 train_end=ds.calendar[12],
                 validation_end=ds.calendar[18],
             )

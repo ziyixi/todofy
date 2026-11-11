@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .asof import asof_join
+from .candidates import build_candidates
 from .client import (
     Client,
     Dataset,
@@ -11,6 +13,7 @@ from .client import (
     connect,
     load,
 )
+from .clocks import Calendar
 from .constants import (
     ALL_METRICS,
     API,
@@ -18,6 +21,9 @@ from .constants import (
     COUNT_SOURCES,
     DATA_FAMILIES,
     DECISION_TIME,
+    DEFAULT_HORIZONS,
+    DEFAULT_TERMINAL_POLICY,
+    DEFAULT_UNIVERSE_RULE,
     DURATION_METRICS,
     FAMILY_SPECS,
     FIELDS,
@@ -34,20 +40,24 @@ from .constants import (
     SourceContract,
     __version__,
 )
-from .panels import (
-    KEYS,
-    LIMITATIONS,
-    build_candidates,
-    daily_features,
-    forward_returns,
+from .events import EventSpec
+from .fundamentals import (
     fundamental_features,
     fundamental_ratios,
-    material_from_version,
-    panel,
-    prepare,
     prepare_fundamental_features,
     prepare_fundamental_ratios,
 )
+from .labels import split_membership
+from .panels import (
+    KEYS,
+    LIMITATIONS,
+    daily_features,
+    forward_returns,
+    material_from_version,
+    panel,
+    prepare,
+)
+from .provenance import code_digest
 
 __all__ = [
     "ALL_METRICS",
@@ -56,6 +66,9 @@ __all__ = [
     "COUNT_SOURCES",
     "DATA_FAMILIES",
     "DECISION_TIME",
+    "DEFAULT_HORIZONS",
+    "DEFAULT_TERMINAL_POLICY",
+    "DEFAULT_UNIVERSE_RULE",
     "DURATION_METRICS",
     "FAMILY_SPECS",
     "FIELDS",
@@ -70,15 +83,19 @@ __all__ = [
     "SOURCES",
     "SOURCE_CONTRACTS",
     "VETO_CODES",
+    "Calendar",
     "Client",
     "Dataset",
     "DatasetError",
+    "EventSpec",
     "FamilySpec",
     "SourceContract",
     "Version",
     "__version__",
+    "asof_join",
     "build_candidates",
     "check_manifest",
+    "code_digest",
     "connect",
     "daily_features",
     "forward_returns",
@@ -90,4 +107,5 @@ __all__ = [
     "prepare",
     "prepare_fundamental_features",
     "prepare_fundamental_ratios",
+    "split_membership",
 ]

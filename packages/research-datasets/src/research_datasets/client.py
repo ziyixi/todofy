@@ -32,11 +32,25 @@ import pyarrow.dataset as pads
 from .constants import (
     API,
     DATA_FAMILIES,
+    DEFAULT_HORIZONS,
     FAMILY_SPECS,
     FIELDS,
     MANIFEST_SCHEMA_MAX,
     FamilySpec,
     __version__,
+)
+from .events import EventSpec
+from .fundamentals import (
+    fundamental_features as _fundamental_features,
+)
+from .fundamentals import (
+    fundamental_ratios as _fundamental_ratios,
+)
+from .fundamentals import (
+    prepare_fundamental_features as _prepare_fundamental_features,
+)
+from .fundamentals import (
+    prepare_fundamental_ratios as _prepare_fundamental_ratios,
 )
 from .panels import (
     build_candidates,
@@ -48,22 +62,10 @@ from .panels import (
     forward_returns as _forward_returns,
 )
 from .panels import (
-    fundamental_features as _fundamental_features,
-)
-from .panels import (
-    fundamental_ratios as _fundamental_ratios,
-)
-from .panels import (
     panel as _panel,
 )
 from .panels import (
     prepare as _prepare,
-)
-from .panels import (
-    prepare_fundamental_features as _prepare_fundamental_features,
-)
-from .panels import (
-    prepare_fundamental_ratios as _prepare_fundamental_ratios,
 )
 
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -955,6 +957,7 @@ class Dataset:
         end: str | date | None = None,
         metrics: Sequence[str] | None = None,
         columns: Sequence[str] | None = None,
+        optional_columns: bool = False,
     ) -> pd.DataFrame:
         spec = self._require_family(family)
         attrs: dict[str, Any] = {"dataset_version": self.id}
@@ -988,6 +991,7 @@ class Dataset:
             end_s,
             tuple(metrics) if metrics is not None else None,
             tuple(columns) if columns is not None else None,
+            optional_columns,
         )
         if cache_key in self._df_cache:
             return _copy_frame(self._df_cache[cache_key])
@@ -1014,6 +1018,8 @@ class Dataset:
         paths = [str(self._client._part(item)) for item in parts]
         ds = pads.dataset(paths, format="parquet")
         names = set(ds.schema.names)
+        if columns is not None and optional_columns:
+            columns = [name for name in columns if name in names]
         if columns is not None and not set(columns).issubset(names):
             raise DatasetError(
                 "BAD_REQUEST",
@@ -1271,13 +1277,20 @@ class Dataset:
         symbols: str | Sequence[str] | None = None,
         start: str | date | None = None,
         end: str | date | None = None,
+        *,
+        columns: Sequence[str] | None = None,
     ) -> pd.DataFrame:
-        """Frozen observation versions, including removed links, by observation_recorded_at date."""
+        """Frozen observation versions, including removed links, by observation_recorded_at date.
+
+        ``columns`` keeps only those of the requested columns this version has.
+        """
         return self._read_family(
             "event_observations",
             symbols=symbols,
             start=start,
             end=end,
+            columns=columns,
+            optional_columns=True,
         )
 
     def source_checks(self, symbols: str | Sequence[str] | None = None) -> pd.DataFrame:
@@ -1562,9 +1575,24 @@ class Dataset:
         *,
         start: str | date | None = None,
         end: str | date | None = None,
+        sampling: str = "daily",
+        universe: str = "pit",
+        keep_non_members: bool = False,
+        benchmark: str | None = None,
+        next_session: str | date | None = None,
     ) -> pd.DataFrame:
-        """Return candidate ``(asset_id, symbol, signal_session, previous_decision_at, decision_at)`` rows."""
-        return build_candidates(self, symbols, start=start, end=end)
+        """Return candidate rows with decision clocks and point-in-time membership."""
+        return build_candidates(
+            self,
+            symbols,
+            start=start,
+            end=end,
+            sampling=sampling,
+            universe=universe,
+            keep_non_members=keep_non_members,
+            benchmark=benchmark,
+            next_session=next_session,
+        )
 
     def daily_features(
         self,
@@ -1574,6 +1602,9 @@ class Dataset:
         start: str | date | None = None,
         end: str | date | None = None,
         benchmark: str | None = None,
+        specs: Sequence[EventSpec] | None = None,
+        sampling: str = "daily",
+        next_session: str | date | None = None,
     ) -> pd.DataFrame:
         """Return daily price/volume/event-count PIT features as a ``pd.DataFrame``."""
         return _daily_features(
@@ -1583,6 +1614,9 @@ class Dataset:
             end=end,
             time_policy=time_policy,
             benchmark=benchmark,
+            specs=specs,
+            sampling=sampling,
+            next_session=next_session,
         )
 
     def fundamental_features(
@@ -1594,6 +1628,7 @@ class Dataset:
         end: str | date | None = None,
         metrics: Mapping[str, str] | Sequence[str] | None = None,
         period_kind: str | Sequence[str] = "quarter",
+        provenance: bool = True,
     ) -> pd.DataFrame:
         """Return PIT-aligned fundamental features as a ``pd.DataFrame``."""
         return _fundamental_features(
@@ -1604,6 +1639,7 @@ class Dataset:
             metrics=metrics,
             period_kind=period_kind,
             time_policy=time_policy,
+            provenance=provenance,
         )
 
     def fundamental_ratios(
@@ -1615,6 +1651,7 @@ class Dataset:
         end: str | date | None = None,
         currency: str = "USD",
         period_kind: str | Sequence[str] = "quarter",
+        provenance: bool = True,
     ) -> pd.DataFrame:
         """Return PIT-aligned fundamental ratios as a ``pd.DataFrame``."""
         return _fundamental_ratios(
@@ -1625,6 +1662,7 @@ class Dataset:
             currency=currency,
             period_kind=period_kind,
             time_policy=time_policy,
+            provenance=provenance,
         )
 
     def forward_returns(
@@ -1634,7 +1672,13 @@ class Dataset:
         start: str | date | None = None,
         end: str | date | None = None,
         benchmark: str = "SPY",
-        horizons: int | Iterable[int] = (1, 5),
+        horizons: int | Iterable[int] = DEFAULT_HORIZONS,
+        sampling: str = "daily",
+        universe: str = "pit",
+        allow_static_universe: bool = False,
+        keep_non_members: bool = False,
+        terminal_policy: Mapping[str, Any] | None = None,
+        neutralize: Sequence[str] = (),
     ) -> pd.DataFrame:
         """Return forward return labels as a ``pd.DataFrame`` without requiring split boundaries."""
         return _forward_returns(
@@ -1644,6 +1688,12 @@ class Dataset:
             end=end,
             benchmark=benchmark,
             horizons=horizons,
+            sampling=sampling,
+            universe=universe,
+            allow_static_universe=allow_static_universe,
+            keep_non_members=keep_non_members,
+            terminal_policy=terminal_policy,
+            neutralize=neutralize,
         )
 
     def panel(
@@ -1654,10 +1704,18 @@ class Dataset:
         start: str | date | None = None,
         end: str | date | None = None,
         benchmark: str = "SPY",
-        horizons: int | Iterable[int] = (1, 5),
+        horizons: int | Iterable[int] = DEFAULT_HORIZONS,
+        sampling: str = "daily",
+        universe: str = "pit",
+        allow_static_universe: bool = False,
+        keep_non_members: bool = False,
+        terminal_policy: Mapping[str, Any] | None = None,
+        neutralize: Sequence[str] = (),
+        next_session: str | date | None = None,
         fundamental_time_policy: str | None = None,
         include_fundamentals: bool = True,
         include_ratios: bool = True,
+        provenance_columns: bool = False,
         output_dir: str | Path | None = None,
     ) -> pd.DataFrame:
         """Build a unified PIT research ``pd.DataFrame`` combining daily, fundamental, ratio, and label columns."""
@@ -1668,10 +1726,18 @@ class Dataset:
             end=end,
             benchmark=benchmark,
             horizons=horizons,
+            sampling=sampling,
+            universe=universe,
+            allow_static_universe=allow_static_universe,
+            keep_non_members=keep_non_members,
+            terminal_policy=terminal_policy,
+            neutralize=neutralize,
+            next_session=next_session,
             time_policy=time_policy,
             fundamental_time_policy=fundamental_time_policy,
             include_fundamentals=include_fundamentals,
             include_ratios=include_ratios,
+            provenance_columns=provenance_columns,
             output_dir=output_dir,
         )
 
