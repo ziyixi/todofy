@@ -1,3 +1,4 @@
+load("@rules_python//python:defs.bzl", "py_binary")
 load("//tools/bazel/audit:sources.bzl", "SOURCE_AUDIT_EXCLUDES")
 load("//tools/bazel/python:tests.bzl", "unittest_test")
 
@@ -175,6 +176,52 @@ unittest_test(
     ],
 )
 
+unittest_test(
+    name = "test_valuation",
+    size = "small",
+    srcs = [
+        "test_valuation.py",
+    ],
+    imports = [".", "..", "../src"],
+    modules = ["tests.test_valuation"],
+    deps = [
+        "//packages/research-datasets/src/research_datasets:library",
+        "@python_deps//numpy",
+        "@python_deps//pandas",
+        "@python_deps//pyarrow",
+    ],
+)
+
+unittest_test(
+    name = "test_industry",
+    size = "small",
+    srcs = [
+        "test_industry.py",
+        "test_sdk.py",
+    ],
+    imports = [".", "..", "../src"],
+    modules = ["tests.test_industry"],
+    deps = [
+        "//packages/research-datasets/src/research_datasets:library",
+        "@python_deps//numpy",
+        "@python_deps//pandas",
+        "@python_deps//pyarrow",
+    ],
+)
+
+py_binary(
+    name = "bench_fundamentals",
+    srcs = ["bench_fundamentals.py"],
+    imports = [".", "..", "../src"],
+    legacy_create_init = 0,
+    deps = [
+        "//packages/research-datasets/src/research_datasets:library",
+        "@python_deps//numpy",
+        "@python_deps//pandas",
+        "@python_deps//pyarrow",
+    ],
+)
+
 test_suite(
     name = "tests",
     tests = [
@@ -184,10 +231,12 @@ test_suite(
         ":test_fundamental_features",
         ":test_fundamental_ratios",
         ":test_fundamentals_derived",
+        ":test_industry",
         ":test_labels",
         ":test_prepare",
         ":test_regressions",
         ":test_sdk",
+        ":test_valuation",
     ],
 )
 

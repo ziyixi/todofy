@@ -70,6 +70,9 @@ from .fundamentals_derived import (
 from .fundamentals_derived import (
     fundamental_states as _fundamental_states,
 )
+from .industry import (
+    industry as _industry,
+)
 from .panels import (
     build_candidates,
 )
@@ -84,6 +87,9 @@ from .panels import (
 )
 from .panels import (
     prepare as _prepare,
+)
+from .valuation import (
+    valuation as _valuation,
 )
 
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -1694,6 +1700,52 @@ class Dataset:
         )
         return _fundamental_factors(derived)
 
+    def valuation(
+        self,
+        candidates_or_symbols: pd.DataFrame | str | Sequence[str] | None = None,
+        derived: pd.DataFrame | None = None,
+        *,
+        time_policy: str,
+        start: str | date | None = None,
+        end: str | date | None = None,
+        prices: pd.DataFrame | None = None,
+        split_events: pd.DataFrame | None = None,
+        fx: pd.DataFrame | None = None,
+        provenance: bool = False,
+    ) -> pd.DataFrame:
+        """Compute point-in-time market values, enterprise value, and valuation yields."""
+        samples = (
+            candidates_or_symbols
+            if isinstance(candidates_or_symbols, pd.DataFrame)
+            else self.candidates(candidates_or_symbols, start=start, end=end)
+        )
+        return _valuation(
+            self,
+            samples,
+            derived,
+            time_policy=time_policy,
+            prices=prices,
+            split_events=split_events,
+            fx=fx,
+            provenance=provenance,
+        )
+
+    def industry(
+        self,
+        candidates_or_symbols: pd.DataFrame | str | Sequence[str] | None = None,
+        *,
+        time_policy: str,
+        start: str | date | None = None,
+        end: str | date | None = None,
+    ) -> pd.DataFrame:
+        """Attach SIC, division, Fama-French 12, and non-PIT metadata onto samples."""
+        samples = (
+            candidates_or_symbols
+            if isinstance(candidates_or_symbols, pd.DataFrame)
+            else self.candidates(candidates_or_symbols, start=start, end=end)
+        )
+        return _industry(self, samples, time_policy=time_policy)
+
     def audit(
         self,
         symbols: str | Sequence[str] | None = None,
@@ -1985,6 +2037,7 @@ class Dataset:
         keep_non_members: bool = False,
         terminal_policy: Mapping[str, Any] | None = None,
         neutralize: Sequence[str] = (),
+        time_policy: str | None = None,
     ) -> pd.DataFrame:
         """Return forward return labels as a ``pd.DataFrame`` without requiring split boundaries."""
         return _forward_returns(
@@ -2000,6 +2053,7 @@ class Dataset:
             keep_non_members=keep_non_members,
             terminal_policy=terminal_policy,
             neutralize=neutralize,
+            time_policy=time_policy,
         )
 
     def panel(

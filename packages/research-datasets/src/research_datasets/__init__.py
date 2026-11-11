@@ -71,6 +71,16 @@ from .fundamentals_derived import (
     fundamental_states,
     normalize_facts,
 )
+from .industry import (
+    FF12_CODES,
+    INDUSTRY_COLUMNS,
+    SIC_LIMITATION,
+    industry,
+    normalize_sic,
+    sic_to_division,
+    sic_to_ff12,
+    sic_to_major_group,
+)
 from .labels import split_membership
 from .panels import (
     KEYS,
@@ -82,6 +92,11 @@ from .panels import (
     prepare,
 )
 from .provenance import code_digest
+from .valuation import (
+    VALUATION_LIMITATION,
+    VALUATION_NAMES,
+    valuation,
+)
 
 __all__ = [
     "ALL_METRICS",
@@ -101,8 +116,10 @@ __all__ = [
     "DURATION_METRICS",
     "FACTOR_NAMES",
     "FAMILY_SPECS",
+    "FF12_CODES",
     "FIELDS",
     "FISCAL_QUARTER_COLUMNS",
+    "INDUSTRY_COLUMNS",
     "INSTANT_METRICS",
     "KEYS",
     "LEGACY_SEC_COUNT_FORMS",
@@ -113,10 +130,13 @@ __all__ = [
     "PERIODIC_ANNUAL_FORMS",
     "POLICIES",
     "RATIO_METRICS",
+    "SIC_LIMITATION",
     "SOURCES",
     "SOURCE_CONTRACTS",
     "STALE_AFTER_DAYS",
     "TAG_TO_CONCEPT",
+    "VALUATION_LIMITATION",
+    "VALUATION_NAMES",
     "VETO_CODES",
     "Calendar",
     "Client",
@@ -144,12 +164,18 @@ __all__ = [
     "fundamental_features",
     "fundamental_ratios",
     "fundamental_states",
+    "industry",
     "load",
     "material_from_version",
     "normalize_facts",
+    "normalize_sic",
     "panel",
     "prepare",
     "prepare_fundamental_features",
     "prepare_fundamental_ratios",
+    "sic_to_division",
+    "sic_to_ff12",
+    "sic_to_major_group",
     "split_membership",
+    "valuation",
 ]

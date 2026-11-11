@@ -23,7 +23,9 @@ from . import candidates as _candidates
 from . import clocks
 from . import fundamentals as _fundamentals
 from . import fundamentals_derived as _fundamentals_derived
+from . import industry as _industry
 from . import labels as _labels
+from . import valuation as _valuation
 from .candidates import build_candidates
 from .clocks import CAPTURE_DEADLINE as _CAPTURE_DEADLINE
 from .clocks import day as _day
@@ -748,6 +750,7 @@ def forward_returns(
     keep_non_members: bool = False,
     terminal_policy: Mapping[str, Any] | None = None,
     neutralize: Sequence[str] = (),
+    time_policy: str | None = None,
 ) -> pd.DataFrame:
     """Return forward return labels as a ``pd.DataFrame`` without requiring split boundaries.
 
@@ -819,10 +822,50 @@ def forward_returns(
     universe_rows = {
         str(row["asset_id"]): row for row in _candidates.records(version.universe)
     }
+    industry_names = {"ff12", "sic_division", "sic_major_group", "sic"}
+    families = version.manifest.get("data_families") or {}
+    has_profiles = isinstance(families, Mapping) and "issuer_profiles" in families
+    has_uni_sector = any(
+        universe_rows.get(str(a), {}).get("sector") is not None
+        for a in samples["asset_id"]
+    )
+    has_uni_sic = any(
+        universe_rows.get(str(a), {}).get("sic") is not None
+        for a in samples["asset_id"]
+    )
+    group_samples = samples
+    used_industry = any(name in industry_names for name in neutralize)
+    sector_via_industry = (
+        "sector" in neutralize
+        and "sector" not in samples
+        and (has_profiles or (not has_uni_sector and has_uni_sic))
+    )
+    need_industry = sector_via_industry or any(
+        name in industry_names and name not in samples for name in neutralize
+    )
+    if neutralize and need_industry:
+        ind_policy = (
+            _policy(time_policy)
+            if time_policy is not None
+            else (
+                "observed_content"
+                if "decision_at" in samples.columns
+                else "public_reconstructed"
+            )
+        )
+        ind_df = _industry.industry(version, samples, time_policy=ind_policy)
+        group_samples = samples.copy()
+        for col in ("ff12", "sic_division", "sic_major_group", "sic"):
+            if col not in group_samples.columns and col in ind_df.columns:
+                group_samples[col] = ind_df[col].to_numpy()
+        if sector_via_industry:
+            group_samples["sector"] = ind_df["ff12"].to_numpy()
+        used_industry = True
+
     groups_from_universe = [
         name
         for name in dict.fromkeys(neutralize)
-        if name != "size" and name not in samples
+        if name != "size" and name not in group_samples
     ]
     if neutralize:
         benchmarks = {benchmark_id}.union(
@@ -830,7 +873,7 @@ def forward_returns(
         )
         eligible = ~samples["asset_id"].astype(str).isin(benchmarks).to_numpy(bool)
         groups = {
-            name: _labels.neutral_groups(samples, name, universe_rows)
+            name: _labels.neutral_groups(group_samples, name, universe_rows)
             for name in dict.fromkeys(neutralize)
         }
         labels = _labels.neutralize(labels, groups, horizon_list, eligible)
@@ -855,9 +898,10 @@ def forward_returns(
     labels.attrs["masks"] = masks
     if counts:
         labels.attrs["counts"] = counts
-    labels.attrs["limitations"] = _labels.limitations(
-        universe_basis, return_basis, groups_from_universe
-    )
+    lims = _labels.limitations(universe_basis, return_basis, groups_from_universe)
+    if used_industry and _industry.SIC_LIMITATION not in lims:
+        lims.append(_industry.SIC_LIMITATION)
+    labels.attrs["limitations"] = lims
     return labels
 
 
@@ -934,6 +978,7 @@ def panel(
     parts: list[pd.DataFrame] = [rows]
     samples = rows[KEYS + ["decision_at"]]
     derived_limitations: list[str] = []
+    label_rows_input = rows
 
     if fundamentals == "derived" and (include_fundamentals or include_ratios):
         derived = _fundamentals_derived.derived_fundamentals(
@@ -948,11 +993,43 @@ def panel(
             for item in derived.attrs.get("limitations", [])
             if item not in manifest_lims
         ]
+        ind: pd.DataFrame | None = None
+        val: pd.DataFrame | None = None
         if include_fundamentals:
             parts.append(derived.drop(columns=KEYS))
+            ind = _industry.industry(version, samples, time_policy=fund_policy)
+            parts.append(ind.drop(columns=KEYS))
+            if (
+                _industry.SIC_LIMITATION not in manifest_lims
+                and _industry.SIC_LIMITATION not in derived_limitations
+            ):
+                derived_limitations.append(_industry.SIC_LIMITATION)
         if include_ratios:
             factors = _fundamentals_derived.fundamental_factors(derived)
             parts.append(factors.drop(columns=KEYS))
+            val = _valuation.valuation(
+                version,
+                samples,
+                derived,
+                time_policy=fund_policy,
+                provenance=provenance_columns,
+            )
+            parts.append(val.drop(columns=KEYS))
+            if (
+                _valuation.VALUATION_LIMITATION not in manifest_lims
+                and _valuation.VALUATION_LIMITATION not in derived_limitations
+            ):
+                derived_limitations.append(_valuation.VALUATION_LIMITATION)
+        if val is not None or ind is not None:
+            label_rows_input = rows.copy()
+            if val is not None and "market_cap_issuer_value" in val.columns:
+                label_rows_input["market_cap_issuer_value"] = val[
+                    "market_cap_issuer_value"
+                ].to_numpy()
+            if ind is not None:
+                for col in ("ff12", "sic_division", "sic_major_group", "sic"):
+                    if col in ind.columns:
+                        label_rows_input[col] = ind[col].to_numpy()
     elif fundamentals == "legacy" and (include_fundamentals or include_ratios):
         # One read of the facts and one prepared engine serve features and ratios.
         metrics = {
@@ -1008,7 +1085,7 @@ def panel(
 
     labels = forward_returns(
         version,
-        rows,
+        label_rows_input,
         benchmark=benchmark,
         horizons=horizons,
         sampling=sampling,
@@ -1017,6 +1094,7 @@ def panel(
         keep_non_members=keep_non_members,
         terminal_policy=terminal_policy,
         neutralize=neutralize,
+        time_policy=fund_policy,
     )
     # Candidate columns (keys, clocks, membership) win over the label's copies. The
     # labels' calendar has no live session, so non-members are counted from the
@@ -1093,16 +1171,20 @@ def panel(
                 "rank_population",
             )
         },
-        limitations=[
-            *LIMITATIONS,
-            *labels.attrs["limitations"],
-            *derived_limitations,
-            *_live_limitations(
-                candidates.attrs["parameters"],
-                candidates.attrs["counts"]["membership_carried"],
-            ),
-            *version.manifest.get("limitations", []),
-        ],
+        limitations=list(
+            dict.fromkeys(
+                [
+                    *LIMITATIONS,
+                    *labels.attrs["limitations"],
+                    *derived_limitations,
+                    *_live_limitations(
+                        candidates.attrs["parameters"],
+                        candidates.attrs["counts"]["membership_carried"],
+                    ),
+                    *version.manifest.get("limitations", []),
+                ]
+            )
+        ),
     )
     combined.attrs["provenance"] = provenance
     if output_dir is not None:

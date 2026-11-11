@@ -616,7 +616,12 @@ def neutral_groups(
     21-session or one-session dollar volume), a column of ``frame``, or a (non point-in-
     time) field of the universe entries."""
     if name == "size":
-        for column in ("market_cap", "dollar_volume_21d_log", "raw_dollar_volume"):
+        for column in (
+            "market_cap_issuer_value",
+            "market_cap",
+            "dollar_volume_21d_log",
+            "raw_dollar_volume",
+        ):
             if column in frame:
                 ranks = frame.groupby("signal_session", sort=False)[column].rank(
                     pct=True
@@ -624,7 +629,10 @@ def neutral_groups(
                 return np.ceil(ranks * SIZE_GROUPS).clip(1, SIZE_GROUPS)
         raise ValueError("size neutralization needs a size column in the samples")
     if name in frame:
-        return frame[name]
+        col = frame[name]
+        if pd.api.types.is_object_dtype(col) or pd.api.types.is_string_dtype(col):
+            return col.map(lambda v: None if v == "" else v)
+        return col
     values = [
         universe_rows.get(str(asset), {}).get(name) for asset in frame["asset_id"]
     ]

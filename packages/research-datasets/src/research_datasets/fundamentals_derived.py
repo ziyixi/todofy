@@ -2721,6 +2721,9 @@ def derived_fundamentals(
                 )
                 out[f"{view}_tag"] = pd.Series(dtype="object", index=samples.index)
                 out[f"{view}_currency"] = pd.Series(dtype="object", index=samples.index)
+                out[f"{view}_reference_date"] = pd.Series(
+                    dtype="object", index=samples.index
+                )
         out.attrs.update(
             parameters={
                 "views": list(selected_views),
@@ -2784,6 +2787,7 @@ def derived_fundamentals(
         "accessions",
         "tag",
         "currency",
+        "reference_date",
     ]
     ciks_with_view: dict[str, set[str]] = {}
     if not states.empty:
@@ -2895,6 +2899,10 @@ def derived_fundamentals(
                 None if i in cleared or pd.isna(v) else str(v)
                 for i, v in enumerate(joined["currency"].astype(object).tolist())
             ]
+            ref_vals = [
+                None if i in cleared or (isinstance(v, float) and np.isnan(v)) else v
+                for i, v in enumerate(joined["reference_date"].tolist())
+            ]
             new_cols[f"{view}_period_end"] = pd.Series(
                 pe_vals, index=samples.index, dtype="object"
             )
@@ -2910,6 +2918,9 @@ def derived_fundamentals(
             )
             new_cols[f"{view}_currency"] = pd.Series(
                 cur_vals, index=samples.index, dtype="object"
+            )
+            new_cols[f"{view}_reference_date"] = pd.Series(
+                ref_vals, index=samples.index, dtype="object"
             )
 
     result = pd.concat(
