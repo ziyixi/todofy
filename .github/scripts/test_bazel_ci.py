@@ -386,6 +386,10 @@ class BazelCI(unittest.TestCase):
             "data-check",
             operations["on"]["workflow_dispatch"]["inputs"]["operation"]["options"],
         )
+        self.assertIn(
+            "cache-reset",
+            operations["on"]["workflow_dispatch"]["inputs"]["operation"]["options"],
+        )
         self.assertIn("finish-worker", operations["on"]["workflow_dispatch"]["inputs"]["operation"]["options"])
         jobs = operations["jobs"]
         self.assertEqual(set(jobs), {"context", "operate"})

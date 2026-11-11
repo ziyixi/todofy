@@ -146,3 +146,26 @@ panel = ds.panel(
 - Upgrading from 1.x: pass `time_policy`; decisions are 06:00 New York on the entry session; labels default to
   horizons 5, 21, 63, 126 with total returns when the version has them; versions without point-in-time membership need
   `allow_static_universe=True` for labels.
+
+### 2.1.0
+
+- Derived point-in-time fundamentals (`ds.fundamental_states`, `ds.derived_fundamentals`, `ds.fiscal_quarters`,
+  `ds.fundamental_factors`): single fiscal quarters (`_q`, derived from 3-month, YTD differences, or annual minus 9-month
+  filings), trailing twelve months (`_ttm`), fiscal-year (`_fy`), point-in-time instant (`_inst`), and 52/53-week YoY
+  growth (`_yoy`), with concept-specific staleness flags and quality/leverage/cash-flow factors. `ds.panel(...)` defaults
+  to `fundamentals="derived"` (`"legacy"` retains the 2.0 per-period selector; `"none"` omits fundamental and ratio
+  blocks).
+- Valuation and industry (`ds.valuation`, `ds.industry`): issuer-level and security-level market value (resolving
+  multi-class issuers via `share_classes` when available), enterprise value, and book/earnings/FCF/sales/EBITDA yields;
+  SIC division, major group, and Fama-French 12 classification (`sic_pit=False` flags non-PIT SIC metadata; supported in
+  `neutralize=["ff12"]`).
+- Corporate actions and total-return families (`ds.corporate_actions`, `ds.total_returns`, `ds.return_reconciliation`)
+  plus issuer metadata (`ds.issuer_profiles`, `ds.share_classes`, `ds.share_class_checks`).
+- Typed SEC filing events and earnings features (`ds.sec_event_specs`, `typed_event_features`,
+  `ds.earnings_announcements`, `earnings_features`, `sue_features`, `ds.earnings_calendar(asof=...)`,
+  `label_announcement_flags`): manifest-driven SEC event kind counts and bulk-filer guards (`sec_kind_*`), point-in-time
+  earnings timing and volume-confirmed abnormal returns (`earn_*`), split-invariant seasonal-random-walk SUE
+  (`earn_sue_*`), and ex-post label window diagnostics (`label_has_earnings_{H}d`, `label_primary_earnings_{H}d`).
+- Calendar holiday and half-day helpers (`us_federal_holidays`, `nyse_holidays`, `nyse_early_closes`,
+  `is_sec_business_day`, `next_sec_business_day`, `sec_public_fallback`) provide deterministic SEC business-day and NYSE
+  13:00 early-close rules when a manifest omits explicit close times.

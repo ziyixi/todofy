@@ -134,6 +134,143 @@ def source_zone(source: str, zones: Mapping[str, str]) -> ZoneInfo:
     return NEW_YORK
 
 
+SEC_ACCEPTANCE_CUTOFF = time(17, 30)
+NYSE_EARLY_CLOSE = "13:00"
+
+
+def _observed_holiday(fixed: date) -> date:
+    if fixed.weekday() == 5:
+        return fixed - timedelta(days=1)
+    if fixed.weekday() == 6:
+        return fixed + timedelta(days=1)
+    return fixed
+
+
+def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
+    first = date(year, month, 1)
+    offset = (weekday - first.weekday()) % 7
+    return first + timedelta(days=offset + 7 * (n - 1))
+
+
+def _last_weekday(year: int, month: int, weekday: int) -> date:
+    next_month = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+    last = next_month - timedelta(days=1)
+    offset = (last.weekday() - weekday) % 7
+    return last - timedelta(days=offset)
+
+
+def _easter_sunday(year: int) -> date:
+    a = year % 19
+    b, c = divmod(year, 100)
+    d, e = divmod(b, 4)
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = divmod(c, 4)
+    ell = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * ell) // 451
+    month, day_num = divmod(h + ell - 7 * m + 114, 31)
+    return date(year, month, day_num + 1)
+
+
+@lru_cache(maxsize=256)
+def us_federal_holidays(year: int) -> frozenset[date]:
+    """US federal holidays (SEC EDGAR closed schedule) falling in ``year``."""
+    found = {
+        _nth_weekday(year, 1, 0, 3),  # Martin Luther King Jr. Day
+        _nth_weekday(year, 2, 0, 3),  # Washington's Birthday
+        _last_weekday(year, 5, 0),  # Memorial Day
+        _observed_holiday(date(year, 7, 4)),  # Independence Day
+        _nth_weekday(year, 9, 0, 1),  # Labor Day
+        _nth_weekday(year, 10, 0, 2),  # Columbus Day (SEC closed, NYSE open)
+        _observed_holiday(date(year, 11, 11)),  # Veterans Day (SEC closed, NYSE open)
+        _nth_weekday(year, 11, 3, 4),  # Thanksgiving Day
+        _observed_holiday(date(year, 12, 25)),  # Christmas Day
+    }
+    nyd = _observed_holiday(date(year, 1, 1))
+    if nyd.year == year:
+        found.add(nyd)
+    next_nyd = _observed_holiday(date(year + 1, 1, 1))
+    if next_nyd.year == year:
+        found.add(next_nyd)
+    if year >= 2021:
+        found.add(_observed_holiday(date(year, 6, 19)))  # Juneteenth
+    return frozenset(found)
+
+
+@lru_cache(maxsize=256)
+def nyse_holidays(year: int) -> frozenset[date]:
+    """Regular NYSE full-day holiday closures in ``year``."""
+    found = {
+        _nth_weekday(year, 1, 0, 3),  # Martin Luther King Jr. Day
+        _nth_weekday(year, 2, 0, 3),  # Washington's Birthday
+        _easter_sunday(year) - timedelta(days=2),  # Good Friday
+        _last_weekday(year, 5, 0),  # Memorial Day
+        _observed_holiday(date(year, 7, 4)),  # Independence Day
+        _nth_weekday(year, 9, 0, 1),  # Labor Day
+        _nth_weekday(year, 11, 3, 4),  # Thanksgiving Day
+        _observed_holiday(date(year, 12, 25)),  # Christmas Day
+    }
+    jan1 = date(year, 1, 1)
+    if jan1.weekday() < 5:
+        found.add(jan1)
+    elif jan1.weekday() == 6:
+        found.add(date(year, 1, 2))
+    if year >= 2022:
+        found.add(_observed_holiday(date(year, 6, 19)))  # Juneteenth
+    return frozenset(found)
+
+
+def nyse_early_closes(sessions: Sequence[Any]) -> dict[str, str]:
+    """Standard NYSE 13:00 New York early-close sessions among ``sessions``."""
+    result: dict[str, str] = {}
+    for raw in sessions:
+        d = day(raw)
+        if d in nyse_holidays(d.year) or d.weekday() > 4:
+            continue
+        black_friday = _nth_weekday(d.year, 11, 3, 4) + timedelta(days=1)
+        if (
+            d == black_friday
+            or (d.month == 7 and d.day == 3 and d.weekday() < 4)
+            or (d.month == 12 and d.day == 24 and d.weekday() < 4)
+        ):
+            result[d.isoformat()] = NYSE_EARLY_CLOSE
+    return result
+
+
+def is_sec_business_day(value: date) -> bool:
+    """Whether ``value`` is a weekday on which SEC EDGAR assigns same-day filings."""
+    return value.weekday() < 5 and value not in us_federal_holidays(value.year)
+
+
+def next_sec_business_day(value: date) -> date:
+    """First SEC business day strictly after ``value``."""
+    candidate = value + timedelta(days=1)
+    while not is_sec_business_day(candidate):
+        candidate += timedelta(days=1)
+    return candidate
+
+
+def sec_filing_date_from_acceptance(accepted: pd.Timestamp | str) -> date:
+    """Infer SEC filing date from an acceptance timestamp using the 17:30 ET and
+    US federal-holiday schedule when ``filing_date`` is absent."""
+    ts = accepted if isinstance(accepted, pd.Timestamp) else clock(accepted)
+    if ts is None or ts.tzinfo is None:
+        raise ValueError("accepted must be an offset-bearing timestamp")
+    local = ts.tz_convert(NEW_YORK)
+    local_day = local.date()
+    if not is_sec_business_day(local_day):
+        return next_sec_business_day(local_day)
+    if (local.hour, local.minute, local.second, local.microsecond) >= (
+        SEC_ACCEPTANCE_CUTOFF.hour,
+        SEC_ACCEPTANCE_CUTOFF.minute,
+        0,
+        0,
+    ):
+        return next_sec_business_day(local_day)
+    return local_day
+
+
 def sec_floor(filing_date: date) -> pd.Timestamp:
     """SEC disseminates a filing from 06:00 New York on its SEC filing date."""
     return at(filing_date, SEC_DISSEMINATION_START.hour, SEC_DISSEMINATION_START.minute)
@@ -143,6 +280,27 @@ def sec_public(accepted: pd.Timestamp, filing_date: date) -> pd.Timestamp:
     """SEC dates filings accepted after 17:30 or on non-business days to the next
     business day, so the public instant is max(acceptance, 06:00 on the filing date)."""
     return max(accepted, sec_floor(filing_date))
+
+
+def sec_public_fallback(
+    accepted: pd.Timestamp | str, filing_date: date | str | None = None
+) -> pd.Timestamp:
+    """SEC public instant using ``filing_date`` when present, else the 17:30 ET
+    federal-holiday fallback rule."""
+    ts = accepted if isinstance(accepted, pd.Timestamp) else clock(accepted)
+    if ts is None or ts.tzinfo is None:
+        raise ValueError("accepted must be an offset-bearing timestamp")
+    if isinstance(filing_date, str):
+        effective = (
+            day_str(filing_date.strip())
+            if filing_date.strip()
+            else sec_filing_date_from_acceptance(ts)
+        )
+    elif filing_date is not None:
+        effective = filing_date
+    else:
+        effective = sec_filing_date_from_acceptance(ts)
+    return sec_public(ts, effective)
 
 
 def _next_midnight(value: Any, zone: str) -> pd.Timestamp | None:
@@ -156,7 +314,10 @@ def _next_midnight(value: Any, zone: str) -> pd.Timestamp | None:
 
 
 def public_clock(
-    row: Mapping[str, Any], zones: Mapping[str, str]
+    row: Mapping[str, Any],
+    zones: Mapping[str, str],
+    *,
+    holiday_fallback: bool = False,
 ) -> pd.Timestamp | None:
     """One row's public instant (scalar form of ``public_clocks``)."""
     precision = row.get("public_time_precision")
@@ -174,6 +335,8 @@ def public_clock(
             filed = date_field(row, "filing_date", "filed")
             if filed is not None:
                 public = sec_public(public, filed)
+            elif holiday_fallback:
+                public = sec_public_fallback(public, None)
         return public
     if precision != "date":
         return None
@@ -278,7 +441,10 @@ def _sec_floor(value: Any) -> int:
 
 
 def public_clocks(
-    frame: pd.DataFrame, zones: Mapping[str, str]
+    frame: pd.DataFrame,
+    zones: Mapping[str, str],
+    *,
+    holiday_fallback: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Public instants (int64 ns, NAT when unknown) and invalid declared clocks per row.
 
@@ -310,9 +476,24 @@ def public_clocks(
         )
         sec &= public != NAT
         if sec.any():
-            floors = map_unique(
-                _first_text(frame.loc[sec], ("filing_date", "filed")), _sec_floor
-            )
+            filed_text = _first_text(frame.loc[sec], ("filing_date", "filed"))
+            floors = map_unique(filed_text, _sec_floor)
+            if holiday_fallback:
+                missing_floor = floors == NAT
+                if missing_floor.any():
+                    sec_indices = np.flatnonzero(sec)[missing_floor]
+                    public[sec_indices] = np.fromiter(
+                        (
+                            _ns(
+                                sec_public_fallback(
+                                    pd.Timestamp(int(val), tz="UTC"), None
+                                )
+                            )
+                            for val in public[sec_indices]
+                        ),
+                        dtype=np.int64,
+                        count=len(sec_indices),
+                    )
             public[sec] = np.maximum(public[sec], floors)
     if dated.any() and "public_date" in frame.columns:
         cells = frame["public_date"].to_numpy(dtype=object)[dated]
@@ -386,6 +567,8 @@ class Calendar:
         sessions: Sequence[Any],
         closes: Mapping[str, str] | None = None,
         next_session: Any = None,
+        *,
+        infer_early_closes: bool = False,
     ) -> None:
         self.days: list[date] = [day(value) for value in sessions]
         if not self.days or self.days != sorted(set(self.days)):
@@ -398,8 +581,14 @@ class Calendar:
         ):
             raise ValueError("next_session must be a weekday after the last session")
         self._index = {value: position for position, value in enumerate(self.days)}
+        effective_closes: dict[str, str] = (
+            nyse_early_closes(self.days) if infer_early_closes else {}
+        )
+        for key, value in (closes or {}).items():
+            effective_closes[str(key)] = str(value)
         self._closes = {
-            day(key): time.fromisoformat(value) for key, value in (closes or {}).items()
+            day(key): time.fromisoformat(value)
+            for key, value in effective_closes.items()
         }
         following = [] if self.next_session is None else [self.next_session]
         # decisions[i] = 06:00 New York on session i; one more entry for the session

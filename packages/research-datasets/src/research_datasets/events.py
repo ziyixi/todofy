@@ -62,6 +62,7 @@ class EventSpec:
     source: str
     where: Mapping[str, frozenset[str]] = field(default_factory=dict)
     items_any: frozenset[str] = frozenset()
+    kinds_any: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         def values(allowed: Any) -> frozenset[str]:
@@ -76,6 +77,7 @@ class EventSpec:
         where = {str(column): values(allowed) for column, allowed in self.where.items()}
         object.__setattr__(self, "where", where)
         object.__setattr__(self, "items_any", values(self.items_any))
+        object.__setattr__(self, "kinds_any", values(self.kinds_any))
 
     def columns(self) -> list[str]:
         """Observation columns the filters read."""
@@ -83,12 +85,15 @@ class EventSpec:
 
     def record(self) -> dict[str, Any]:
         """JSON form for run records."""
-        return {
+        payload: dict[str, Any] = {
             "name": self.name,
             "source": self.source,
             "where": {column: sorted(values) for column, values in self.where.items()},
             "items_any": sorted(self.items_any),
         }
+        if self.kinds_any:
+            payload["kinds_any"] = sorted(self.kinds_any)
+        return payload
 
 
 def default_specs() -> tuple[EventSpec, ...]:
@@ -327,10 +332,42 @@ def _carried(frame: pd.DataFrame, column: str, chain: np.ndarray) -> pd.Series:
     return values.groupby(chain).ffill()
 
 
+def _carried_kinds(frame: pd.DataFrame, chain: np.ndarray) -> list[tuple[str, ...]]:
+    """Carry forward ``event_kinds`` per observation chain, or classify from form/items."""
+    if "event_kinds" in frame.columns:
+        raw_cells = frame["event_kinds"].to_numpy(dtype=object)
+        out: list[tuple[str, ...]] = []
+        last_chain = -1
+        current: tuple[str, ...] = ()
+        for ch, cell in zip(chain.tolist(), raw_cells):
+            if ch != last_chain:
+                last_chain = ch
+                current = ()
+            if isinstance(cell, (list, tuple, np.ndarray)):
+                current = tuple(str(x) for x in cell if x is not None and str(x) != "")
+            out.append(current)
+        return out
+    from .sec_events import classify_sec_filing
+
+    forms = _carried(frame, "form", chain).to_numpy(dtype=object)
+    items = (
+        _carried(frame, "items", chain).to_numpy(dtype=object)
+        if "items" in frame.columns
+        else np.full(len(frame), "", dtype=object)
+    )
+    return [tuple(classify_sec_filing(f, it)) for f, it in zip(forms, items)]
+
+
 def _passes(frame: pd.DataFrame, chain: np.ndarray, spec: EventSpec) -> np.ndarray:
     """Whether each version matches the specification's attribute filters."""
     result = np.ones(len(frame), dtype=bool)
     absent = [column for column in spec.columns() if column not in frame.columns]
+    if (
+        spec.kinds_any
+        and "event_kinds" not in frame.columns
+        and "form" not in frame.columns
+    ):
+        absent.append("event_kinds")
     if absent and spec not in default_specs():
         raise ValueError(
             f"CAPABILITY_MISSING: {spec.name} filters on {absent}, "
@@ -352,6 +389,13 @@ def _passes(frame: pd.DataFrame, chain: np.ndarray, spec: EventSpec) -> np.ndarr
                 )
             )
             .to_numpy(dtype=bool)
+        )
+    if spec.kinds_any:
+        carried_kinds = _carried_kinds(frame, chain)
+        result &= np.fromiter(
+            (any(k in spec.kinds_any for k in kinds) for kinds in carried_kinds),
+            dtype=bool,
+            count=len(frame),
         )
     return result
 

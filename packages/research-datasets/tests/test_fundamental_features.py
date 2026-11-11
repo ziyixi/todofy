@@ -271,13 +271,17 @@ class FundamentalFeaturesTest(unittest.TestCase):
             fact(fact_id="alias", tag="SalesRevenueNet", tag_priority=1, value="101"),
         ]
         result = self.prepare(material(aliases))
-        self.assertEqual(set(result.revenue_status), {"ambiguous"})
-        self.assertTrue(result.revenue_value.isna().all())
-        aliases[1]["value"] = "100.0"
-        result = self.prepare(material(aliases))
         self.assertEqual(set(result.revenue_status), {"ok"})
-        self.assertEqual(set(result.revenue_tag), {"SalesRevenueNet"})
-        self.assertEqual(set(result.revenue_raw_value), {"100.0"})
+        self.assertEqual(set(result.revenue_tag), {"Revenues"})
+        self.assertEqual(set(result.revenue_value), {100.0})
+        self.assertEqual(set(result.revenue_alternative_values), {1})
+        same_tag = [
+            fact(),
+            fact(fact_id="same-tag-conflict", tag="Revenues", value="101"),
+        ]
+        conflict = self.prepare(material(same_tag))
+        self.assertEqual(set(conflict.revenue_status), {"ambiguous"})
+        self.assertTrue(conflict.revenue_value.isna().all())
 
     def test_decimal_provenance_and_nonfinite_model_values(self):
         exact = "1000000000000000000.1234567890123456789"
@@ -315,6 +319,8 @@ class FundamentalFeaturesTest(unittest.TestCase):
         # Accepted Friday 18:10 New York; SEC dates it Tuesday (Monday is a SEC holiday
         # but a trading session), so it is public at 06:00 on Tuesday, not on Monday.
         accepted = fact(
+            period_start="2026-07-01",
+            period_end="2026-09-30",
             public_at="2026-10-09T22:10:00Z",
             public_date="2026-10-09",
             observed_at="2026-10-09T22:11:00Z",
@@ -593,7 +599,7 @@ def random_material(seed: int) -> tuple[dict, pd.DataFrame]:
                         {
                             **row,
                             "fact_id": row["fact_id"] + "-alias",
-                            "tag": "C",
+                            "tag": rng.choice([row["tag"], "C", "C", "C", "C"]),
                             "tag_priority": rng.randrange(3),
                             "value": rng.choice([row["value"], "100.00", "101"]),
                         }

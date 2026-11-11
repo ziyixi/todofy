@@ -287,8 +287,19 @@ class DerivedFundamentalsTest(unittest.TestCase):
             "2024-12-29",
         ]
         result = ratios(source, samples())
-        self.assertEqual(set(result.revenue_yoy_status), {"unverified_prior_period"})
-        self.assertTrue(result.revenue_yoy_value.isna().all())
+        self.assertEqual(set(result.revenue_yoy_status), {"ok"})
+        self.assertEqual(result.revenue_yoy_value.tolist(), [1.0] * len(result))
+        source_far = material()
+        prior_far = source_far["fundamentals"].fact_id == "revenue-prior"
+        source_far["fundamentals"].loc[prior_far, ["period_start", "period_end"]] = [
+            "2024-09-20",
+            "2024-12-20",
+        ]
+        far_result = ratios(source_far, samples())
+        self.assertEqual(
+            set(far_result.revenue_yoy_status), {"unverified_prior_period"}
+        )
+        self.assertTrue(far_result.revenue_yoy_value.isna().all())
         source = material()
         source["fundamentals"].loc[
             source["fundamentals"].fact_id == "revenue-prior", "value"

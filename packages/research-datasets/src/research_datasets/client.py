@@ -18,7 +18,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from copy import deepcopy
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -52,6 +52,27 @@ from .fundamentals import (
 from .fundamentals import (
     prepare_fundamental_ratios as _prepare_fundamental_ratios,
 )
+from .fundamentals_derived import (
+    asset_at as _asset_at,
+)
+from .fundamentals_derived import (
+    cik_at as _cik_at,
+)
+from .fundamentals_derived import (
+    derived_fundamentals as _derived_fundamentals,
+)
+from .fundamentals_derived import (
+    fiscal_quarters as _fiscal_quarters,
+)
+from .fundamentals_derived import (
+    fundamental_factors as _fundamental_factors,
+)
+from .fundamentals_derived import (
+    fundamental_states as _fundamental_states,
+)
+from .industry import (
+    industry as _industry,
+)
 from .panels import (
     build_candidates,
 )
@@ -66,6 +87,15 @@ from .panels import (
 )
 from .panels import (
     prepare as _prepare,
+)
+from .sec_events import (
+    earnings_calendar_asof as _earnings_calendar_asof,
+)
+from .sec_events import (
+    sec_event_specs as _sec_event_specs,
+)
+from .valuation import (
+    valuation as _valuation,
 )
 
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -849,7 +879,7 @@ class Dataset:
         self, symbols: str | Sequence[str] | None
     ) -> tuple[list[str], list[str]]:
         selected = set(self.resolve(symbols))
-        ciks, unmapped = [], []
+        ciks, unmapped_set = [], set()
         for asset in self.manifest["universe"]:
             if asset["asset_id"] not in selected:
                 continue
@@ -861,7 +891,39 @@ class Dataset:
             ):
                 ciks.append(cik)
             else:
-                unmapped.append(str(asset["asset_id"]))
+                unmapped_set.add(str(asset["asset_id"]))
+        families = self.manifest.get("data_families")
+        if isinstance(families, dict) and "issuer_history" in families:
+            hist = self._read_family(
+                "issuer_history",
+                symbols=None
+                if (symbols is None or symbols == "all")
+                else list(selected),
+            )
+            if not hist.empty and "cik" in hist.columns:
+                status_col = (
+                    hist["status"].astype(str)
+                    if "status" in hist.columns
+                    else pd.Series("verified", index=hist.index)
+                )
+                for aid, cik_val, st in zip(
+                    hist["asset_id"].astype(str),
+                    hist["cik"].fillna("").astype(str),
+                    status_col,
+                ):
+                    if aid not in selected or st != "verified":
+                        continue
+                    padded = (
+                        cik_val.strip().zfill(10) if cik_val.strip().isdigit() else ""
+                    )
+                    if re.fullmatch(r"[0-9]{10}", padded) and int(padded) > 0:
+                        ciks.append(padded)
+                        unmapped_set.discard(aid)
+        unmapped = [
+            str(asset["asset_id"])
+            for asset in self.manifest["universe"]
+            if str(asset["asset_id"]) in unmapped_set
+        ]
         if not ciks and symbols is not None and symbols != "all":
             raise DatasetError(
                 "ISSUER_MAPPING_MISSING",
@@ -956,6 +1018,7 @@ class Dataset:
         start: str | date | None = None,
         end: str | date | None = None,
         metrics: Sequence[str] | None = None,
+        tags: Sequence[str] | None = None,
         columns: Sequence[str] | None = None,
         optional_columns: bool = False,
     ) -> pd.DataFrame:
@@ -990,6 +1053,7 @@ class Dataset:
             start_s,
             end_s,
             tuple(metrics) if metrics is not None else None,
+            tuple(tags) if tags is not None else None,
             tuple(columns) if columns is not None else None,
             optional_columns,
         )
@@ -1050,6 +1114,10 @@ class Dataset:
             if "metric" not in names:
                 raise DatasetError("INTEGRITY", f"{family} 缺少 metric 列。")
             scalar_filters.append(("metric", metrics))
+        if tags is not None:
+            if "tag" not in names:
+                raise DatasetError("INTEGRITY", f"{family} 缺少 tag 列。")
+            scalar_filters.append(("tag", tags))
         table = _scan_batches(
             ds,
             scalar_filters=scalar_filters,
@@ -1320,10 +1388,61 @@ class Dataset:
         start: str | date | None = None,
         end: str | date | None = None,
     ) -> pd.DataFrame:
-        """All frozen earnings observation versions by observed_at date; no latest/as-of selection."""
+        """All frozen earnings observation versions by observed_at date; no latest/as-of selection.
+
+        For point-in-time calendar snapshots use ``earnings_calendar(asof=...)``; for
+        filing-derived announcement timing and volume confirmation use ``earnings_announcements()``.
+        """
         return self._read_family(
             "earnings_observations", symbols=symbols, start=start, end=end
         )
+
+    def earnings_announcements(
+        self,
+        symbols: str | Sequence[str] | None = None,
+        start: str | date | None = None,
+        end: str | date | None = None,
+        *,
+        columns: Sequence[str] | None = None,
+    ) -> pd.DataFrame:
+        """Frozen earnings announcement rows derived from SEC filings and dollar-volume reaction."""
+        return self._read_family(
+            "earnings_announcements",
+            symbols=symbols,
+            start=start,
+            end=end,
+            columns=columns,
+        )
+
+    def earnings_calendar(
+        self,
+        symbols: str | Sequence[str] | None = None,
+        *,
+        asof: Any = None,
+        include_unlinked: bool = False,
+    ) -> pd.DataFrame:
+        """Latest earnings calendar row per ``(asset_id, fiscal_year, fiscal_quarter)`` as of ``asof``."""
+        frame = _earnings_calendar_asof(
+            self.event_observations(symbols),
+            self.earnings(symbols),
+            asof,
+            include_unlinked=include_unlinked,
+        )
+        if not frame.empty and symbols is not None and symbols != "all":
+            wanted = {str(aid) for aid in self.resolve(symbols)}
+            frame = frame[frame["asset_id"].astype(str).isin(wanted)].reset_index(
+                drop=True
+            )
+        return frame
+
+    def sec_event_specs(
+        self,
+        *,
+        prefix: str = "sec_kind_",
+        fallback: bool = False,
+    ) -> tuple[EventSpec, ...]:
+        """Build typed SEC ``EventSpec`` definitions from this dataset's manifest vocabulary."""
+        return _sec_event_specs(self, prefix=prefix, fallback=fallback)
 
     def _expand_by_asset(
         self, frame: pd.DataFrame, symbols: str | Sequence[str] | None
@@ -1345,6 +1464,8 @@ class Dataset:
         symbols: str | Sequence[str] | None = None,
         metrics: str | Sequence[str] | None = None,
         *,
+        tags: str | Sequence[str] | None = None,
+        columns: Sequence[str] | None = None,
         period_kind: str | Sequence[str] | None = None,
         active_only: bool = False,
         by_asset: bool = False,
@@ -1352,6 +1473,7 @@ class Dataset:
         """All frozen fact observation versions for frozen verified issuers.
 
         Optional filters:
+        - ``tags``: XBRL tag name or sequence of tag names.
         - ``period_kind``: ``"quarter"``, ``"annual"``, ``"instant"``, or sequence of period kinds.
         - ``active_only=True``: filter to ``is_retracted == False``.
         - ``by_asset=True``: expand CIK-keyed facts to ``(asset_id, symbol)`` rows (for dual-class shares).
@@ -1363,7 +1485,20 @@ class Dataset:
                 not isinstance(metric, str) or not metric for metric in metric_list
             ):
                 raise DatasetError("BAD_REQUEST", "metrics 需要非空的指标名称。")
-        frame = self._read_family("fundamentals", symbols=symbols, metrics=metric_list)
+        tag_list: list[str] | None = None
+        if tags is not None:
+            tag_list = [tags] if isinstance(tags, str) else list(tags)
+            if not tag_list or any(
+                not isinstance(tag, str) or not tag for tag in tag_list
+            ):
+                raise DatasetError("BAD_REQUEST", "tags 需要非空的标签名称。")
+        frame = self._read_family(
+            "fundamentals",
+            symbols=symbols,
+            metrics=metric_list,
+            tags=tag_list,
+            columns=columns,
+        )
         if not frame.empty:
             if period_kind is not None and "period_kind" in frame.columns:
                 kinds = (
@@ -1376,6 +1511,37 @@ class Dataset:
                 frame = self._expand_by_asset(frame, symbols)
         return frame
 
+    def iter_fundamentals(
+        self,
+        ciks: Sequence[str] | None = None,
+        *,
+        tags: Sequence[str] | None = None,
+        columns: Sequence[str] | None = None,
+    ) -> Iterator[pd.DataFrame]:
+        """Yield per-part ``fundamentals`` frames with bounded memory."""
+        self._require_family("fundamentals")
+        identities: list[str] | None = None
+        if ciks is not None:
+            identities = [str(c).strip().zfill(10) for c in ciks if str(c).strip()]
+            if not identities:
+                return
+        parts = self._family_parts("fundamentals", identities=identities)
+        for item in parts:
+            path = str(self._client._part(item))
+            ds = pads.dataset([path], format="parquet")
+            names = set(ds.schema.names)
+            proj = None
+            if columns is not None:
+                proj = [name for name in dict.fromkeys(columns) if name in names]
+            scalar_filters: list[tuple[str, Sequence[Any]]] = []
+            if identities is not None and "cik" in names:
+                scalar_filters.append(("cik", identities))
+            if tags is not None and "tag" in names:
+                scalar_filters.append(("tag", list(tags)))
+            table = _scan_batches(ds, scalar_filters=scalar_filters, columns=proj)
+            if table.num_rows > 0:
+                yield table.to_pandas().reset_index(drop=True)
+
     def financial_checks(
         self,
         symbols: str | Sequence[str] | None = None,
@@ -1387,6 +1553,255 @@ class Dataset:
         if by_asset and not frame.empty:
             frame = self._expand_by_asset(frame, symbols)
         return frame
+
+    def issuer_profiles(
+        self,
+        symbols: str | Sequence[str] | None = None,
+        *,
+        start: str | date | None = None,
+        end: str | date | None = None,
+        columns: Sequence[str] | None = None,
+        by_asset: bool = False,
+    ) -> pd.DataFrame:
+        """Frozen SEC issuer submission profiles (observations keyed by CIK)."""
+        frame = self._read_family(
+            "issuer_profiles",
+            symbols=symbols,
+            start=start,
+            end=end,
+            columns=columns,
+        )
+        if by_asset and not frame.empty:
+            frame = self._expand_by_asset(frame, symbols)
+        return frame
+
+    def share_classes(
+        self,
+        symbols: str | Sequence[str] | None = None,
+        *,
+        columns: Sequence[str] | None = None,
+        by_asset: bool = False,
+    ) -> pd.DataFrame:
+        """Frozen cover-page class share counts keyed by CIK."""
+        frame = self._read_family("share_classes", symbols=symbols, columns=columns)
+        if by_asset and not frame.empty:
+            frame = self._expand_by_asset(frame, symbols)
+        return frame
+
+    def share_class_checks(
+        self,
+        symbols: str | Sequence[str] | None = None,
+        *,
+        start: str | date | None = None,
+        end: str | date | None = None,
+        columns: Sequence[str] | None = None,
+        by_asset: bool = False,
+    ) -> pd.DataFrame:
+        """Frozen cover-page parsing check records keyed by CIK."""
+        frame = self._read_family(
+            "share_class_checks",
+            symbols=symbols,
+            start=start,
+            end=end,
+            columns=columns,
+        )
+        if by_asset and not frame.empty:
+            frame = self._expand_by_asset(frame, symbols)
+        return frame
+
+    def corporate_actions(
+        self,
+        symbols: str | Sequence[str] | None = None,
+        start: str | date | None = None,
+        end: str | date | None = None,
+        *,
+        columns: Sequence[str] | None = None,
+    ) -> pd.DataFrame:
+        """Frozen structured corporate actions linked per security and participant role."""
+        return self._read_family(
+            "corporate_actions",
+            symbols=symbols,
+            start=start,
+            end=end,
+            columns=columns,
+        )
+
+    def total_returns(
+        self,
+        symbols: str | Sequence[str] | None = None,
+        start: str | date | None = None,
+        end: str | date | None = None,
+        *,
+        columns: Sequence[str] | None = None,
+    ) -> pd.DataFrame:
+        """Frozen daily total-return series, split indices, and terminal rows."""
+        return self._read_family(
+            "daily_returns",
+            symbols=symbols,
+            start=start,
+            end=end,
+            columns=columns,
+        )
+
+    def return_reconciliation(
+        self,
+        symbols: str | Sequence[str] | None = None,
+        start: str | date | None = None,
+        end: str | date | None = None,
+        *,
+        columns: Sequence[str] | None = None,
+    ) -> pd.DataFrame:
+        """Frozen session-level return reconciliation rows."""
+        return self._read_family(
+            "return_reconciliation",
+            symbols=symbols,
+            start=start,
+            end=end,
+            columns=columns,
+        )
+
+    def cik_at(
+        self,
+        asset_ids: Sequence[str],
+        sessions: Sequence[str | date],
+    ) -> pd.Series:
+        """Point-in-time verified 10-digit CIK per ``(asset_id, session)``."""
+        return _cik_at(self, asset_ids, sessions)
+
+    def asset_at(self, symbol: str, session: str | date) -> str | None:
+        """Resolve ``symbol`` to ``asset_id`` at ``session`` using ``symbol_history``."""
+        return _asset_at(self, symbol, session)
+
+    def fundamental_states(
+        self,
+        *,
+        time_policy: str,
+        ciks: Sequence[str] | None = None,
+        concepts: Sequence[str] | None = None,
+        views: Sequence[str] | None = None,
+    ) -> pd.DataFrame:
+        """Point-in-time derived financial statement state timeline."""
+        return _fundamental_states(
+            self,
+            time_policy=time_policy,
+            ciks=ciks,
+            concepts=concepts,
+            views=views,
+        )
+
+    def derived_fundamentals(
+        self,
+        candidates_or_symbols: pd.DataFrame | str | Sequence[str] | None = None,
+        *,
+        time_policy: str,
+        start: str | date | None = None,
+        end: str | date | None = None,
+        views: Sequence[str] | None = None,
+        stale_after_days: Mapping[str, int] | None = None,
+        provenance: bool = False,
+    ) -> pd.DataFrame:
+        """Join derived point-in-time fundamentals onto ``samples`` or candidate symbols."""
+        samples = (
+            candidates_or_symbols
+            if isinstance(candidates_or_symbols, pd.DataFrame)
+            else self.candidates(candidates_or_symbols, start=start, end=end)
+        )
+        return _derived_fundamentals(
+            self,
+            samples,
+            time_policy=time_policy,
+            views=views,
+            stale_after_days=stale_after_days,
+            provenance=provenance,
+        )
+
+    def fiscal_quarters(
+        self,
+        *,
+        time_policy: str,
+        concepts: Sequence[str] = ("eps_diluted", "eps_basic", "net_income", "revenue"),
+        symbols: str | Sequence[str] | None = None,
+    ) -> pd.DataFrame:
+        """Point-in-time quarterly ledger recording first-known and latest values per quarter."""
+        whole = symbols is None or symbols == "all"
+        ciks = None if whole else self._issuer_ids(symbols)[0]
+        return _fiscal_quarters(
+            self,
+            time_policy=time_policy,
+            concepts=concepts,
+            ciks=ciks,
+        )
+
+    def fundamental_factors(
+        self,
+        derived_or_symbols: pd.DataFrame | str | Sequence[str] | None = None,
+        *,
+        time_policy: str | None = None,
+        start: str | date | None = None,
+        end: str | date | None = None,
+    ) -> pd.DataFrame:
+        """Statement-only quality, margin, growth, and balance-sheet factors."""
+        if isinstance(derived_or_symbols, pd.DataFrame) and any(
+            str(col).endswith("_value") for col in derived_or_symbols.columns
+        ):
+            return _fundamental_factors(derived_or_symbols)
+        if time_policy is None:
+            raise ValueError(
+                "time_policy is required when computing derived fundamentals"
+            )
+        derived = self.derived_fundamentals(
+            derived_or_symbols,
+            time_policy=time_policy,
+            start=start,
+            end=end,
+        )
+        return _fundamental_factors(derived)
+
+    def valuation(
+        self,
+        candidates_or_symbols: pd.DataFrame | str | Sequence[str] | None = None,
+        derived: pd.DataFrame | None = None,
+        *,
+        time_policy: str,
+        start: str | date | None = None,
+        end: str | date | None = None,
+        prices: pd.DataFrame | None = None,
+        split_events: pd.DataFrame | None = None,
+        fx: pd.DataFrame | None = None,
+        provenance: bool = False,
+    ) -> pd.DataFrame:
+        """Compute point-in-time market values, enterprise value, and valuation yields."""
+        samples = (
+            candidates_or_symbols
+            if isinstance(candidates_or_symbols, pd.DataFrame)
+            else self.candidates(candidates_or_symbols, start=start, end=end)
+        )
+        return _valuation(
+            self,
+            samples,
+            derived,
+            time_policy=time_policy,
+            prices=prices,
+            split_events=split_events,
+            fx=fx,
+            provenance=provenance,
+        )
+
+    def industry(
+        self,
+        candidates_or_symbols: pd.DataFrame | str | Sequence[str] | None = None,
+        *,
+        time_policy: str,
+        start: str | date | None = None,
+        end: str | date | None = None,
+    ) -> pd.DataFrame:
+        """Attach SIC, division, Fama-French 12, and non-PIT metadata onto samples."""
+        samples = (
+            candidates_or_symbols
+            if isinstance(candidates_or_symbols, pd.DataFrame)
+            else self.candidates(candidates_or_symbols, start=start, end=end)
+        )
+        return _industry(self, samples, time_policy=time_policy)
 
     def audit(
         self,
@@ -1679,6 +2094,7 @@ class Dataset:
         keep_non_members: bool = False,
         terminal_policy: Mapping[str, Any] | None = None,
         neutralize: Sequence[str] = (),
+        time_policy: str | None = None,
     ) -> pd.DataFrame:
         """Return forward return labels as a ``pd.DataFrame`` without requiring split boundaries."""
         return _forward_returns(
@@ -1694,6 +2110,7 @@ class Dataset:
             keep_non_members=keep_non_members,
             terminal_policy=terminal_policy,
             neutralize=neutralize,
+            time_policy=time_policy,
         )
 
     def panel(
@@ -1713,8 +2130,11 @@ class Dataset:
         neutralize: Sequence[str] = (),
         next_session: str | date | None = None,
         fundamental_time_policy: str | None = None,
+        fundamentals: str = "derived",
         include_fundamentals: bool = True,
         include_ratios: bool = True,
+        include_sec_events: bool = True,
+        include_earnings: bool = True,
         provenance_columns: bool = False,
         output_dir: str | Path | None = None,
     ) -> pd.DataFrame:
@@ -1735,8 +2155,11 @@ class Dataset:
             next_session=next_session,
             time_policy=time_policy,
             fundamental_time_policy=fundamental_time_policy,
+            fundamentals=fundamentals,
             include_fundamentals=include_fundamentals,
             include_ratios=include_ratios,
+            include_sec_events=include_sec_events,
+            include_earnings=include_earnings,
             provenance_columns=provenance_columns,
             output_dir=output_dir,
         )

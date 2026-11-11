@@ -765,8 +765,9 @@ class DatasetSdkTest(unittest.TestCase):
             self.assertEqual(len(panel_df), len(daily))
             self.assertIn("symbol", panel_df.columns)
             self.assertIn("momentum20", panel_df.columns)
-            self.assertIn("quarter_revenue_value", panel_df.columns)
-            self.assertIn("quarter_gross_margin_value", panel_df.columns)
+            self.assertIn("revenue_q_value", panel_df.columns)
+            self.assertIn("revenue_ttm_value", panel_df.columns)
+            self.assertIn("gross_margin_ttm_value", panel_df.columns)
             self.assertIn("forward_excess_return_5d", panel_df.columns)
             self.assertIn("alpaca_news_events_rank_21d", panel_df.columns)
             self.assertTrue((out_dir / "panel.parquet").is_file())
@@ -774,11 +775,30 @@ class DatasetSdkTest(unittest.TestCase):
             self.assertEqual(
                 provenance["package_version"], research_datasets.__version__
             )
+            self.assertEqual(provenance["parameters"]["fundamentals"], "derived")
+            self.assertEqual(
+                provenance["parameters"]["derivation_version"],
+                research_datasets.DERIVATION_VERSION,
+            )
             self.assertEqual(provenance["skipped_sources"], {"future_x": 1})
             self.assertIn(LIMITATION_PREFIX, " ".join(provenance["limitations"]))
             self.assertEqual(provenance["parameters"]["time_policy_version"], 2)
             self.assertEqual(provenance["parameters"]["universe_basis"], "static")
             self.assertIn("5", provenance["masks"])
+
+            legacy_panel_df = ds.panel(
+                symbols,
+                start=start,
+                end=end,
+                benchmark="SPY",
+                horizons=(1, 5),
+                time_policy="observed_content",
+                fundamental_time_policy="public_reconstructed",
+                fundamentals="legacy",
+                allow_static_universe=True,
+            )
+            self.assertIn("quarter_revenue_value", legacy_panel_df.columns)
+            self.assertIn("quarter_gross_margin_value", legacy_panel_df.columns)
 
             # Backward-compatible prepare() works both with and without train_end/validation_end
             features_no_split, labels_no_split, splits_none, _ = (

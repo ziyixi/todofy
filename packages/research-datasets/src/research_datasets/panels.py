@@ -22,7 +22,11 @@ import pandas as pd
 from . import candidates as _candidates
 from . import clocks
 from . import fundamentals as _fundamentals
+from . import fundamentals_derived as _fundamentals_derived
+from . import industry as _industry
 from . import labels as _labels
+from . import sec_events as _sec_events
+from . import valuation as _valuation
 from .candidates import build_candidates
 from .clocks import CAPTURE_DEADLINE as _CAPTURE_DEADLINE
 from .clocks import day as _day
@@ -77,6 +81,8 @@ OBSERVATION_COLUMNS = (
     "public_time_precision",
     "public_at",
     "public_date",
+    "public_time_basis",
+    "event_kinds",
     "story_key",
 )
 LIMITATIONS = [
@@ -747,6 +753,7 @@ def forward_returns(
     keep_non_members: bool = False,
     terminal_policy: Mapping[str, Any] | None = None,
     neutralize: Sequence[str] = (),
+    time_policy: str | None = None,
 ) -> pd.DataFrame:
     """Return forward return labels as a ``pd.DataFrame`` without requiring split boundaries.
 
@@ -818,10 +825,50 @@ def forward_returns(
     universe_rows = {
         str(row["asset_id"]): row for row in _candidates.records(version.universe)
     }
+    industry_names = {"ff12", "sic_division", "sic_major_group", "sic"}
+    families = version.manifest.get("data_families") or {}
+    has_profiles = isinstance(families, Mapping) and "issuer_profiles" in families
+    has_uni_sector = any(
+        universe_rows.get(str(a), {}).get("sector") is not None
+        for a in samples["asset_id"]
+    )
+    has_uni_sic = any(
+        universe_rows.get(str(a), {}).get("sic") is not None
+        for a in samples["asset_id"]
+    )
+    group_samples = samples
+    used_industry = any(name in industry_names for name in neutralize)
+    sector_via_industry = (
+        "sector" in neutralize
+        and "sector" not in samples
+        and (has_profiles or (not has_uni_sector and has_uni_sic))
+    )
+    need_industry = sector_via_industry or any(
+        name in industry_names and name not in samples for name in neutralize
+    )
+    if neutralize and need_industry:
+        ind_policy = (
+            _policy(time_policy)
+            if time_policy is not None
+            else (
+                "observed_content"
+                if "decision_at" in samples.columns
+                else "public_reconstructed"
+            )
+        )
+        ind_df = _industry.industry(version, samples, time_policy=ind_policy)
+        group_samples = samples.copy()
+        for col in ("ff12", "sic_division", "sic_major_group", "sic"):
+            if col not in group_samples.columns and col in ind_df.columns:
+                group_samples[col] = ind_df[col].to_numpy()
+        if sector_via_industry:
+            group_samples["sector"] = ind_df["ff12"].to_numpy()
+        used_industry = True
+
     groups_from_universe = [
         name
         for name in dict.fromkeys(neutralize)
-        if name != "size" and name not in samples
+        if name != "size" and name not in group_samples
     ]
     if neutralize:
         benchmarks = {benchmark_id}.union(
@@ -829,7 +876,7 @@ def forward_returns(
         )
         eligible = ~samples["asset_id"].astype(str).isin(benchmarks).to_numpy(bool)
         groups = {
-            name: _labels.neutral_groups(samples, name, universe_rows)
+            name: _labels.neutral_groups(group_samples, name, universe_rows)
             for name in dict.fromkeys(neutralize)
         }
         labels = _labels.neutralize(labels, groups, horizon_list, eligible)
@@ -854,9 +901,10 @@ def forward_returns(
     labels.attrs["masks"] = masks
     if counts:
         labels.attrs["counts"] = counts
-    labels.attrs["limitations"] = _labels.limitations(
-        universe_basis, return_basis, groups_from_universe
-    )
+    lims = _labels.limitations(universe_basis, return_basis, groups_from_universe)
+    if used_industry and _industry.SIC_LIMITATION not in lims:
+        lims.append(_industry.SIC_LIMITATION)
+    labels.attrs["limitations"] = lims
     return labels
 
 
@@ -877,8 +925,11 @@ def panel(
     neutralize: Sequence[str] = (),
     next_session: str | date | None = None,
     fundamental_time_policy: str | None = None,
+    fundamentals: str = "derived",
     include_fundamentals: bool = True,
     include_ratios: bool = True,
+    include_sec_events: bool = True,
+    include_earnings: bool = True,
     provenance_columns: bool = False,
     output_dir: str | Path | None = None,
 ) -> pd.DataFrame:
@@ -887,11 +938,15 @@ def panel(
     Candidates are built once (sampling, point-in-time membership, default securities
     without benchmarks); features are computed on the daily grid and kept for those
     rows. A version without membership rows needs ``allow_static_universe=True``.
-    Default quarterly columns omit operating cash flow, capex and free cash flow (10-Q
-    cash flows are year-to-date); request them explicitly through ``fundamental_features``.
-    Fundamental columns are each metric's value and categorical status;
-    ``provenance_columns=True`` adds the selected facts' provenance and ratio inputs.
+    ``fundamentals="derived"`` (default) computes derived single quarters, trailing
+    twelve months, YoY changes, and fundamental factors; ``fundamentals="legacy"``
+    retains the v1 per-period selection engine; ``fundamentals="none"`` omits all
+    fundamental and ratio blocks.
     """
+    if fundamentals not in ("derived", "legacy", "none"):
+        raise ValueError(
+            f"fundamentals must be 'derived', 'legacy', or 'none', got {fundamentals!r}"
+        )
     _policy(time_policy)
     fund_policy = _policy(fundamental_time_policy or time_policy)
     horizon_list, _ = _labels.horizons(horizons)
@@ -927,14 +982,160 @@ def panel(
     )
     parts: list[pd.DataFrame] = [rows]
     samples = rows[KEYS + ["decision_at"]]
+    sec_cov_cols = ["sec_coverage"] if "sec_coverage" in rows.columns else []
+    sec_samples = rows[KEYS + ["decision_at", *sec_cov_cols]]
+    families = _candidates.families(version)
+    cal_full = _candidates.calendar(
+        version, version.calendar, next_session=next_session
+    )
+    selected_assets = list(dict.fromkeys(candidates["asset_id"].astype(str)))
+    derived_limitations: list[str] = []
+    label_rows_input = rows
 
-    # One read of the facts and one prepared engine serve features and ratios.
-    metrics = {
-        kind: _fundamentals.default_metrics(kind)
-        for kind in ("quarter", "annual", "instant")
-    }
-    inputs = (
-        _fundamentals.FactInputs(
+    if (
+        include_sec_events
+        and "event_observations" in families
+        and isinstance(version.manifest.get("sec_event_kinds"), Mapping)
+        and version.manifest.get("sec_event_kinds")
+    ):
+        sec_specs = _sec_events.sec_event_specs(version)
+        sec_kinds = [kind for spec in sec_specs for kind in spec.kinds_any]
+        if sec_kinds:
+            typed = _sec_events.typed_event_features(
+                _observations(version, sec_specs),
+                sec_samples,
+                kinds=sec_kinds,
+                calendar=cal_full,
+                time_policy=time_policy,
+                zones=version.manifest.get("source_timezones", {}),
+                vocabulary=version.manifest.get("sec_event_kinds"),
+            )
+            parts.append(typed.drop(columns=KEYS))
+
+    ann_df: pd.DataFrame | None = None
+    primary_periods: Any = None
+    if include_earnings and "earnings_announcements" in families:
+        ann_df = version.family("earnings_announcements", selected_assets)
+        bench_id = str(version.resolve(benchmark)[0]) if benchmark is not None else None
+        price_ids = list(
+            dict.fromkeys([*selected_assets, *([bench_id] if bench_id else [])])
+        )
+        dr_df = (
+            version.family("daily_returns", price_ids)
+            if "daily_returns" in families
+            else None
+        )
+        adj_df = _price_frame(version.prices(price_ids, adjusted=True))
+        ev_obs_cal = (
+            _observations(version)
+            if "earnings_observations" in families and "event_observations" in families
+            else None
+        )
+        earn_obs_cal = (
+            version.family("earnings_observations", selected_assets)
+            if "earnings_observations" in families
+            else None
+        )
+        earn_df = _sec_events.earnings_features(
+            ann_df,
+            sec_samples,
+            calendar=cal_full,
+            adjusted=adj_df,
+            benchmark_id=bench_id,
+            daily_returns=dr_df,
+            time_policy=time_policy,
+            event_observations=ev_obs_cal,
+            earnings_observations=earn_obs_cal,
+            horizons=horizon_list,
+        )
+        primary_periods = earn_df.attrs.get("primary_period_end")
+        parts.append(earn_df.drop(columns=KEYS))
+
+    if fundamentals == "derived" and (include_fundamentals or include_ratios):
+        derived = _fundamentals_derived.derived_fundamentals(
+            version,
+            samples,
+            time_policy=fund_policy,
+            provenance=provenance_columns,
+        )
+        manifest_lims = set(version.manifest.get("limitations", []))
+        derived_limitations = [
+            item
+            for item in derived.attrs.get("limitations", [])
+            if item not in manifest_lims
+        ]
+        ind: pd.DataFrame | None = None
+        val: pd.DataFrame | None = None
+        if include_fundamentals:
+            parts.append(derived.drop(columns=KEYS))
+            ind = _industry.industry(version, samples, time_policy=fund_policy)
+            parts.append(ind.drop(columns=KEYS))
+            if (
+                _industry.SIC_LIMITATION not in manifest_lims
+                and _industry.SIC_LIMITATION not in derived_limitations
+            ):
+                derived_limitations.append(_industry.SIC_LIMITATION)
+        if include_ratios:
+            factors = _fundamentals_derived.fundamental_factors(derived)
+            parts.append(factors.drop(columns=KEYS))
+            val = _valuation.valuation(
+                version,
+                samples,
+                derived,
+                time_policy=fund_policy,
+                provenance=provenance_columns,
+            )
+            parts.append(val.drop(columns=KEYS))
+            if (
+                _valuation.VALUATION_LIMITATION not in manifest_lims
+                and _valuation.VALUATION_LIMITATION not in derived_limitations
+            ):
+                derived_limitations.append(_valuation.VALUATION_LIMITATION)
+        if val is not None or ind is not None:
+            label_rows_input = rows.copy()
+            if val is not None and "market_cap_issuer_value" in val.columns:
+                label_rows_input["market_cap_issuer_value"] = val[
+                    "market_cap_issuer_value"
+                ].to_numpy()
+            if ind is not None:
+                for col in ("ff12", "sic_division", "sic_major_group", "sic"):
+                    if col in ind.columns:
+                        label_rows_input[col] = ind[col].to_numpy()
+        if include_earnings and include_fundamentals and "fundamentals" in families:
+            ciks_series = _fundamentals_derived.cik_at(
+                version,
+                samples["asset_id"].astype(str).tolist(),
+                samples["signal_session"].tolist(),
+            )
+            unique_ciks = [
+                c for c in dict.fromkeys(ciks_series.dropna().astype(str).tolist()) if c
+            ]
+            q_ledger = (
+                _fundamentals_derived.fiscal_quarters(
+                    version,
+                    time_policy=fund_policy,
+                    concepts=("eps_diluted", "eps_basic", "revenue"),
+                    ciks=unique_ciks,
+                )
+                if unique_ciks
+                else pd.DataFrame()
+            )
+            raw_prices = _price_frame(version.prices(selected_assets, adjusted=False))
+            sue_df = _sec_events.sue_features(
+                q_ledger,
+                sec_samples,
+                raw=raw_prices,
+                asset_ciks=ciks_series,
+                primary_period_end=primary_periods,
+            )
+            parts.append(sue_df.drop(columns=KEYS))
+    elif fundamentals == "legacy" and (include_fundamentals or include_ratios):
+        # One read of the facts and one prepared engine serve features and ratios.
+        metrics = {
+            kind: _fundamentals.default_metrics(kind)
+            for kind in ("quarter", "annual", "instant")
+        }
+        inputs = _fundamentals.FactInputs(
             version,
             samples["asset_id"],
             list(
@@ -946,44 +1147,44 @@ def panel(
                 )
             ),
         )
-        if include_fundamentals or include_ratios
-        else None
-    )
-    if include_fundamentals:
-        fund = _fundamentals.features_by_period(
-            version,
-            samples,
-            metrics,
-            time_policy=fund_policy,
-            provenance=provenance_columns,
-            inputs=inputs,
-        )
-        parts.append(fund.drop(columns=KEYS))
-
-    if include_ratios:
-        ratios = _fundamentals.ratios_by_period(
-            version,
-            samples,
-            ("quarter", "annual"),
-            currency="USD",
-            time_policy=fund_policy,
-            provenance=provenance_columns,
-            inputs=inputs,
-        )
-        stale = tuple(
-            [f"quarter_{name}_" for name in QUARTER_DEFAULT_EXCLUDED_RATIOS]
-            + [f"quarter_source_{name}_" for name in QUARTER_DEFAULT_EXCLUDED_METRICS]
-        )
-        parts.append(
-            ratios.drop(
-                columns=KEYS
-                + [column for column in ratios.columns if column.startswith(stale)]
+        if include_fundamentals:
+            fund = _fundamentals.features_by_period(
+                version,
+                samples,
+                metrics,
+                time_policy=fund_policy,
+                provenance=provenance_columns,
+                inputs=inputs,
             )
-        )
+            parts.append(fund.drop(columns=KEYS))
+
+        if include_ratios:
+            ratios = _fundamentals.ratios_by_period(
+                version,
+                samples,
+                ("quarter", "annual"),
+                currency="USD",
+                time_policy=fund_policy,
+                provenance=provenance_columns,
+                inputs=inputs,
+            )
+            stale = tuple(
+                [f"quarter_{name}_" for name in QUARTER_DEFAULT_EXCLUDED_RATIOS]
+                + [
+                    f"quarter_source_{name}_"
+                    for name in QUARTER_DEFAULT_EXCLUDED_METRICS
+                ]
+            )
+            parts.append(
+                ratios.drop(
+                    columns=KEYS
+                    + [column for column in ratios.columns if column.startswith(stale)]
+                )
+            )
 
     labels = forward_returns(
         version,
-        rows,
+        label_rows_input,
         benchmark=benchmark,
         horizons=horizons,
         sampling=sampling,
@@ -992,11 +1193,20 @@ def panel(
         keep_non_members=keep_non_members,
         terminal_policy=terminal_policy,
         neutralize=neutralize,
+        time_policy=fund_policy,
     )
     # Candidate columns (keys, clocks, membership) win over the label's copies. The
     # labels' calendar has no live session, so non-members are counted from the
     # candidates' membership (it includes the live row's) plus the rows dropped.
     parts.append(labels.drop(columns=[c for c in labels.columns if c in rows]))
+    if ann_df is not None:
+        lflags = _sec_events.label_announcement_flags(
+            ann_df,
+            rows[KEYS],
+            calendar=cal_full,
+            horizons=horizon_list,
+        )
+        parts.append(lflags.drop(columns=KEYS))
     member = np.asarray(rows["in_universe"].fillna(rule is None), dtype=bool)
     outside = (
         int((~member).sum()) + candidates.attrs["counts"]["not_in_universe_dropped"]
@@ -1020,8 +1230,16 @@ def panel(
             "horizons": horizon_list,
             **_time_parameters(time_policy),
             "fundamental_time_policy": fund_policy,
+            "fundamentals": fundamentals,
+            "derivation_version": (
+                _fundamentals_derived.DERIVATION_VERSION
+                if fundamentals == "derived"
+                else None
+            ),
             "include_fundamentals": include_fundamentals,
             "include_ratios": include_ratios,
+            "include_sec_events": include_sec_events,
+            "include_earnings": include_earnings,
             "provenance_columns": provenance_columns,
             "next_session": None if next_session is None else str(_day(next_session)),
             "membership_carried_from": candidates.attrs["parameters"][
@@ -1062,15 +1280,20 @@ def panel(
                 "rank_population",
             )
         },
-        limitations=[
-            *LIMITATIONS,
-            *labels.attrs["limitations"],
-            *_live_limitations(
-                candidates.attrs["parameters"],
-                candidates.attrs["counts"]["membership_carried"],
-            ),
-            *version.manifest.get("limitations", []),
-        ],
+        limitations=list(
+            dict.fromkeys(
+                [
+                    *LIMITATIONS,
+                    *labels.attrs["limitations"],
+                    *derived_limitations,
+                    *_live_limitations(
+                        candidates.attrs["parameters"],
+                        candidates.attrs["counts"]["membership_carried"],
+                    ),
+                    *version.manifest.get("limitations", []),
+                ]
+            )
+        ),
     )
     combined.attrs["provenance"] = provenance
     if output_dir is not None:
