@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 from research_datasets import clocks
+from research_datasets.concepts import LEGACY_TAG_ORDER, PERIODIC_ANNUAL_FORMS
 from research_datasets.constants import (
     CAPTURE_GRACE,
     KEYS,
@@ -26,6 +27,7 @@ from research_datasets.constants import (
     VETO_CODES,
 )
 from research_datasets.events import EventSpec, default_specs
+from research_datasets.fundamentals import LEGACY_STALE_AFTER_DAYS
 
 
 def story_keys(news_versions: pd.DataFrame | None) -> dict[tuple[str, str], str]:
@@ -818,8 +820,22 @@ def reference_fundamental_features(
     # Memoize per (cik, metric, unit, decision, report_limit) so dual-class securities
     # (e.g. GOOG/GOOGL, BRK.A/BRK.B) and repeated evaluation keys share identical results.
     eval_cache: dict[
-        tuple[str, str, str, pd.Timestamp | None, date | None], dict[str, Any]
+        tuple[str, str, str, pd.Timestamp | None, date | None, date], dict[str, Any]
     ] = {}
+
+    def _tag_rank_key(metric_name: str, row: Mapping[str, Any]) -> tuple[int, int, str]:
+        t_val = row.get("tag")
+        t_str = t_val if isinstance(t_val, str) else ""
+        order = LEGACY_TAG_ORDER.get(metric_name, ())
+        if t_str and t_str in order:
+            return (0, order.index(t_str), t_str)
+        prio = row.get("tag_priority", 0)
+        prio_int = (
+            int(prio)
+            if isinstance(prio, (int, np.integer)) and not isinstance(prio, bool)
+            else 0
+        )
+        return (1, prio_int, t_str)
 
     def _eval_metric(
         cik_padded: str,
@@ -828,6 +844,7 @@ def reference_fundamental_features(
         unit: str,
         decision: pd.Timestamp | None,
         report_limit: date | None,
+        signal_day: date,
     ) -> dict[str, Any]:
         cache_key = (
             cik_padded if verified else "",
@@ -835,6 +852,7 @@ def reference_fundamental_features(
             unit,
             decision,
             report_limit,
+            signal_day,
         )
         cached = eval_cache.get(cache_key)
         if cached is not None:
@@ -842,6 +860,8 @@ def reference_fundamental_features(
         feature: dict[str, Any] = {
             "value": np.nan,
             "status": "metric_missing",
+            "age_days": np.nan,
+            "alternative_values": 0,
             "raw_value": None,
             "available_at": pd.NaT,
             "public_clock_missing": False,
@@ -885,7 +905,14 @@ def reference_fundamental_features(
             possible = selected + unknown
             matching_unit = [row for row in possible if row.get("unit") == unit]
             matching_period = [
-                row for row in matching_unit if row.get("period_kind") == period_kind
+                row
+                for row in matching_unit
+                if row.get("period_kind") == period_kind
+                and (
+                    period_kind != "annual"
+                    or not (isinstance(row.get("form"), str) and row.get("form"))
+                    or row["form"].removesuffix("/A") in PERIODIC_ANNUAL_FORMS
+                )
             ]
             dated = [
                 row
@@ -930,11 +957,18 @@ def reference_fundamental_features(
                         )
                         == report_at
                     ]
+                    best_tag = min(_tag_rank_key(metric, row) for row in candidates)
+                    tag_candidates = [
+                        row
+                        for row in candidates
+                        if _tag_rank_key(metric, row) == best_tag
+                    ]
                     try:
                         values = (
-                            {Decimal(row["value"]) for row in candidates}
+                            {Decimal(row["value"]) for row in tag_candidates}
                             if all(
-                                isinstance(row.get("value"), str) for row in candidates
+                                isinstance(row.get("value"), str)
+                                for row in tag_candidates
                             )
                             else set()
                         )
@@ -944,20 +978,38 @@ def reference_fundamental_features(
                         feature["status"] = "invalid_value"
                     elif (
                         len(values) != 1
-                        or len({row.get("period_start") for row in candidates}) != 1
+                        or len({row.get("period_start") for row in tag_candidates}) != 1
                     ):
                         feature["status"] = "ambiguous"
                     else:
+                        win_dec = next(iter(values))
                         chosen = min(
-                            candidates,
+                            tag_candidates,
                             key=lambda row: (
                                 row.get("tag_priority", 0),
                                 row["fact_id"],
                             ),
                         )
+                        alt_decimals: set[Decimal] = set()
+                        tag_ids = {id(r) for r in tag_candidates}
+                        for row in candidates:
+                            if id(row) in tag_ids:
+                                continue
+                            txt = row.get("value")
+                            if not isinstance(txt, str):
+                                continue
+                            try:
+                                other_dec = Decimal(txt)
+                            except (InvalidOperation, TypeError, ValueError):
+                                continue
+                            if other_dec.is_finite() and other_dec != win_dec:
+                                alt_decimals.add(other_dec)
                         feature.update({name: chosen.get(name) for name in provenance})
-                        number = float(next(iter(values)))
+                        number = float(win_dec)
+                        age_val = float((signal_day - chosen["_period_end_day"]).days)
                         feature.update(
+                            age_days=age_val,
+                            alternative_values=len(alt_decimals),
                             raw_value=chosen["value"],
                             available_at=chosen["_available"],
                             public_clock_missing=chosen["_public"] is None,
@@ -965,13 +1017,19 @@ def reference_fundamental_features(
                             if chosen["_public"] is None
                             else time_policy,
                         )
-                        feature["status"] = (
-                            "ok_observed_only" if chosen["_public"] is None else "ok"
-                        )
-                        if np.isfinite(number):
-                            feature["value"] = number
-                        else:
+                        stale_limit = LEGACY_STALE_AFTER_DAYS.get(period_kind, 200)
+                        if not np.isfinite(number):
                             feature["status"] = "nonfinite_model_value"
+                        else:
+                            feature["value"] = number
+                            if age_val > stale_limit:
+                                feature["status"] = "stale"
+                            else:
+                                feature["status"] = (
+                                    "ok_observed_only"
+                                    if chosen["_public"] is None
+                                    else "ok"
+                                )
         prefixed = {f"{metric}_{name}": value for name, value in feature.items()}
         eval_cache[cache_key] = prefixed
         return prefixed
@@ -1000,7 +1058,9 @@ def reference_fundamental_features(
         features: dict[str, Any] = {}
         for metric, unit in metrics.items():
             features.update(
-                _eval_metric(cik_padded, verified, metric, unit, decision, report_limit)
+                _eval_metric(
+                    cik_padded, verified, metric, unit, decision, report_limit, signal
+                )
             )
         results.append(features)
     columns = [
@@ -1009,6 +1069,8 @@ def reference_fundamental_features(
         for name in (
             "value",
             "status",
+            "age_days",
+            "alternative_values",
             "raw_value",
             "available_at",
             "public_clock_missing",
@@ -1076,7 +1138,8 @@ def reference_fundamental_ratios(
 
     prior_samples = samples.copy()
     prior_samples["report_period_end"] = [
-        previous_year(value) for value in current["revenue_period_end"]
+        None if (py := previous_year(value)) is None else py + timedelta(days=7)
+        for value in current["revenue_period_end"]
     ]
     prior = reference_fundamental_features(
         version_or_material,
@@ -1108,9 +1171,11 @@ def reference_fundamental_ratios(
                     f"{metric}_{field}"
                 ].array
 
+    usable_statuses = {"ok", "ok_observed_only", "stale"}
+
     def input_status(row: Mapping[str, Any], names: Sequence[str]) -> str:
         if any(
-            row[f"{name}_status"] not in {"ok", "ok_observed_only"}
+            row[f"{name}_status"] not in usable_statuses
             or not np.isfinite(row[f"{name}_value"])
             for name in names
         ):
@@ -1133,9 +1198,29 @@ def reference_fundamental_ratios(
                 return status
         return (
             "ok_observed_only"
-            if any(row[f"{name}_status"] == "ok_observed_only" for name in names)
+            if any(
+                row[f"{name}_availability_basis"] == "observed_only" for name in names
+            )
             else "ok"
         )
+
+    def _prior_unverified(row: Mapping[str, Any], previous: Mapping[str, Any]) -> bool:
+        for field in ("start", "end"):
+            if (
+                not row[f"revenue_period_{field}"]
+                or not previous[f"revenue_period_{field}"]
+            ):
+                return True
+        cur_s = clocks.day(row["revenue_period_start"])
+        cur_e = clocks.day(row["revenue_period_end"])
+        pri_s = clocks.day(previous["revenue_period_start"])
+        pri_e = clocks.day(previous["revenue_period_end"])
+        exp_e = previous_year(cur_e)
+        if exp_e is None or cur_s > cur_e or pri_s > pri_e:
+            return True
+        if abs((pri_e - exp_e).days) > 7:
+            return True
+        return abs((pri_e - pri_s).days - (cur_e - cur_s).days) > 7
 
     derived = []
     for row, previous in zip(current.to_dict("records"), prior.to_dict("records")):
@@ -1164,19 +1249,14 @@ def reference_fundamental_ratios(
             values.update({f"{name}_value": value, f"{name}_status": status})
         status, growth = input_status(row, ("revenue",)), np.nan
         if status in {"ok", "ok_observed_only"}:
-            if previous["revenue_status"] not in {"ok", "ok_observed_only"}:
+            if previous["revenue_status"] not in usable_statuses:
                 status = "prior_unavailable"
             elif any(
                 previous[f"revenue_{field}"] != row[f"revenue_{field}"]
                 for field in ("cik", "unit", "currency")
             ):
                 status = "prior_basis_mismatch"
-            elif any(
-                not previous[f"revenue_period_{field}"]
-                or clocks.day(previous[f"revenue_period_{field}"])
-                != previous_year(row[f"revenue_period_{field}"])
-                for field in ("start", "end")
-            ):
+            elif _prior_unverified(row, previous):
                 status = "unverified_prior_period"
             elif previous["revenue_value"] == 0:
                 status = "zero_prior_revenue"
@@ -1184,7 +1264,11 @@ def reference_fundamental_ratios(
                 growth = row["revenue_value"] / previous["revenue_value"] - 1
                 status = (
                     "ok_observed_only"
-                    if "ok_observed_only" in {status, previous["revenue_status"]}
+                    if "observed_only"
+                    in {
+                        row["revenue_availability_basis"],
+                        previous["revenue_availability_basis"],
+                    }
                     else "ok"
                 )
                 if not np.isfinite(growth):

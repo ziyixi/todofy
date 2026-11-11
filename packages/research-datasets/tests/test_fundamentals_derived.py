@@ -19,6 +19,8 @@ from research_datasets import (
     asset_at,
     cik_at,
     derived_fundamentals,
+    fiscal_quarters,
+    fundamental_factors,
     fundamental_states,
     prepare_fundamental_features,
 )
@@ -284,6 +286,7 @@ class DerivedQuartersTest(unittest.TestCase):
             time_policy="public_reconstructed",
         )
         self.assertEqual(legacy.iloc[0]["operating_cash_flow_period_end"], "2025-03-31")
+        self.assertEqual(legacy.iloc[0]["operating_cash_flow_status"], "stale")
 
     def test_q4_derived_from_fy_minus_nine_months_only_after_10k_clock(self) -> None:
         # Accepted Friday after 17:30 New York; SEC filingDate is Monday 2026-02-23,
@@ -828,6 +831,786 @@ class FamilySchemaCompatibilityTest(unittest.TestCase):
                 ds, time_policy="public_reconstructed", ciks=[bundle.CIK_A]
             )
             self.assertFalse(states.empty)
+
+
+class TrailingAndFiscalQuartersTest(unittest.TestCase):
+    def test_ttm_equals_fy_at_year_end(self) -> None:
+        rows = [
+            make_fact(
+                "rev-q1",
+                "Revenues",
+                "100",
+                "2025-01-01",
+                "2025-03-31",
+                accession="acc-q1",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            make_fact(
+                "rev-q2",
+                "Revenues",
+                "120",
+                "2025-04-01",
+                "2025-06-30",
+                accession="acc-q2",
+                public_at="2025-08-01T12:00:00Z",
+            ),
+            make_fact(
+                "rev-q3",
+                "Revenues",
+                "140",
+                "2025-07-01",
+                "2025-09-30",
+                accession="acc-q3",
+                public_at="2025-11-01T12:00:00Z",
+            ),
+            make_fact(
+                "rev-fy",
+                "Revenues",
+                "520",
+                "2025-01-01",
+                "2025-12-31",
+                form="10-K",
+                period_kind="annual",
+                accession="acc-fy",
+                public_at="2026-02-15T12:00:00Z",
+            ),
+            make_fact(
+                "eps-q1",
+                "EarningsPerShareDiluted",
+                "1.00",
+                "2025-01-01",
+                "2025-03-31",
+                unit="USD/shares",
+                accession="acc-q1",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            make_fact(
+                "eps-fy",
+                "EarningsPerShareDiluted",
+                "4.85",
+                "2025-01-01",
+                "2025-12-31",
+                unit="USD/shares",
+                form="10-K",
+                period_kind="annual",
+                accession="acc-fy",
+                public_at="2026-02-15T12:00:00Z",
+            ),
+        ]
+        samples = pd.DataFrame(
+            {
+                "asset_id": [ASSET_A],
+                "signal_session": ["2026-02-18"],
+                "decision_at": ["2026-02-19T11:00:00Z"],
+            }
+        )
+        res = derived_fundamentals(
+            make_material(rows),
+            samples,
+            time_policy="public_reconstructed",
+            views=("revenue_ttm", "revenue_fy", "eps_diluted_ttm", "eps_diluted_fy"),
+            provenance=True,
+        )
+        row = res.iloc[0]
+        self.assertAlmostEqual(row["revenue_ttm_value"], 520.0)
+        self.assertAlmostEqual(row["revenue_fy_value"], 520.0)
+        self.assertEqual(row["revenue_ttm_basis"], "fiscal_year")
+        self.assertEqual(row["revenue_ttm_status"], "ok")
+        self.assertAlmostEqual(row["eps_diluted_ttm_value"], 4.85)
+        self.assertAlmostEqual(row["eps_diluted_fy_value"], 4.85)
+        self.assertEqual(row["eps_diluted_ttm_basis"], "fiscal_year")
+        self.assertEqual(row["eps_diluted_ttm_status"], "ok")
+
+    def test_ttm_fy_bridge_and_quarter_sum(self) -> None:
+        rows = [
+            make_fact(
+                "fy24",
+                "Revenues",
+                "400",
+                "2024-01-01",
+                "2024-12-31",
+                form="10-K",
+                period_kind="annual",
+                accession="acc-24",
+                public_at="2025-02-15T12:00:00Z",
+            ),
+            make_fact(
+                "h1-24",
+                "Revenues",
+                "180",
+                "2024-01-01",
+                "2024-06-30",
+                period_kind="ytd",
+                accession="acc-25-q2",
+                public_at="2025-08-01T12:00:00Z",
+            ),
+            make_fact(
+                "h1-25",
+                "Revenues",
+                "230",
+                "2025-01-01",
+                "2025-06-30",
+                period_kind="ytd",
+                accession="acc-25-q2",
+                public_at="2025-08-01T12:00:00Z",
+            ),
+            # EPS only has 4 non-overlapping quarters (no annual YTD bridge) -> quarter_sum + approximate
+            make_fact(
+                "eps-24q3",
+                "EarningsPerShareDiluted",
+                "1.10",
+                "2024-07-01",
+                "2024-09-30",
+                unit="USD/shares",
+                accession="acc-24q3",
+                public_at="2024-11-01T12:00:00Z",
+            ),
+            make_fact(
+                "eps-24q4",
+                "EarningsPerShareDiluted",
+                "1.20",
+                "2024-10-01",
+                "2024-12-31",
+                unit="USD/shares",
+                accession="acc-24q4",
+                public_at="2025-02-15T12:00:00Z",
+            ),
+            make_fact(
+                "eps-25q1",
+                "EarningsPerShareDiluted",
+                "1.30",
+                "2025-01-01",
+                "2025-03-31",
+                unit="USD/shares",
+                accession="acc-25q1",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            make_fact(
+                "eps-25q2",
+                "EarningsPerShareDiluted",
+                "1.40",
+                "2025-04-01",
+                "2025-06-30",
+                unit="USD/shares",
+                accession="acc-25q2",
+                public_at="2025-08-01T12:00:00Z",
+            ),
+        ]
+        samples = pd.DataFrame(
+            {
+                "asset_id": [ASSET_A],
+                "signal_session": ["2025-08-04"],
+                "decision_at": ["2025-08-05T10:00:00Z"],
+            }
+        )
+        res = derived_fundamentals(
+            make_material(rows),
+            samples,
+            time_policy="public_reconstructed",
+            views=("revenue_ttm", "eps_diluted_ttm"),
+            provenance=True,
+        )
+        row = res.iloc[0]
+        # Bridge: 400 + 230 - 180 = 450
+        self.assertAlmostEqual(row["revenue_ttm_value"], 450.0)
+        self.assertEqual(row["revenue_ttm_basis"], "ytd_bridge")
+        self.assertEqual(row["revenue_ttm_status"], "ok")
+        # EPS quarter_sum: 1.10 + 1.20 + 1.30 + 1.40 = 5.00 -> status approximate
+        self.assertAlmostEqual(row["eps_diluted_ttm_value"], 5.00)
+        self.assertEqual(row["eps_diluted_ttm_basis"], "quarter_sum")
+        self.assertEqual(row["eps_diluted_ttm_status"], "approximate")
+
+    def test_twelve_month_column_in_10q_is_not_fiscal_year(self) -> None:
+        # A 12-month column reported inside a 10-Q (minor 7) must never become `fy`
+        # or legacy `annual`!
+        rows = [
+            make_fact(
+                "fy24",
+                "Revenues",
+                "400",
+                "2024-01-01",
+                "2024-12-31",
+                metric="revenue",
+                form="10-K",
+                period_kind="annual",
+                accession="acc-10k",
+                public_at="2025-02-15T12:00:00Z",
+            ),
+            make_fact(
+                "tm-10q",
+                "Revenues",
+                "445",
+                "2024-07-01",
+                "2025-06-30",
+                metric="revenue",
+                form="10-Q",
+                period_kind="annual",
+                accession="acc-10q",
+                public_at="2025-08-01T12:00:00Z",
+            ),
+        ]
+        mat = make_material(rows)
+        samples = pd.DataFrame(
+            {
+                "asset_id": [ASSET_A],
+                "signal_session": ["2025-08-04"],
+                "decision_at": ["2025-08-05T10:00:00Z"],
+            }
+        )
+        res = derived_fundamentals(
+            mat,
+            samples,
+            time_policy="public_reconstructed",
+            views=("revenue_fy",),
+            provenance=True,
+        )
+        self.assertAlmostEqual(res.iloc[0]["revenue_fy_value"], 400.0)
+        self.assertEqual(res.iloc[0]["revenue_fy_period_end"], date(2024, 12, 31))
+
+        legacy = prepare_fundamental_features(
+            mat,
+            samples,
+            metrics={"revenue": "USD"},
+            period_kind="annual",
+            time_policy="public_reconstructed",
+        )
+        self.assertAlmostEqual(legacy.iloc[0]["revenue_value"], 400.0)
+        self.assertEqual(legacy.iloc[0]["revenue_period_end"], "2024-12-31")
+
+    def test_52_53_week_yoy_tolerance(self) -> None:
+        # 52/53-week retail calendar: prior year ends 2024-09-28 (364d), current ends 2025-09-27 (364d),
+        # and Q4 ends 2024-09-28 (91d) vs 2025-09-27 (91d). Also test a 53-week year (+6d shift).
+        rows = [
+            make_fact(
+                "fy24",
+                "Revenues",
+                "1000",
+                "2023-10-01",
+                "2024-09-28",
+                form="10-K",
+                period_kind="annual",
+                accession="acc-24",
+                public_at="2024-11-15T12:00:00Z",
+            ),
+            make_fact(
+                "fy25",
+                "Revenues",
+                "1150",
+                "2024-09-29",
+                "2025-10-04",
+                form="10-K",
+                period_kind="annual",
+                accession="acc-25",
+                public_at="2025-11-15T12:00:00Z",
+            ),
+            make_fact(
+                "q1-25",
+                "Revenues",
+                "250",
+                "2024-09-29",
+                "2024-12-28",
+                accession="acc-q1-25",
+                public_at="2025-02-01T12:00:00Z",
+            ),
+            make_fact(
+                "q1-26",
+                "Revenues",
+                "300",
+                "2025-10-05",
+                "2026-01-03",
+                accession="acc-q1-26",
+                public_at="2026-02-05T12:00:00Z",
+            ),
+            make_fact(
+                "assets-24",
+                "Assets",
+                "2000",
+                None,
+                "2024-12-28",
+                period_kind="instant",
+                accession="acc-q1-25",
+                public_at="2025-02-01T12:00:00Z",
+            ),
+            make_fact(
+                "assets-25",
+                "Assets",
+                "2200",
+                None,
+                "2026-01-03",
+                period_kind="instant",
+                accession="acc-q1-26",
+                public_at="2026-02-05T12:00:00Z",
+            ),
+        ]
+        samples = pd.DataFrame(
+            {
+                "asset_id": [ASSET_A],
+                "signal_session": ["2026-02-10"],
+                "decision_at": ["2026-02-11T11:00:00Z"],
+            }
+        )
+        res = derived_fundamentals(
+            make_material(rows),
+            samples,
+            time_policy="public_reconstructed",
+            views=("revenue_fy_yoy", "revenue_q_yoy", "total_assets_i_yoy"),
+        )
+        row = res.iloc[0]
+        self.assertEqual(row["revenue_fy_yoy_status"], "ok")
+        self.assertAlmostEqual(row["revenue_fy_yoy_value"], 0.15)
+        self.assertEqual(row["revenue_q_yoy_status"], "ok")
+        self.assertAlmostEqual(row["revenue_q_yoy_value"], 0.20)
+        self.assertEqual(row["total_assets_i_yoy_status"], "ok")
+        self.assertAlmostEqual(row["total_assets_i_yoy_value"], 0.10)
+
+    def test_leap_year_february_quarter_yoy(self) -> None:
+        rows = [
+            make_fact(
+                "q-leap",
+                "Revenues",
+                "200",
+                "2023-12-01",
+                "2024-02-29",
+                accession="acc-24",
+                public_at="2024-04-05T12:00:00Z",
+            ),
+            make_fact(
+                "q-nonleap",
+                "Revenues",
+                "240",
+                "2024-12-01",
+                "2025-02-28",
+                accession="acc-25",
+                public_at="2025-04-05T12:00:00Z",
+            ),
+        ]
+        samples = pd.DataFrame(
+            {
+                "asset_id": [ASSET_A],
+                "signal_session": ["2025-04-10"],
+                "decision_at": ["2025-04-11T10:00:00Z"],
+            }
+        )
+        res = derived_fundamentals(
+            make_material(rows),
+            samples,
+            time_policy="public_reconstructed",
+            views=("revenue_q_yoy",),
+        )
+        self.assertEqual(res.iloc[0]["revenue_q_yoy_status"], "ok")
+        self.assertAlmostEqual(res.iloc[0]["revenue_q_yoy_value"], 0.20)
+
+    def test_restated_comparative_changes_value_at_its_own_clock(self) -> None:
+        rows = [
+            make_fact(
+                "q1-orig",
+                "Revenues",
+                "100",
+                "2024-01-01",
+                "2024-03-31",
+                accession="acc-24q1",
+                public_at="2024-05-01T12:00:00Z",
+            ),
+            # Restated comparative for 2024-Q1 reported inside 2025-Q1 10-Q
+            make_fact(
+                "q1-restated",
+                "Revenues",
+                "95",
+                "2024-01-01",
+                "2024-03-31",
+                accession="acc-25q1",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+        ]
+        samples = pd.DataFrame(
+            {
+                "asset_id": [ASSET_A, ASSET_A],
+                "signal_session": ["2024-05-06", "2025-05-06"],
+                "decision_at": ["2024-05-07T10:00:00Z", "2025-05-07T10:00:00Z"],
+            }
+        )
+        res = derived_fundamentals(
+            make_material(rows),
+            samples,
+            time_policy="public_reconstructed",
+            views=("revenue_q",),
+        )
+        self.assertEqual(res["revenue_q_value"].tolist(), [100.0, 95.0])
+
+    def test_age_days_and_stale_thresholds_by_view(self) -> None:
+        rows = [
+            make_fact(
+                "rev-q1",
+                "Revenues",
+                "100",
+                "2025-01-01",
+                "2025-03-31",
+                accession="acc-q1",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            make_fact(
+                "rev-fy",
+                "Revenues",
+                "400",
+                "2024-01-01",
+                "2024-12-31",
+                form="10-K",
+                period_kind="annual",
+                accession="acc-fy",
+                public_at="2025-02-15T12:00:00Z",
+            ),
+        ]
+        # 2025-10-20 is 203 days after 2025-03-31 (> 200d for q) and 293 days after 2024-12-31 (< 460d for fy)
+        samples = pd.DataFrame(
+            {
+                "asset_id": [ASSET_A],
+                "signal_session": ["2025-10-20"],
+                "decision_at": ["2025-10-21T10:00:00Z"],
+            }
+        )
+        res = derived_fundamentals(
+            make_material(rows),
+            samples,
+            time_policy="public_reconstructed",
+            views=("revenue_q", "revenue_fy"),
+        )
+        row = res.iloc[0]
+        self.assertEqual(row["revenue_q_age_days"], 203.0)
+        self.assertEqual(row["revenue_q_status"], "stale")
+        self.assertAlmostEqual(row["revenue_q_value"], 100.0)
+        self.assertEqual(row["revenue_fy_age_days"], 293.0)
+        self.assertEqual(row["revenue_fy_status"], "ok")
+
+        # Custom stale_after_days override
+        override = derived_fundamentals(
+            make_material(rows),
+            samples,
+            time_policy="public_reconstructed",
+            views=("revenue_q",),
+            stale_after_days={"q": 250},
+        )
+        self.assertEqual(override.iloc[0]["revenue_q_status"], "ok")
+
+    def test_status_reasons(self) -> None:
+        cik_unmapped = "unmapped-asset"
+        cik_nonfiler = "0000000002"
+        cik_annual_only = "0000000003"
+        cik_v1_checked = "0000000004"
+
+        rows = [
+            # Annual-only foreign private issuer (20-F, no 10-Q/6-K)
+            make_fact(
+                "20f-rev",
+                "Revenues",
+                "800",
+                "2024-01-01",
+                "2024-12-31",
+                cik=cik_annual_only,
+                form="20-F",
+                period_kind="annual",
+                accession="acc-20f",
+                public_at="2025-04-01T12:00:00Z",
+            ),
+            # v1-checked issuer has revenue only after 2025-05-01
+            make_fact(
+                "v1-rev",
+                "Revenues",
+                "100",
+                "2025-01-01",
+                "2025-03-31",
+                cik=cik_v1_checked,
+                accession="acc-v1",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+        ]
+        mat = {
+            "manifest": {"source_timezones": {"sec": "America/New_York"}},
+            "universe": pd.DataFrame(
+                [
+                    {
+                        "asset_id": cik_unmapped,
+                        "cik": "",
+                        "issuer_mapping_status": "unmapped",
+                    },
+                    {
+                        "asset_id": "asset-nonfiler",
+                        "cik": cik_nonfiler,
+                        "issuer_mapping_status": "verified",
+                    },
+                    {
+                        "asset_id": "asset-20f",
+                        "cik": cik_annual_only,
+                        "issuer_mapping_status": "verified",
+                    },
+                    {
+                        "asset_id": "asset-v1",
+                        "cik": cik_v1_checked,
+                        "issuer_mapping_status": "verified",
+                    },
+                    {
+                        "asset_id": "asset-unchecked",
+                        "cik": "0000000005",
+                        "issuer_mapping_status": "verified",
+                    },
+                ]
+            ),
+            "fundamentals": pd.DataFrame(rows),
+            "financial_checks": pd.DataFrame(
+                [
+                    {
+                        "cik": cik_nonfiler,
+                        "check_sequence": 1,
+                        "checked_at": "2025-01-01T00:00:00Z",
+                        "status": "unsupported_filer",
+                        "error_code": "SEC_NOT_PERIODIC_FILER",
+                        "parser_version": "companyfacts-v2",
+                    },
+                    {
+                        "cik": cik_annual_only,
+                        "check_sequence": 1,
+                        "checked_at": "2025-04-02T00:00:00Z",
+                        "status": "checked",
+                        "parser_version": "companyfacts-v2",
+                    },
+                    {
+                        "cik": cik_v1_checked,
+                        "check_sequence": 1,
+                        "checked_at": "2025-05-02T00:00:00Z",
+                        "status": "checked",
+                        "parser_version": "companyfacts-v1",
+                    },
+                ]
+            ),
+        }
+        samples = pd.DataFrame(
+            [
+                {
+                    "asset_id": cik_unmapped,
+                    "signal_session": "2025-06-02",
+                    "decision_at": "2025-06-03T10:00:00Z",
+                },
+                {
+                    "asset_id": "asset-nonfiler",
+                    "signal_session": "2025-06-02",
+                    "decision_at": "2025-06-03T10:00:00Z",
+                },
+                {
+                    "asset_id": "asset-20f",
+                    "signal_session": "2025-12-01",
+                    "decision_at": "2025-12-02T11:00:00Z",
+                },
+                {
+                    "asset_id": "asset-v1",
+                    "signal_session": "2025-04-15",
+                    "decision_at": "2025-04-16T10:00:00Z",
+                },
+                {
+                    "asset_id": "asset-v1",
+                    "signal_session": "2025-06-02",
+                    "decision_at": "2025-06-03T10:00:00Z",
+                },
+                {
+                    "asset_id": "asset-unchecked",
+                    "signal_session": "2025-06-02",
+                    "decision_at": "2025-06-03T10:00:00Z",
+                },
+            ]
+        )
+        res = derived_fundamentals(
+            mat,
+            samples,
+            time_policy="public_reconstructed",
+            views=("revenue_q", "revenue_ttm", "rnd_q", "gross_profit_q"),
+        )
+        self.assertEqual(res.iloc[0]["revenue_q_status"], "mapping_missing")
+        self.assertEqual(res.iloc[1]["revenue_q_status"], "issuer_not_sec_filer")
+        # 20-F issuer has annual_only for q, and ttm uses 460-day threshold (335d -> ok)
+        self.assertEqual(res.iloc[2]["revenue_q_status"], "annual_only")
+        self.assertEqual(res.iloc[2]["revenue_ttm_status"], "ok")
+        self.assertAlmostEqual(res.iloc[2]["revenue_ttm_value"], 800.0)
+        # Before first filing -> not_yet_available
+        self.assertEqual(res.iloc[3]["revenue_q_status"], "not_yet_available")
+        # v1 parser check -> min_parser=2 concept (rnd) is not_captured, min_parser=1 (gross_profit) is metric_missing
+        self.assertEqual(res.iloc[4]["rnd_q_status"], "not_captured")
+        self.assertEqual(res.iloc[4]["gross_profit_q_status"], "metric_missing")
+        # Unchecked CIK -> not_checked
+        self.assertEqual(res.iloc[5]["revenue_q_status"], "not_checked")
+
+    def test_fiscal_quarters_first_and_latest_values(self) -> None:
+        rows = [
+            # Prior-year comparative reported in same filing as 2025-Q1
+            make_fact(
+                "eps-24q1-comp",
+                "EarningsPerShareDiluted",
+                "1.00",
+                "2024-01-01",
+                "2024-03-31",
+                unit="USD/shares",
+                accession="acc-25q1",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            make_fact(
+                "eps-25q1-first",
+                "EarningsPerShareDiluted",
+                "1.25",
+                "2025-01-01",
+                "2025-03-31",
+                unit="USD/shares",
+                accession="acc-25q1",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            # Later restatement of 2025-Q1 in 2026-Q1 filing
+            make_fact(
+                "eps-25q1-restated",
+                "EarningsPerShareDiluted",
+                "1.22",
+                "2025-01-01",
+                "2025-03-31",
+                unit="USD/shares",
+                accession="acc-26q1",
+                public_at="2026-05-01T12:00:00Z",
+            ),
+        ]
+        fq = fiscal_quarters(
+            make_material(rows),
+            time_policy="public_reconstructed",
+            concepts=("eps_diluted",),
+        )
+        q1_25 = fq[fq["period_end"] == date(2025, 3, 31)].iloc[0]
+        self.assertAlmostEqual(q1_25["value_first"], 1.25)
+        self.assertAlmostEqual(q1_25["value_latest"], 1.22)
+        self.assertAlmostEqual(q1_25["prior_year_value_first"], 1.00)
+        self.assertEqual(q1_25["prior_year_period_end_first"], date(2024, 3, 31))
+        self.assertEqual(q1_25["accession_first"], "acc-25q1")
+        self.assertEqual(q1_25["fiscal_quarter"], 1)
+        self.assertEqual(
+            q1_25["available_at_first"], pd.Timestamp("2025-05-01T12:00:00Z")
+        )
+        self.assertEqual(
+            q1_25["available_at_latest"], pd.Timestamp("2026-05-01T12:00:00Z")
+        )
+
+    def test_fundamental_factors_alignment_and_zero_denominators(self) -> None:
+        rows = [
+            make_fact(
+                "rev-fy",
+                "Revenues",
+                "0",
+                "2025-01-01",
+                "2025-12-31",
+                form="10-K",
+                period_kind="annual",
+                accession="acc-fy",
+                public_at="2026-02-15T12:00:00Z",
+            ),
+            make_fact(
+                "gp-fy",
+                "GrossProfit",
+                "50",
+                "2025-01-01",
+                "2025-12-31",
+                form="10-K",
+                period_kind="annual",
+                accession="acc-fy",
+                public_at="2026-02-15T12:00:00Z",
+            ),
+            make_fact(
+                "ni-fy",
+                "NetIncomeLoss",
+                "20",
+                "2025-01-01",
+                "2025-12-31",
+                form="10-K",
+                period_kind="annual",
+                accession="acc-fy",
+                public_at="2026-02-15T12:00:00Z",
+            ),
+            make_fact(
+                "eq-i",
+                "StockholdersEquity",
+                "-100",
+                None,
+                "2025-12-31",
+                form="10-K",
+                period_kind="instant",
+                accession="acc-fy",
+                public_at="2026-02-15T12:00:00Z",
+            ),
+            make_fact(
+                "assets-i",
+                "Assets",
+                "500",
+                None,
+                "2025-12-31",
+                form="10-K",
+                period_kind="instant",
+                accession="acc-fy",
+                public_at="2026-02-15T12:00:00Z",
+            ),
+        ]
+        samples = pd.DataFrame(
+            {
+                "asset_id": [ASSET_A],
+                "signal_session": ["2026-02-18"],
+                "decision_at": ["2026-02-19T11:00:00Z"],
+            }
+        )
+        derived = derived_fundamentals(
+            make_material(rows),
+            samples,
+            time_policy="public_reconstructed",
+        )
+        factors = fundamental_factors(derived)
+        row = factors.iloc[0]
+        # Zero revenue -> invalid_value
+        self.assertEqual(row["gross_margin_ttm_status"], "invalid_value")
+        self.assertTrue(np.isnan(row["gross_margin_ttm_value"]))
+        # Negative equity -> invalid_value on ROE
+        self.assertEqual(row["roe_ttm_status"], "invalid_value")
+        self.assertTrue(np.isnan(row["roe_ttm_value"]))
+        # Positive total_assets (aligned at 2025-12-31) -> gross_profitability = 50 / 500 = 0.10, ROA = 20 / 500 = 0.04
+        self.assertEqual(row["gross_profitability_status"], "ok")
+        self.assertAlmostEqual(row["gross_profitability_value"], 0.10)
+        self.assertEqual(row["roa_ttm_status"], "ok")
+        self.assertAlmostEqual(row["roa_ttm_value"], 0.04)
+
+    def test_state_cache_key_includes_policy_and_derivation_version(self) -> None:
+        rows = [
+            make_fact(
+                "rev-q1",
+                "Revenues",
+                "100",
+                "2025-01-01",
+                "2025-03-31",
+                accession="acc-q1",
+                public_at="2025-05-01T12:00:00Z",
+                observed_at="2025-05-10T12:00:00Z",
+            ),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            mat = make_material(
+                rows,
+                cache_dir=tmp,
+                manifest_sha256="a" * 64,
+            )
+            mat["manifest"]["dataset_id"] = "ds-cache-test"
+            s_pub = fundamental_states(
+                mat, time_policy="public_reconstructed", views=("revenue_q",)
+            )
+            s_obs = fundamental_states(
+                mat, time_policy="observed_content", views=("revenue_q",)
+            )
+            # Cached reload hits disk and preserves exact timestamps & values
+            s_pub_cached = fundamental_states(
+                mat, time_policy="public_reconstructed", views=("revenue_q",)
+            )
+            self.assertNotEqual(
+                s_pub.iloc[0]["available_at"], s_obs.iloc[0]["available_at"]
+            )
+            self.assertEqual(
+                s_pub.iloc[0]["available_at"], s_pub_cached.iloc[0]["available_at"]
+            )
+            self.assertEqual(s_pub.iloc[0]["value"], s_pub_cached.iloc[0]["value"])
 
 
 if __name__ == "__main__":

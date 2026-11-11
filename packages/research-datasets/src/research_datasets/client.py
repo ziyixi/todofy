@@ -62,6 +62,12 @@ from .fundamentals_derived import (
     derived_fundamentals as _derived_fundamentals,
 )
 from .fundamentals_derived import (
+    fiscal_quarters as _fiscal_quarters,
+)
+from .fundamentals_derived import (
+    fundamental_factors as _fundamental_factors,
+)
+from .fundamentals_derived import (
     fundamental_states as _fundamental_states,
 )
 from .panels import (
@@ -1628,6 +1634,7 @@ class Dataset:
         start: str | date | None = None,
         end: str | date | None = None,
         views: Sequence[str] | None = None,
+        stale_after_days: Mapping[str, int] | None = None,
         provenance: bool = False,
     ) -> pd.DataFrame:
         """Join derived point-in-time fundamentals onto ``samples`` or candidate symbols."""
@@ -1641,8 +1648,51 @@ class Dataset:
             samples,
             time_policy=time_policy,
             views=views,
+            stale_after_days=stale_after_days,
             provenance=provenance,
         )
+
+    def fiscal_quarters(
+        self,
+        *,
+        time_policy: str,
+        concepts: Sequence[str] = ("eps_diluted", "eps_basic", "net_income", "revenue"),
+        symbols: str | Sequence[str] | None = None,
+    ) -> pd.DataFrame:
+        """Point-in-time quarterly ledger recording first-known and latest values per quarter."""
+        whole = symbols is None or symbols == "all"
+        ciks = None if whole else self._issuer_ids(symbols)[0]
+        return _fiscal_quarters(
+            self,
+            time_policy=time_policy,
+            concepts=concepts,
+            ciks=ciks,
+        )
+
+    def fundamental_factors(
+        self,
+        derived_or_symbols: pd.DataFrame | str | Sequence[str] | None = None,
+        *,
+        time_policy: str | None = None,
+        start: str | date | None = None,
+        end: str | date | None = None,
+    ) -> pd.DataFrame:
+        """Statement-only quality, margin, growth, and balance-sheet factors."""
+        if isinstance(derived_or_symbols, pd.DataFrame) and any(
+            str(col).endswith("_value") for col in derived_or_symbols.columns
+        ):
+            return _fundamental_factors(derived_or_symbols)
+        if time_policy is None:
+            raise ValueError(
+                "time_policy is required when computing derived fundamentals"
+            )
+        derived = self.derived_fundamentals(
+            derived_or_symbols,
+            time_policy=time_policy,
+            start=start,
+            end=end,
+        )
+        return _fundamental_factors(derived)
 
     def audit(
         self,
@@ -1969,6 +2019,7 @@ class Dataset:
         neutralize: Sequence[str] = (),
         next_session: str | date | None = None,
         fundamental_time_policy: str | None = None,
+        fundamentals: str = "derived",
         include_fundamentals: bool = True,
         include_ratios: bool = True,
         provenance_columns: bool = False,
@@ -1991,6 +2042,7 @@ class Dataset:
             next_session=next_session,
             time_policy=time_policy,
             fundamental_time_policy=fundamental_time_policy,
+            fundamentals=fundamentals,
             include_fundamentals=include_fundamentals,
             include_ratios=include_ratios,
             provenance_columns=provenance_columns,

@@ -226,11 +226,26 @@ class ContractRegressionTest(unittest.TestCase):
             tempfile.TemporaryDirectory() as tmp,
         ):
             ds = _load(server, tmp)
+            derived_frame = ds.panel(
+                ["AAPL", "GOOG"],
+                start=ds.calendar[6],
+                end=ds.calendar[8],
+                time_policy="public_reconstructed",
+                allow_static_universe=True,
+            )
+            for name in (
+                "operating_cash_flow_q_value",
+                "fcf_q_value",
+                "revenue_q_value",
+                "gross_margin_ttm_value",
+            ):
+                self.assertIn(name, derived_frame.columns)
             frame = ds.panel(
                 ["AAPL", "GOOG"],
                 start=ds.calendar[6],
                 end=ds.calendar[8],
                 time_policy="public_reconstructed",
+                fundamentals="legacy",
                 allow_static_universe=True,
             )
             for prefix in (
@@ -272,8 +287,24 @@ class ContractRegressionTest(unittest.TestCase):
                 "time_policy": "public_reconstructed",
                 "allow_static_universe": True,
             }
-            lean = ds.panel(["AAPL", "GOOG"], **options)
-            full = ds.panel(["AAPL", "GOOG"], provenance_columns=True, **options)
+            derived_lean = ds.panel(["AAPL", "GOOG"], **options)
+            derived_full = ds.panel(
+                ["AAPL", "GOOG"], provenance_columns=True, **options
+            )
+            lean = ds.panel(["AAPL", "GOOG"], fundamentals="legacy", **options)
+            full = ds.panel(
+                ["AAPL", "GOOG"],
+                fundamentals="legacy",
+                provenance_columns=True,
+                **options,
+            )
+        self.assertIn("ok", set(derived_lean["revenue_q_status"]))
+        self.assertNotIn("revenue_q_available_at", derived_lean.columns)
+        self.assertIn("revenue_q_available_at", derived_full.columns)
+        self.assertEqual(
+            [name for name in derived_full if name in derived_lean],
+            list(derived_lean.columns),
+        )
         for name in ("quarter_revenue_status", "quarter_gross_margin_status"):
             self.assertIsInstance(lean[name].dtype, pd.CategoricalDtype)
             self.assertEqual(lean[name].astype(object).tolist(), full[name].tolist())

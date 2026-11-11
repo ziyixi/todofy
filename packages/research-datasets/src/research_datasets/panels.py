@@ -22,6 +22,7 @@ import pandas as pd
 from . import candidates as _candidates
 from . import clocks
 from . import fundamentals as _fundamentals
+from . import fundamentals_derived as _fundamentals_derived
 from . import labels as _labels
 from .candidates import build_candidates
 from .clocks import CAPTURE_DEADLINE as _CAPTURE_DEADLINE
@@ -877,6 +878,7 @@ def panel(
     neutralize: Sequence[str] = (),
     next_session: str | date | None = None,
     fundamental_time_policy: str | None = None,
+    fundamentals: str = "derived",
     include_fundamentals: bool = True,
     include_ratios: bool = True,
     provenance_columns: bool = False,
@@ -887,11 +889,15 @@ def panel(
     Candidates are built once (sampling, point-in-time membership, default securities
     without benchmarks); features are computed on the daily grid and kept for those
     rows. A version without membership rows needs ``allow_static_universe=True``.
-    Default quarterly columns omit operating cash flow, capex and free cash flow (10-Q
-    cash flows are year-to-date); request them explicitly through ``fundamental_features``.
-    Fundamental columns are each metric's value and categorical status;
-    ``provenance_columns=True`` adds the selected facts' provenance and ratio inputs.
+    ``fundamentals="derived"`` (default) computes derived single quarters, trailing
+    twelve months, YoY changes, and fundamental factors; ``fundamentals="legacy"``
+    retains the v1 per-period selection engine; ``fundamentals="none"`` omits all
+    fundamental and ratio blocks.
     """
+    if fundamentals not in ("derived", "legacy", "none"):
+        raise ValueError(
+            f"fundamentals must be 'derived', 'legacy', or 'none', got {fundamentals!r}"
+        )
     _policy(time_policy)
     fund_policy = _policy(fundamental_time_policy or time_policy)
     horizon_list, _ = _labels.horizons(horizons)
@@ -927,14 +933,33 @@ def panel(
     )
     parts: list[pd.DataFrame] = [rows]
     samples = rows[KEYS + ["decision_at"]]
+    derived_limitations: list[str] = []
 
-    # One read of the facts and one prepared engine serve features and ratios.
-    metrics = {
-        kind: _fundamentals.default_metrics(kind)
-        for kind in ("quarter", "annual", "instant")
-    }
-    inputs = (
-        _fundamentals.FactInputs(
+    if fundamentals == "derived" and (include_fundamentals or include_ratios):
+        derived = _fundamentals_derived.derived_fundamentals(
+            version,
+            samples,
+            time_policy=fund_policy,
+            provenance=provenance_columns,
+        )
+        manifest_lims = set(version.manifest.get("limitations", []))
+        derived_limitations = [
+            item
+            for item in derived.attrs.get("limitations", [])
+            if item not in manifest_lims
+        ]
+        if include_fundamentals:
+            parts.append(derived.drop(columns=KEYS))
+        if include_ratios:
+            factors = _fundamentals_derived.fundamental_factors(derived)
+            parts.append(factors.drop(columns=KEYS))
+    elif fundamentals == "legacy" and (include_fundamentals or include_ratios):
+        # One read of the facts and one prepared engine serve features and ratios.
+        metrics = {
+            kind: _fundamentals.default_metrics(kind)
+            for kind in ("quarter", "annual", "instant")
+        }
+        inputs = _fundamentals.FactInputs(
             version,
             samples["asset_id"],
             list(
@@ -946,40 +971,40 @@ def panel(
                 )
             ),
         )
-        if include_fundamentals or include_ratios
-        else None
-    )
-    if include_fundamentals:
-        fund = _fundamentals.features_by_period(
-            version,
-            samples,
-            metrics,
-            time_policy=fund_policy,
-            provenance=provenance_columns,
-            inputs=inputs,
-        )
-        parts.append(fund.drop(columns=KEYS))
-
-    if include_ratios:
-        ratios = _fundamentals.ratios_by_period(
-            version,
-            samples,
-            ("quarter", "annual"),
-            currency="USD",
-            time_policy=fund_policy,
-            provenance=provenance_columns,
-            inputs=inputs,
-        )
-        stale = tuple(
-            [f"quarter_{name}_" for name in QUARTER_DEFAULT_EXCLUDED_RATIOS]
-            + [f"quarter_source_{name}_" for name in QUARTER_DEFAULT_EXCLUDED_METRICS]
-        )
-        parts.append(
-            ratios.drop(
-                columns=KEYS
-                + [column for column in ratios.columns if column.startswith(stale)]
+        if include_fundamentals:
+            fund = _fundamentals.features_by_period(
+                version,
+                samples,
+                metrics,
+                time_policy=fund_policy,
+                provenance=provenance_columns,
+                inputs=inputs,
             )
-        )
+            parts.append(fund.drop(columns=KEYS))
+
+        if include_ratios:
+            ratios = _fundamentals.ratios_by_period(
+                version,
+                samples,
+                ("quarter", "annual"),
+                currency="USD",
+                time_policy=fund_policy,
+                provenance=provenance_columns,
+                inputs=inputs,
+            )
+            stale = tuple(
+                [f"quarter_{name}_" for name in QUARTER_DEFAULT_EXCLUDED_RATIOS]
+                + [
+                    f"quarter_source_{name}_"
+                    for name in QUARTER_DEFAULT_EXCLUDED_METRICS
+                ]
+            )
+            parts.append(
+                ratios.drop(
+                    columns=KEYS
+                    + [column for column in ratios.columns if column.startswith(stale)]
+                )
+            )
 
     labels = forward_returns(
         version,
@@ -1020,6 +1045,12 @@ def panel(
             "horizons": horizon_list,
             **_time_parameters(time_policy),
             "fundamental_time_policy": fund_policy,
+            "fundamentals": fundamentals,
+            "derivation_version": (
+                _fundamentals_derived.DERIVATION_VERSION
+                if fundamentals == "derived"
+                else None
+            ),
             "include_fundamentals": include_fundamentals,
             "include_ratios": include_ratios,
             "provenance_columns": provenance_columns,
@@ -1065,6 +1096,7 @@ def panel(
         limitations=[
             *LIMITATIONS,
             *labels.attrs["limitations"],
+            *derived_limitations,
             *_live_limitations(
                 candidates.attrs["parameters"],
                 candidates.attrs["counts"]["membership_carried"],

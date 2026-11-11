@@ -25,6 +25,7 @@ import pandas as pd
 from . import clocks
 from .candidates import ensure_samples
 from .clocks import NAT, NEVER
+from .concepts import LEGACY_TAG_ORDER, PERIODIC_ANNUAL_FORMS
 from .constants import (
     ALL_METRICS,
     DURATION_METRICS,
@@ -34,10 +35,18 @@ from .constants import (
     RATIO_METRICS,
 )
 
+LEGACY_STALE_AFTER_DAYS: Mapping[str, int] = {
+    "quarter": 200,
+    "instant": 200,
+    "annual": 460,
+}
+
 # Per-metric columns of a feature frame, then the selected fact's provenance.
 FEATURE_FIELDS = (
     "value",
     "status",
+    "age_days",
+    "alternative_values",
     "raw_value",
     "available_at",
     "public_clock_missing",
@@ -62,6 +71,7 @@ PROVENANCE = (
 STATUSES = (
     "ok",
     "ok_observed_only",
+    "stale",
     "mapping_missing",
     "clock_unknown",
     "metric_missing",
@@ -76,6 +86,7 @@ STATUSES = (
 (
     OK,
     OK_OBSERVED,
+    STALE,
     MAPPING_MISSING,
     CLOCK_UNKNOWN,
     METRIC_MISSING,
@@ -289,9 +300,15 @@ class _MetricSteps:
             engine.retracted_end[retracted],
             domain,
         )
+        valid_form = (
+            engine.annual_form_ok[live]
+            if period_kind == "annual"
+            else np.ones(len(live), dtype=bool)
+        )
         dated = live[
             in_unit
             & engine.equals("period_kind", period_kind)[live]
+            & valid_form
             & (engine.period[live] > 0)
         ]
         self.bucket_keys, bucket = np.unique(
@@ -309,7 +326,7 @@ class _MetricSteps:
             bucket, engine.start[dated], engine.end[dated], len(self.bucket_keys)
         )
         self.top = self._top(domain)
-        self.results: dict[int, tuple[int, int, float]] = {}
+        self.results: dict[int, tuple[int, int, float, int]] = {}
 
     def _top(self, domain: int) -> _Steps:
         """The largest period with a non-empty bucket, per issuer and instant (0: none)."""
@@ -406,6 +423,7 @@ class FactEngine:
         self.cik, self.cik_names = pd.factorize(pd.Series(cik, dtype=object))
         self.cik_index = {name: code for code, name in enumerate(self.cik_names)}
         metric = _column(frame, "metric")
+        self.metric = metric
         self.metric_codes, self.metric_names = pd.factorize(
             pd.Series(metric, dtype=object), use_na_sentinel=False
         )
@@ -413,7 +431,16 @@ class FactEngine:
         self.retracted = _per_value(_column(frame, "is_retracted", False), bool, bool)
         self.value = _column(frame, "value")
         self.period_start = _column(frame, "period_start")
+        self.tag = _column(frame, "tag", "")
         self.tag_priority = _column(frame, "tag_priority", 0)
+        self.annual_form_ok = _per_value(
+            _column(frame, "form", ""),
+            lambda f: (
+                not (isinstance(f, str) and f)
+                or f.removesuffix("/A") in PERIODIC_ANNUAL_FORMS
+            ),
+            bool,
+        )
         chain = (
             pd.DataFrame({"c": cik, "m": metric, "f": self.fact_id})
             .groupby(["c", "m", "f"], sort=False, dropna=False)
@@ -531,17 +558,37 @@ class FactEngine:
             )
         return self._equals[name, text]
 
-    def _bucket_result(self, rows: Sequence[int]) -> tuple[int, int, float]:
-        """Status, selected row and value of the latest report among a bucket's rows."""
+    def _tag_rank_key(self, row: int) -> tuple[int, int, str]:
+        m_val = self.metric[row]
+        t_val = self.tag[row]
+        m_str = m_val if isinstance(m_val, str) else ""
+        t_str = t_val if isinstance(t_val, str) else ""
+        order = LEGACY_TAG_ORDER.get(m_str, ())
+        if t_str and t_str in order:
+            return (0, order.index(t_str), t_str)
+        prio = self.tag_priority[row]
+        prio_int = (
+            int(prio)
+            if isinstance(prio, (int, np.integer)) and not isinstance(prio, bool)
+            else 0
+        )
+        return (1, prio_int, t_str)
+
+    def _bucket_result(self, rows: Sequence[int]) -> tuple[int, int, float, int]:
+        """Status, selected row, value, and alternative-tag count of a bucket."""
         if any(self.available[row] == NAT for row in rows):
-            return CLOCK_UNKNOWN, -1, np.nan
+            return CLOCK_UNKNOWN, -1, np.nan, 0
         report = [
             self.public[row] if self.public[row] != NAT else self.observed[row]
             for row in rows
         ]
         latest = max(report)
         candidates = [row for row, at in zip(rows, report, strict=True) if at == latest]
-        texts = [self.value[row] for row in candidates]
+        best_tag = min(self._tag_rank_key(row) for row in candidates)
+        tag_candidates = [
+            row for row in candidates if self._tag_rank_key(row) == best_tag
+        ]
+        texts = [self.value[row] for row in tag_candidates]
         try:
             values = (
                 {_decimal(text) for text in texts}
@@ -551,18 +598,45 @@ class FactEngine:
         except (InvalidOperation, TypeError, ValueError):
             values = set()
         if not values or any(not value.is_finite() for value in values):
-            return INVALID, -1, np.nan
-        if len(values) != 1 or len({self.period_start[row] for row in candidates}) != 1:
-            return AMBIGUOUS, -1, np.nan
+            return INVALID, -1, np.nan, 0
+        if (
+            len(values) != 1
+            or len({self.period_start[row] for row in tag_candidates}) != 1
+        ):
+            return AMBIGUOUS, -1, np.nan, 0
+        win_dec = next(iter(values))
         chosen = min(
-            candidates, key=lambda row: (self.tag_priority[row], self.fact_id[row])
+            tag_candidates,
+            key=lambda row: (self.tag_priority[row], self.fact_id[row]),
         )
-        number = float(next(iter(values)))
+        tag_set = set(tag_candidates)
+        alt_decimals: set[Decimal] = set()
+        for row in candidates:
+            if row in tag_set:
+                continue
+            txt = self.value[row]
+            if not isinstance(txt, str):
+                continue
+            try:
+                other_dec = _decimal(txt)
+            except (InvalidOperation, TypeError, ValueError):
+                continue
+            if other_dec.is_finite() and other_dec != win_dec:
+                alt_decimals.add(other_dec)
+        alt_count = len(alt_decimals)
+        number = float(win_dec)
         if not np.isfinite(number):
-            return NONFINITE, chosen, np.nan
-        return (OK_OBSERVED if self.public[chosen] == NAT else OK), chosen, number
+            return NONFINITE, chosen, np.nan, alt_count
+        return (
+            (OK_OBSERVED if self.public[chosen] == NAT else OK),
+            chosen,
+            number,
+            alt_count,
+        )
 
-    def _result(self, steps: _MetricSteps, position: int) -> tuple[int, int, float]:
+    def _result(
+        self, steps: _MetricSteps, position: int
+    ) -> tuple[int, int, float, int]:
         cached = steps.results.get(position)
         if cached is None:
             bucket = steps.buckets.keys[position]
@@ -598,13 +672,13 @@ class FactEngine:
         cik: np.ndarray,
         decision: np.ndarray,
         limit: np.ndarray,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Status codes, selected rows (-1: none) and values for issuer codes (-1: no
-        facts), decision instants (known) and period-end limits (ordinals; 0: none)."""
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Status codes, selected rows (-1: none), values and alt-tag counts."""
         size = len(cik)
         status = np.full(size, METRIC_MISSING, dtype=np.int8)
         chosen = np.full(size, -1, dtype=np.int64)
         value = np.full(size, np.nan)
+        alt_count = np.zeros(size, dtype=np.int64)
         steps = self.steps(metric, unit, period_kind)
         live = cik >= 0
         live[live] = steps.present[cik[live]]
@@ -646,12 +720,13 @@ class FactEngine:
         distinct, inverse = np.unique(position[found], return_inverse=True)
         results = [self._result(steps, int(step)) for step in distinct]
         if results:
-            codes, rows, numbers = zip(*results, strict=True)
+            codes, rows, numbers, alts = zip(*results, strict=True)
             query = query[found]
             status[query] = np.asarray(codes, dtype=np.int8)[inverse]
             chosen[query] = np.asarray(rows, dtype=np.int64)[inverse]
             value[query] = np.asarray(numbers, dtype=np.float64)[inverse]
-        return status, chosen, value
+            alt_count[query] = np.asarray(alts, dtype=np.int64)[inverse]
+        return status, chosen, value, alt_count
 
 
 class FactInputs:
@@ -751,15 +826,17 @@ class _Samples:
         unit: str,
         period_kind: str,
         limit: np.ndarray | None = None,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         size = len(self.cik)
         status = np.full(size, MAPPING_MISSING, dtype=np.int8)
         chosen = np.full(size, -1, dtype=np.int64)
         value = np.full(size, np.nan)
+        age_days = np.full(size, np.nan, dtype=np.float64)
+        alt_count = np.zeros(size, dtype=np.int64)
         verified = self.cik != _UNVERIFIED
         status[verified & (self.decision == NAT)] = CLOCK_UNKNOWN
         query = np.flatnonzero(verified & (self.decision != NAT))
-        status[query], chosen[query], value[query] = engine.evaluate(
+        status[query], chosen[query], value[query], alt_count[query] = engine.evaluate(
             metric,
             unit,
             period_kind,
@@ -767,7 +844,22 @@ class _Samples:
             self.decision[query],
             (self.limit if limit is None else limit)[query],
         )
-        return status, chosen, value
+        picked = np.flatnonzero(chosen >= 0)
+        if len(picked):
+            pe_ord = engine.period[chosen[picked]]
+            dated = pe_ord > 0
+            if dated.any():
+                age_vals = (self.signal[picked[dated]] - pe_ord[dated]).astype(
+                    np.float64
+                )
+                age_days[picked[dated]] = age_vals
+                stale_limit = LEGACY_STALE_AFTER_DAYS.get(period_kind, 200)
+                stale_rows = picked[dated][
+                    np.isin(status[picked[dated]], [OK, OK_OBSERVED])
+                    & (age_vals > stale_limit)
+                ]
+                status[stale_rows] = STALE
+        return status, chosen, value, age_days, alt_count
 
 
 def _pick(values: np.ndarray, chosen: np.ndarray, fill: Any) -> np.ndarray:
@@ -780,11 +872,11 @@ def _pick(values: np.ndarray, chosen: np.ndarray, fill: Any) -> np.ndarray:
 
 def _feature_columns(
     engine: FactEngine,
-    result: tuple[np.ndarray, np.ndarray, np.ndarray],
+    result: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray],
     names: Sequence[str],
 ) -> dict[str, Any]:
     """Columns ``names`` (feature fields or provenance) of one metric's result."""
-    status, chosen, value = result
+    status, chosen, value, age_days, alt_count = result
     picked = chosen >= 0
     unclocked = picked & (_pick(engine.public, chosen, NAT) == NAT)
     columns: dict[str, Any] = {}
@@ -793,6 +885,10 @@ def _feature_columns(
             columns[name] = value
         elif name == "status":
             columns[name] = np.asarray(STATUSES, dtype=object)[status]
+        elif name == "age_days":
+            columns[name] = age_days
+        elif name == "alternative_values":
+            columns[name] = alt_count
         elif name == "raw_value":
             columns[name] = _pick(engine.value, chosen, None)
         elif name == "available_at":
@@ -905,7 +1001,9 @@ class _Selection:
     """Selected rows of one metric with code access to their provenance fields."""
 
     def __init__(
-        self, engine: FactEngine, result: tuple[np.ndarray, np.ndarray, np.ndarray]
+        self,
+        engine: FactEngine,
+        result: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray],
     ) -> None:
         self.engine = engine
         self.result = result
@@ -913,8 +1011,12 @@ class _Selection:
         self.chosen = result[1]
         self.value = result[2]
         self.picked = self.chosen >= 0
-        self.usable = np.isin(result[0], [OK, OK_OBSERVED]) & np.isfinite(self.value)
-        self.observed_only = result[0] == OK_OBSERVED
+        self.usable = np.isin(result[0], [OK, OK_OBSERVED, STALE]) & np.isfinite(
+            self.value
+        )
+        self.observed_only = self.picked & (
+            _pick(engine.public, self.chosen, NAT) == NAT
+        )
 
     def code(self, name: str) -> np.ndarray:
         return _pick(self.engine.codes(name)[0], self.chosen, -1)
@@ -950,6 +1052,8 @@ def _ratios(
     }
     revenue = current["revenue"]
     end = revenue.ordinals("period_end", np.flatnonzero(revenue.picked))
+    prev_end = _previous_year(end)
+    prior_bound = np.where(prev_end > 0, prev_end + 7, 0)
     prior = _Selection(
         engine,
         rows.evaluate(
@@ -957,7 +1061,7 @@ def _ratios(
             "revenue",
             currency,
             period_kind,
-            rows.capped(_previous_year(end)),
+            rows.capped(prior_bound),
         ),
     )
     code = {name: index for index, name in enumerate(RATIO_STATUSES)}
@@ -1025,7 +1129,10 @@ def _ratios(
         status = input_status(("revenue",))
         good = np.isin(status, usable)
         checks = (
-            ("prior_unavailable", lambda: ~np.isin(prior.result[0], [OK, OK_OBSERVED])),
+            (
+                "prior_unavailable",
+                lambda: ~np.isin(prior.result[0], [OK, OK_OBSERVED, STALE]),
+            ),
             (
                 "prior_basis_mismatch",
                 lambda: np.logical_or.reduce(
@@ -1083,14 +1190,28 @@ def _ratios(
 
 
 def _unverified(current: _Selection, prior: _Selection, good: np.ndarray) -> np.ndarray:
-    """Rows whose prior period is not the current period shifted back one year."""
+    """Rows whose prior period end or length differs from current - 1y by > 7 days."""
     rows = np.flatnonzero(good)
     result = np.zeros(len(good), dtype=bool)
-    for field in ("period_start", "period_end"):
-        present = prior.truthy(field)
-        shown = prior.ordinals(field, rows[present[rows]])
-        expected = _previous_year(current.ordinals(field, rows))
-        result |= ~present | (shown != expected) | (expected == 0)
+    if not len(rows):
+        return result
+    cur_start = current.ordinals("period_start", rows)[rows]
+    cur_end = current.ordinals("period_end", rows)[rows]
+    pri_start = prior.ordinals("period_start", rows)[rows]
+    pri_end = prior.ordinals("period_end", rows)[rows]
+    exp_end = _previous_year(cur_end)
+    missing = (
+        (cur_start <= 0)
+        | (cur_end <= 0)
+        | (pri_start <= 0)
+        | (pri_end <= 0)
+        | (exp_end <= 0)
+        | (cur_start > cur_end)
+        | (pri_start > pri_end)
+    )
+    end_diff = np.abs(pri_end - exp_end) > 7
+    len_diff = np.abs((pri_end - pri_start) - (cur_end - cur_start)) > 7
+    result[rows] = missing | end_diff | len_diff
     return result
 
 
