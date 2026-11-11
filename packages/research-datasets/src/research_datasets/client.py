@@ -29,7 +29,15 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.dataset as pads
 
-from .constants import API, DATA_FAMILIES, FIELDS, __version__
+from .constants import (
+    API,
+    DATA_FAMILIES,
+    FAMILY_SPECS,
+    FIELDS,
+    MANIFEST_SCHEMA_MAX,
+    FamilySpec,
+    __version__,
+)
 from .panels import (
     build_candidates,
 )
@@ -61,16 +69,8 @@ from .panels import (
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _RETRY = {429, 500, 502, 503, 504}
 _BATCH_SIZE = 65536
-_FAMILY_CLOCKS: dict[str, str | None] = {
-    "events": "event_date",
-    "event_observations": "observation_recorded_at",
-    "source_checks": "checked_at",
-    "price_coverage": None,
-    "security_history": "observed_at",
-    "earnings_observations": "observed_at",
-    "fundamentals": None,
-    "financial_checks": "checked_at",
-}
+_VERSION = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:(a|b|rc)(\d+))?$")
+_PRE_RELEASE = {"a": 0, "b": 1, "rc": 2}
 _HINTS = {
     "UNAUTHORIZED": "只读 key 无效或已撤销，请更新调用时提供的 key。",
     "DATASET_NOT_READY": "这个固定版本还没有归档完成：稍后再试，或改用已就绪的版本。",
@@ -83,7 +83,44 @@ _HINTS = {
     "CAPABILITY_MISSING": "这个固定版本未包含该数据族或冻结日历：请改用包含该能力的研究版本。",
     "SYMBOL_AMBIGUOUS": "证券代码在这个版本中对应多个证券身份：请改传明确的 asset_id。",
     "ISSUER_MAPPING_MISSING": "所选证券没有已核实的冻结发行人映射。请查看该版本的 universe。",
+    "CLIENT_TOO_OLD": "这个固定版本需要更新的 SDK：请按控制台给出的固定提交重新安装 SDK。",
 }
+
+
+def _version_key(value: Any) -> tuple[int, ...] | None:
+    """Release order of X.Y.Z with an optional aN/bN/rcN pre-release (rc1 < final)."""
+    match = _VERSION.match(value) if isinstance(value, str) else None
+    if match is None:
+        return None
+    major, minor, patch, phase, number = match.groups()
+    return (
+        int(major),
+        int(minor),
+        int(patch),
+        _PRE_RELEASE[phase] if phase else len(_PRE_RELEASE),
+        int(number or 0),
+    )
+
+
+def check_manifest(manifest: Mapping[str, Any]) -> None:
+    """Refuse a manifest layout or client minimum this SDK does not understand."""
+    schema = manifest.get("schema_version", 1)
+    if type(schema) is not int or schema < 1:
+        raise DatasetError("INTEGRITY", "manifest 的 schema_version 无效。")
+    if schema > MANIFEST_SCHEMA_MAX:
+        raise DatasetError(
+            "CLIENT_TOO_OLD",
+            f"manifest schema_version {schema} 新于本 SDK {__version__} 支持的 {MANIFEST_SCHEMA_MAX}。",
+        )
+    minimum = manifest.get("client_min_version")
+    if minimum in (None, ""):
+        return
+    required = _version_key(minimum)
+    if required is None or required > (_version_key(__version__) or ()):
+        raise DatasetError(
+            "CLIENT_TOO_OLD",
+            f"这个固定版本要求 SDK {minimum} 或更新，本 SDK 是 {__version__}。",
+        )
 
 
 class DatasetError(Exception):
@@ -456,9 +493,9 @@ def _scan_batches(
     start: str | None = None,
     end: str | None = None,
     event_date_fallback: bool = False,
+    columns: Sequence[str] | None = None,
 ) -> pa.Table:
-    schema = dataset.schema
-    names = set(schema.names)
+    names = set(dataset.schema.names)
     clauses = []
     for col_name, allowed in scalar_filters:
         if col_name in names:
@@ -473,9 +510,15 @@ def _scan_batches(
     condition = None
     for clause in clauses:
         condition = clause if condition is None else condition & clause
-    scanner = dataset.scanner(
-        columns=list(schema.names), filter=condition, batch_size=_BATCH_SIZE
-    )
+    # Read only the requested columns plus those the filters below need.
+    needed = list(dataset.schema.names)
+    if columns is not None:
+        filters = {"asset_ids", "event_date", "filing_date", time_col}
+        if historical_links:
+            filters.add("asset_first_seen_at")
+        needed = [name for name in needed if name in columns or name in filters]
+    scanner = dataset.scanner(columns=needed, filter=condition, batch_size=_BATCH_SIZE)
+    schema = scanner.projected_schema
     batches = []
     for batch in scanner.to_batches():
         if batch.num_rows == 0:
@@ -535,7 +578,8 @@ def _scan_batches(
             if batch.num_rows == 0:
                 continue
         batches.append(batch)
-    return pa.Table.from_batches(batches, schema=schema)
+    table = pa.Table.from_batches(batches, schema=schema)
+    return table if columns is None else table.select(list(columns))
 
 
 def _columns(fields: Sequence[str] | None, wide: str | None) -> list[str]:
@@ -600,6 +644,7 @@ class Dataset:
     def __init__(
         self, client: Client, manifest: dict[str, Any], manifest_sha256: str = ""
     ) -> None:
+        check_manifest(manifest)
         self._client, self.manifest = client, manifest
         self.manifest_sha256 = manifest_sha256
         self.id = str(manifest["dataset_id"])
@@ -776,7 +821,8 @@ class Dataset:
             raise DatasetError("BAD_REQUEST", "证券重复。")
         return ids
 
-    def _require_family(self, family: str) -> dict[str, Any]:
+    def _require_family(self, family: str) -> FamilySpec:
+        """A frozen family this SDK understands; checked only when it is read."""
         families = self.manifest.get("data_families")
         info = families.get(family) if isinstance(families, dict) else None
         if not isinstance(info, dict):
@@ -784,7 +830,18 @@ class Dataset:
                 "CAPABILITY_MISSING",
                 f"这个固定版本未包含 {family} 数据族。",
             )
-        return info
+        spec = FAMILY_SPECS.get(family)
+        if spec is None:
+            raise DatasetError(
+                "CLIENT_TOO_OLD", f"本 SDK {__version__} 不认识 {family} 数据族。"
+            )
+        schema = info.get("schema_version", 1)
+        if schema not in spec.schema_versions:
+            raise DatasetError(
+                "CLIENT_TOO_OLD",
+                f"{family} 数据族的 schema_version {schema} 需要更新的 SDK（本 SDK {__version__}）。",
+            )
+        return spec
 
     def _issuer_ids(
         self, symbols: str | Sequence[str] | None
@@ -848,10 +905,9 @@ class Dataset:
         ]
         if not files:
             return []
-        clock = _FAMILY_CLOCKS[family]
-        identity_column = (
-            "cik" if family in {"fundamentals", "financial_checks"} else "asset_id"
-        )
+        spec = FAMILY_SPECS.get(family)
+        clock = spec.part_clock if spec is not None else None
+        identity_column = spec.identity if spec is not None else "none"
         index = {
             entry["key"]: entry
             for entry in self.manifest.get("part_index", [])
@@ -863,7 +919,7 @@ class Dataset:
             if not isinstance(entry, dict) or entry.get("family") != family:
                 selected.append(item)
                 continue
-            if identities is not None:
+            if identities is not None and identity_column != "none":
                 first_id = entry.get(f"first_{identity_column}")
                 last_id = entry.get(f"last_{identity_column}")
                 if (
@@ -898,21 +954,30 @@ class Dataset:
         start: str | date | None = None,
         end: str | date | None = None,
         metrics: Sequence[str] | None = None,
+        columns: Sequence[str] | None = None,
     ) -> pd.DataFrame:
-        self._require_family(family)
+        spec = self._require_family(family)
         attrs: dict[str, Any] = {"dataset_version": self.id}
-        identity_column = "asset_id"
+        identity_column = spec.identity
         unmapped: list[str] = []
-        if family in {"fundamentals", "financial_checks"}:
+        whole = symbols is None or symbols == "all"
+        if identity_column == "cik":
             identities, unmapped = self._issuer_ids(symbols)
-            identity_column = "cik"
             attrs.update(
                 unmapped_asset_ids=unmapped, unmapped_asset_count=len(unmapped)
             )
+        elif identity_column == "none":
+            if not whole:
+                raise DatasetError(
+                    "BAD_REQUEST", f"{family} 不按证券划分：请不传 symbols。"
+                )
+            identities = None
         else:
-            identities = (
-                None if (symbols is None or symbols == "all") else self.resolve(symbols)
-            )
+            identities = None if whole else self.resolve(symbols)
+        if columns is not None:
+            columns = list(dict.fromkeys(columns))
+            if not columns or any(not isinstance(name, str) for name in columns):
+                raise DatasetError("BAD_REQUEST", "columns 需要非空的列名列表。")
         start_s, end_s = _range(start, end)
         cache_key = (
             "_read_family",
@@ -922,6 +987,7 @@ class Dataset:
             start_s,
             end_s,
             tuple(metrics) if metrics is not None else None,
+            tuple(columns) if columns is not None else None,
         )
         if cache_key in self._df_cache:
             return _copy_frame(self._df_cache[cache_key])
@@ -948,9 +1014,16 @@ class Dataset:
         paths = [str(self._client._part(item)) for item in parts]
         ds = pads.dataset(paths, format="parquet")
         names = set(ds.schema.names)
-        time_col = _FAMILY_CLOCKS[family]
+        if columns is not None and not set(columns).issubset(names):
+            raise DatasetError(
+                "BAD_REQUEST",
+                f"{family} 没有这些列：{sorted(set(columns) - names)}。",
+            )
+        time_col = spec.part_clock
         if family == "event_observations" and time_col not in names:
             time_col = "content_first_seen_at"
+        if (start_s or end_s) and time_col is None:
+            raise DatasetError("BAD_REQUEST", f"{family} 不支持按日期筛选。")
         if (start_s or end_s) and time_col not in names:
             raise DatasetError(
                 "CAPABILITY_MISSING", f"{family} 缺少 {time_col} 时间列。"
@@ -958,7 +1031,10 @@ class Dataset:
         scalar_filters: list[tuple[str, Sequence[Any]]] = []
         asset_ids_wanted = None
         if identities is not None:
-            if family == "event_observations" and "asset_ids" in names:
+            # Families that link events to securities carry an asset_ids list instead.
+            if "asset_ids" in names and (
+                family == "event_observations" or identity_column not in names
+            ):
                 asset_ids_wanted = set(identities)
             elif identity_column in names:
                 scalar_filters.append((identity_column, identities))
@@ -976,6 +1052,7 @@ class Dataset:
             time_col=time_col,
             start=start_s,
             end=end_s,
+            columns=columns,
         )
         frame = table.to_pandas().reset_index(drop=True)
         self._client._say(
@@ -1090,6 +1167,9 @@ class Dataset:
         sources: str | Sequence[str] | None = None,
     ) -> pd.DataFrame:
         """Events frozen in this version: SEC filings, corporate actions, news metadata and the earnings calendar."""
+        families = self.manifest.get("data_families")
+        if isinstance(families, dict) and "events" in families:
+            self._require_family("events")
         before = self._client._mark()
         start_s, end_s = _range(start, end)
         paths = [
@@ -1151,6 +1231,40 @@ class Dataset:
         self._client._say(before, f"{self.id[:8]} 事件 {len(frame):,} 条")
         frame.attrs.update(dataset_version=self.id)
         return frame
+
+    def family(
+        self,
+        name: str,
+        symbols: str | Sequence[str] | None = None,
+        start: str | date | None = None,
+        end: str | date | None = None,
+        *,
+        columns: Sequence[str] | None = None,
+    ) -> pd.DataFrame:
+        """Any frozen family registered in FAMILY_SPECS, filtered by security and part clock.
+
+        A family this SDK does not know, or a newer family schema, raises CLIENT_TOO_OLD
+        only when it is read; the rest of the version stays readable.
+        """
+        if name in {"raw", "all"}:
+            raise DatasetError("BAD_REQUEST", "价格请用 prices()。")
+        if name == "events":
+            # events keeps its own reader: list links, legacy layouts and date fallback.
+            frame = self.events(symbols, start, end)
+            if columns is None or frame.columns.empty:
+                return frame
+            columns = list(dict.fromkeys(columns))
+            if not columns or any(not isinstance(column, str) for column in columns):
+                raise DatasetError("BAD_REQUEST", "columns 需要非空的列名列表。")
+            missing = sorted(set(columns) - set(frame.columns))
+            if missing:
+                raise DatasetError("BAD_REQUEST", f"events 没有这些列：{missing}。")
+            selected = frame[columns].copy()
+            selected.attrs.update(frame.attrs)
+            return selected
+        return self._read_family(
+            name, symbols=symbols, start=start, end=end, columns=columns
+        )
 
     def event_observations(
         self,
@@ -1456,9 +1570,10 @@ class Dataset:
         self,
         symbols: str | Sequence[str] | None = None,
         *,
+        time_policy: str,
         start: str | date | None = None,
         end: str | date | None = None,
-        time_policy: str = "observed_content",
+        benchmark: str | None = None,
     ) -> pd.DataFrame:
         """Return daily price/volume/event-count PIT features as a ``pd.DataFrame``."""
         return _daily_features(
@@ -1467,17 +1582,18 @@ class Dataset:
             start=start,
             end=end,
             time_policy=time_policy,
+            benchmark=benchmark,
         )
 
     def fundamental_features(
         self,
         candidates_or_symbols: pd.DataFrame | str | Sequence[str] | None = None,
         *,
+        time_policy: str,
         start: str | date | None = None,
         end: str | date | None = None,
         metrics: Mapping[str, str] | Sequence[str] | None = None,
         period_kind: str | Sequence[str] = "quarter",
-        time_policy: str = "observed_content",
     ) -> pd.DataFrame:
         """Return PIT-aligned fundamental features as a ``pd.DataFrame``."""
         return _fundamental_features(
@@ -1494,11 +1610,11 @@ class Dataset:
         self,
         candidates_or_symbols: pd.DataFrame | str | Sequence[str] | None = None,
         *,
+        time_policy: str,
         start: str | date | None = None,
         end: str | date | None = None,
         currency: str = "USD",
         period_kind: str | Sequence[str] = "quarter",
-        time_policy: str = "observed_content",
     ) -> pd.DataFrame:
         """Return PIT-aligned fundamental ratios as a ``pd.DataFrame``."""
         return _fundamental_ratios(
@@ -1534,11 +1650,11 @@ class Dataset:
         self,
         symbols: str | Sequence[str] | None = None,
         *,
+        time_policy: str,
         start: str | date | None = None,
         end: str | date | None = None,
         benchmark: str = "SPY",
         horizons: int | Iterable[int] = (1, 5),
-        time_policy: str = "observed_content",
         fundamental_time_policy: str | None = None,
         include_fundamentals: bool = True,
         include_ratios: bool = True,
@@ -1580,6 +1696,7 @@ __all__ = [
     "_prepare",
     "_prepare_fundamental_features",
     "_prepare_fundamental_ratios",
+    "check_manifest",
     "connect",
     "load",
 ]

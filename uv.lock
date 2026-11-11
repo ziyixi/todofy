@@ -1591,7 +1591,7 @@ dev = [
 
 [[package]]
 name = "todofy-research-datasets"
-version = "1.2.0"
+version = "2.0.0rc1"
 source = { editable = "packages/research-datasets" }
 dependencies = [
     { name = "numpy" },

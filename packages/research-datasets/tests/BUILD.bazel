@@ -35,9 +35,23 @@ unittest_test(
     ],
 )
 
+unittest_test(
+    name = "test_events",
+    size = "small",
+    srcs = ["test_events.py", "test_sdk.py"],
+    imports = [".", "..", "../src"],
+    modules = ["tests.test_events"],
+    deps = [
+        "//packages/research-datasets/src/research_datasets:library",
+        "@python_deps//numpy",
+        "@python_deps//pandas",
+        "@python_deps//pyarrow",
+    ],
+)
+
 test_suite(
     name = "tests",
-    tests = [":test_sdk", ":test_regressions"],
+    tests = [":test_events", ":test_sdk", ":test_regressions"],
 )
 
 filegroup(

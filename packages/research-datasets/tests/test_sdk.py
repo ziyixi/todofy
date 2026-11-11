@@ -25,19 +25,87 @@ BENCH_SPY = "00000000-0000-4000-8000-000000000099"
 CIK_A = "0000000101"
 CIK_G = "0000000102"
 TOKEN = "synthetic.bearer+key/with=padding"
+LIMITATION_PREFIX = "A row is decided at 06:00 New York"
 
 
-def _parquet_bytes(rows: list[dict[str, object]]) -> bytes:
-    table = pa.Table.from_pylist(rows)
+STORY = "synthetic-story-key-0001"
+SESSIONS = pd.bdate_range("2026-01-02", periods=32).strftime("%Y-%m-%d").tolist()
+OBSERVATION_SCHEMA = pa.schema(
+    [
+        ("observation_id", pa.string()),
+        ("event_id", pa.string()),
+        ("event_uid", pa.string()),
+        ("source", pa.string()),
+        ("form", pa.string()),
+        ("filing_date", pa.string()),
+        ("event_date", pa.string()),
+        ("asset_ids", pa.list_(pa.string())),
+        ("asset_first_seen_at", pa.map_(pa.string(), pa.string())),
+        ("content_first_seen_at", pa.string()),
+        ("observation_recorded_at", pa.string()),
+        ("observation_sequence", pa.int64()),
+        ("public_time_precision", pa.string()),
+        ("public_at", pa.string()),
+        ("public_date", pa.string()),
+    ]
+)
+
+
+def _parquet_bytes(
+    rows: list[dict[str, object]], schema: pa.Schema | None = None
+) -> bytes:
+    table = pa.Table.from_pylist(rows, schema=schema)
     buf = io.BytesIO()
     pq.write_table(table, buf)
     return buf.getvalue()
 
 
+def observation(
+    uid: str, source: str, assets: list[str], public_at: str, **changes: object
+) -> dict[str, object]:
+    """One frozen event observation version, captured when it became public."""
+    values: dict[str, object] = {
+        "observation_id": f"obs-{uid}-{changes.get('observation_sequence', 1)}",
+        "event_id": uid,
+        "event_uid": uid,
+        "source": source,
+        "form": "8-K" if source == "sec" else None,
+        "filing_date": public_at[:10] if source == "sec" else None,
+        "event_date": public_at[:10],
+        "asset_ids": assets,
+        "asset_first_seen_at": {asset: public_at for asset in assets},
+        "content_first_seen_at": public_at,
+        "observation_recorded_at": public_at,
+        "observation_sequence": 1,
+        "public_time_precision": "second",
+        "public_at": public_at,
+        "public_date": "",
+    }
+    values.update(changes)
+    return values
+
+
+def default_observations() -> list[dict[str, object]]:
+    """A legacy-form SEC filing, two articles of one story and an unknown source."""
+    return [
+        observation("evt-sec-1", "sec", [ASSET_A], f"{SESSIONS[5]}T20:00:00Z"),
+        observation(
+            "news-1", "alpaca_news", [ASSET_A, ASSET_G1], f"{SESSIONS[7]}T15:00:00Z"
+        ),
+        observation("news-2", "alpaca_news", [ASSET_A], f"{SESSIONS[7]}T18:00:00Z"),
+        observation("future-1", "future_x", [ASSET_A], f"{SESSIONS[7]}T18:00:00Z"),
+    ]
+
+
 def _build_synthetic_bundle(
     financial_status: str = "checked",
+    *,
+    observations: list[dict[str, object]] | None = None,
+    extra_families: dict[str, list[dict[str, object]]] | None = None,
+    family_updates: dict[str, dict[str, object]] | None = None,
+    manifest_updates: dict[str, object] | None = None,
 ) -> tuple[dict[str, bytes], str]:
-    sessions = pd.bdate_range("2026-01-02", periods=32).strftime("%Y-%m-%d").tolist()
+    sessions = SESSIONS
     recipe_bytes = b"# synthetic recipe\n__version__ = '1.0.0'\n"
 
     universe = [
@@ -138,21 +206,8 @@ def _build_synthetic_bundle(
     )
 
     event_obs_bytes = _parquet_bytes(
-        [
-            {
-                "observation_id": "obs-evt-1",
-                "event_uid": "evt-sec-1",
-                "source": "sec",
-                "asset_ids": [ASSET_A],
-                "asset_first_seen_at": {ASSET_A: f"{sessions[5]}T20:00:00Z"},
-                "content_first_seen_at": f"{sessions[5]}T20:00:00Z",
-                "observation_recorded_at": f"{sessions[5]}T20:00:00Z",
-                "observation_sequence": 1,
-                "public_time_precision": "second",
-                "public_at": f"{sessions[5]}T20:00:00Z",
-                "public_date": "",
-            }
-        ]
+        default_observations() if observations is None else observations,
+        OBSERVATION_SCHEMA,
     )
 
     source_checks_bytes = _parquet_bytes(
@@ -163,12 +218,55 @@ def _build_synthetic_bundle(
                 "checked_start": sessions[0],
                 "checked_end": sessions[-1],
                 "checked_at": f"{sessions[0]}T00:00:00Z",
-                "status": "checked",
-                "error_code": "",
+                "status": "partial" if source == "alpaca_news" else "checked",
+                "error_code": "SOURCE_PUBLICATION_COVERAGE_UNKNOWN"
+                if source == "alpaca_news"
+                else "",
                 "count": 1,
             }
             for asset_id in (ASSET_A, ASSET_G1, ASSET_G2, BENCH_SPY)
-            for source in ("sec", "alpaca_actions", "finnhub_news", "finnhub_earnings")
+            for source in (
+                "sec",
+                "alpaca_news",
+                "alpaca_actions",
+                "finnhub_news",
+                "finnhub_earnings",
+            )
+        ]
+    )
+
+    news_versions_bytes = _parquet_bytes(
+        [
+            {
+                "version_id": f"version-{uid}",
+                "event_id": uid,
+                "source": "alpaca_news",
+                "provider_updated_at": f"{sessions[7]}T{hour}:00:00Z",
+                "story_key": STORY,
+                "observed_at": f"{sessions[7]}T{hour}:00:00Z",
+            }
+            for uid, hour in (("news-1", 15), ("news-2", 18))
+        ]
+    )
+
+    symbol_history_bytes = _parquet_bytes(
+        [
+            {
+                "asset_id": asset_id,
+                "version": 1,
+                "ordinal": 0,
+                "symbol": symbol,
+                "valid_from": "2016-01-04",
+                "valid_to": "",
+                "status": "verified",
+                "basis": "synthetic",
+            }
+            for asset_id, symbol in [
+                (ASSET_A, "AAPL"),
+                (ASSET_G1, "GOOG"),
+                (ASSET_G2, "GOOGL"),
+                (BENCH_SPY, "SPY"),
+            ]
         ]
     )
 
@@ -335,8 +433,12 @@ def _build_synthetic_bundle(
         f"{prefix}/security_history/part-0000.parquet": security_history_bytes,
         f"{prefix}/fundamentals/part-0000.parquet": fundamentals_bytes,
         f"{prefix}/financial_checks/part-0000.parquet": financial_checks_bytes,
+        f"{prefix}/news_versions/part-0000.parquet": news_versions_bytes,
+        f"{prefix}/symbol_history/part-0000.parquet": symbol_history_bytes,
         f"{prefix}/recipe.py": recipe_bytes,
     }
+    for family, rows in (extra_families or {}).items():
+        objects[f"{prefix}/{family}/part-0000.parquet"] = _parquet_bytes(rows)
 
     files_list = [
         {
@@ -360,14 +462,21 @@ def _build_synthetic_bundle(
         "security_history",
         "fundamentals",
         "financial_checks",
+        "news_versions",
+        "symbol_history",
+        *(extra_families or {}),
     ):
         payload = objects[f"{prefix}/{family}/part-0000.parquet"]
         data_families[family] = {
+            "schema_version": 2 if family == "events" else 1,
             "rows": pq.read_table(io.BytesIO(payload)).num_rows,
             "bytes": len(payload),
+            **(family_updates or {}).get(family, {}),
         }
 
     manifest = {
+        "schema_version": 2,
+        "client_min_version": "1.0.0",
         "dataset_id": DATASET_ID,
         "cutoff_date": sessions[-1],
         "source_asof": sessions[-1],
@@ -384,6 +493,7 @@ def _build_synthetic_bundle(
         },
         "data_families": data_families,
         "files": files_list,
+        **(manifest_updates or {}),
     }
     manifest_bytes = json.dumps(manifest).encode("utf-8")
     objects[f"{prefix}/manifest.json"] = manifest_bytes
@@ -641,6 +751,7 @@ class DatasetSdkTest(unittest.TestCase):
                 end=end,
                 benchmark="SPY",
                 horizons=(1, 5),
+                time_policy="observed_content",
                 fundamental_time_policy="public_reconstructed",
                 output_dir=out_dir,
             )
@@ -651,8 +762,15 @@ class DatasetSdkTest(unittest.TestCase):
             self.assertIn("quarter_revenue_value", panel_df.columns)
             self.assertIn("quarter_gross_margin_value", panel_df.columns)
             self.assertIn("forward_excess_return_5d", panel_df.columns)
+            self.assertIn("alpaca_news_events_rank_21d", panel_df.columns)
             self.assertTrue((out_dir / "panel.parquet").is_file())
-            self.assertTrue((out_dir / "provenance.json").is_file())
+            provenance = json.loads((out_dir / "provenance.json").read_text())
+            self.assertEqual(
+                provenance["package_version"], research_datasets.__version__
+            )
+            self.assertEqual(provenance["skipped_sources"], {"future_x": 1})
+            self.assertIn(LIMITATION_PREFIX, " ".join(provenance["limitations"]))
+            self.assertEqual(provenance["parameters"]["time_policy_version"], 2)
 
             # Backward-compatible prepare() works both with and without train_end/validation_end
             features_no_split, labels_no_split, splits_none, _ = (
