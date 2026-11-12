@@ -25,7 +25,9 @@ ds = research_datasets.load(
 audit = ds.audit(symbols=["AAPL", "MSFT", "GOOG", "GOOGL"], strict=True)
 
 # Read frozen data families as pandas DataFrames.
-bars = ds.prices(["AAPL", "MSFT"], start="2025-12-01", end="2026-10-30", adjusted="both")
+bars = ds.prices(
+    ["AAPL", "MSFT"], start="2025-12-01", end="2026-10-30", adjusted="both"
+)
 close_wide = ds.prices(["AAPL", "MSFT"], wide="close")
 quarterly_facts = ds.fundamentals(
     ["GOOG", "GOOGL"],
@@ -202,3 +204,15 @@ panel = ds.panel(
   `ds.index_holdings()` read frozen universe and exit tables; when a reused ticker matches multiple securities and
   exactly one is `active`, `ds.resolve()` emits a `UserWarning` and selects the active holder (zero or multiple active
   matches still raise `SYMBOL_AMBIGUOUS`).
+
+### 2.3.0
+
+- Earnings-release document and structured extraction families (`release_documents`, `extraction_results`,
+  `extraction_facts`) join `FAMILY_SPECS` and `Dataset` (`ds.release_documents`, `ds.extraction_results`,
+  `ds.extraction_facts`), keyed by CIK with `accepted_at` / `recorded_at` partition clocks.
+- `release_features` (`ds.release_features`) builds point-in-time release headline, guidance, buyback, and dividend
+  features (`RELEASE_COLUMNS`) from `validation_status == "valid"` facts of one explicit `extractor_version`
+  (defaulting to `manifest["extraction"]["default_extractor_version"]`). When no `extractor_version` is active or the
+  release families are absent, zero columns are emitted.
+- `panel(..., include_release=False)` keeps release extraction features off by default until a production extractor
+  version is published in the manifest, and accepts `True` or an explicit `extractor_version` string.

@@ -21,6 +21,7 @@ py_library(
         "labels.py",
         "panels.py",
         "provenance.py",
+        "release_features.py",
         "sec_events.py",
         "valuation.py",
     ],

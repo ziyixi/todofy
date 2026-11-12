@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import time, timedelta
 from types import MappingProxyType
 
-__version__ = "2.2.0"
+__version__ = "2.3.0"
 API = "v1"
 
 # The newest manifest layout this SDK reads; client_min_version is checked separately.
@@ -181,6 +181,10 @@ FAMILY_SPECS: dict[str, FamilySpec] = {
     "security_identifiers": FamilySpec("asset_id", None, _V1),
     "factor_returns": FamilySpec("none", "date", _V1, evaluation_only=True),
     "text_changes": FamilySpec("cik", "available_at", _V1),
+    # Earnings release document captures and structured LLM extraction families.
+    "release_documents": FamilySpec("cik", "accepted_at", _V1),
+    "extraction_results": FamilySpec("cik", "recorded_at", _V1),
+    "extraction_facts": FamilySpec("cik", "accepted_at", _V1),
 }
 DATA_FAMILIES: tuple[str, ...] = tuple(FAMILY_SPECS)
 
