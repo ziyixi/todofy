@@ -18,6 +18,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import warnings
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from copy import deepcopy
 from datetime import date
@@ -32,6 +33,7 @@ import pyarrow.dataset as pads
 from .constants import (
     API,
     DATA_FAMILIES,
+    DEFAULT_EXTRA_GROUPS,
     DEFAULT_HORIZONS,
     FAMILY_SPECS,
     FIELDS,
@@ -40,6 +42,15 @@ from .constants import (
     __version__,
 )
 from .events import EventSpec
+from .extra_features import (
+    extra_features as _extra_features,
+)
+from .extra_features import (
+    factor_matrix as _factor_matrix,
+)
+from .extra_features import (
+    risk_free_daily as _risk_free_daily,
+)
 from .fundamentals import (
     fundamental_features as _fundamental_features,
 )
@@ -809,7 +820,12 @@ class Dataset:
             raise DatasetError("INTEGRITY", "研究脚本不是有效的 UTF-8 文本。") from None
 
     def resolve(self, symbols: str | Sequence[str] | None) -> list[str]:
-        """Tickers or asset UUIDs -> asset UUIDs. Any ticker matching multiple securities fails with SYMBOL_AMBIGUOUS."""
+        """Tickers or asset UUIDs -> asset UUIDs.
+
+        When a reused ticker matches multiple securities and exactly one match has
+        ``status == "active"``, emits a ``UserWarning`` and resolves to that active
+        security. Raises ``SYMBOL_AMBIGUOUS`` when zero or multiple matches are active.
+        """
         assets = self.manifest["universe"]
         if symbols is None or symbols == "all":
             return [str(asset["asset_id"]) for asset in assets]
@@ -836,6 +852,27 @@ class Dataset:
                     f"{value} 不在这个版本（{len(assets):,} 个证券）。",
                 )
             if len(matches) > 1:
+                active = [
+                    asset
+                    for asset in matches
+                    if str(asset.get("status", "")).lower() == "active"
+                ]
+                if len(active) == 1:
+                    chosen = str(active[0]["asset_id"])
+                    others = [
+                        str(asset["asset_id"])
+                        for asset in matches
+                        if str(asset["asset_id"]) != chosen
+                    ]
+                    warnings.warn(
+                        f"Symbol {value!r} matches {len(matches)} securities in dataset "
+                        f"{self.id}; preferring active security {chosen} over inactive "
+                        f"{others}. Pass an explicit asset_id to select a specific security.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    ids.append(chosen)
+                    continue
                 listing = "；".join(
                     f"{asset['asset_id']} {asset.get('status', '')} {asset.get('name', '')}"
                     for asset in matches
@@ -1023,7 +1060,7 @@ class Dataset:
         optional_columns: bool = False,
     ) -> pd.DataFrame:
         spec = self._require_family(family)
-        attrs: dict[str, Any] = {"dataset_version": self.id}
+        attrs: dict[str, Any] = {"dataset_version": self.id, "family": family}
         identity_column = spec.identity
         unmapped: list[str] = []
         whole = symbols is None or symbols == "all"
@@ -1032,6 +1069,18 @@ class Dataset:
             attrs.update(
                 unmapped_asset_ids=unmapped, unmapped_asset_count=len(unmapped)
             )
+        elif identity_column == "series_id":
+            if whole:
+                identities = None
+            else:
+                raw_ids = [symbols] if isinstance(symbols, str) else list(symbols)
+                if not raw_ids or any(
+                    not isinstance(item, str) or not item.strip() for item in raw_ids
+                ):
+                    raise DatasetError("BAD_REQUEST", "series_id 需要非空的序列标识。")
+                identities = list(
+                    dict.fromkeys(item.strip().upper() for item in raw_ids)
+                )
         elif identity_column == "none":
             if not whole:
                 raise DatasetError(
@@ -1108,6 +1157,8 @@ class Dataset:
                 asset_ids_wanted = set(identities)
             elif identity_column in names:
                 scalar_filters.append((identity_column, identities))
+            elif identity_column == "cik" and "issuer_cik" in names:
+                scalar_filters.append(("issuer_cik", identities))
             else:
                 raise DatasetError("INTEGRITY", f"{family} 缺少证券身份列。")
         if metrics is not None:
@@ -1660,6 +1711,78 @@ class Dataset:
             columns=columns,
         )
 
+    def universe_membership(
+        self,
+        symbols: str | Sequence[str] | None = None,
+        *,
+        rule_version: str | None = None,
+        start: str | date | None = None,
+        end: str | date | None = None,
+        columns: Sequence[str] | None = None,
+    ) -> pd.DataFrame:
+        """Frozen monthly point-in-time universe membership rows, optionally filtered by ``rule_version``."""
+        read_cols = columns
+        drop_rule = False
+        if (
+            rule_version is not None
+            and columns is not None
+            and "rule_version" not in columns
+        ):
+            read_cols = [*columns, "rule_version"]
+            drop_rule = True
+        frame = self._read_family(
+            "universe_membership",
+            symbols=symbols,
+            start=start,
+            end=end,
+            columns=read_cols,
+        )
+        if (
+            rule_version is not None
+            and not frame.empty
+            and "rule_version" in frame.columns
+        ):
+            saved_attrs = dict(frame.attrs)
+            frame = frame[
+                frame["rule_version"].astype(str) == rule_version
+            ].reset_index(drop=True)
+            if drop_rule and columns is not None:
+                frame = frame[list(columns)].copy()
+            frame.attrs.update(saved_attrs)
+        return frame
+
+    def delistings(
+        self,
+        symbols: str | Sequence[str] | None = None,
+        start: str | date | None = None,
+        end: str | date | None = None,
+        *,
+        columns: Sequence[str] | None = None,
+    ) -> pd.DataFrame:
+        """Frozen security exit and delisting resolution records."""
+        return self._read_family(
+            "delistings",
+            symbols=symbols,
+            start=start,
+            end=end,
+            columns=columns,
+        )
+
+    def index_holdings(
+        self,
+        start: str | date | None = None,
+        end: str | date | None = None,
+        *,
+        columns: Sequence[str] | None = None,
+    ) -> pd.DataFrame:
+        """Frozen public index benchmark holdings snapshots."""
+        return self._read_family(
+            "index_holdings",
+            start=start,
+            end=end,
+            columns=columns,
+        )
+
     def cik_at(
         self,
         asset_ids: Sequence[str],
@@ -1802,6 +1925,53 @@ class Dataset:
             else self.candidates(candidates_or_symbols, start=start, end=end)
         )
         return _industry(self, samples, time_policy=time_policy)
+
+    def extra_features(
+        self,
+        candidates_or_symbols: pd.DataFrame | str | Sequence[str] | None = None,
+        *,
+        time_policy: str,
+        start: str | date | None = None,
+        end: str | date | None = None,
+        groups: Sequence[str] = DEFAULT_EXTRA_GROUPS,
+        fundamentals: pd.DataFrame | None = None,
+        ranks: bool = False,
+        allow_unverified_links: bool = False,
+    ) -> pd.DataFrame:
+        """Compute reference, market ETF, insider, short-interest, filing-text, and borrow features."""
+        samples = (
+            candidates_or_symbols
+            if isinstance(candidates_or_symbols, pd.DataFrame)
+            else self.candidates(candidates_or_symbols, start=start, end=end)
+        )
+        return _extra_features(
+            self,
+            samples,
+            time_policy=time_policy,
+            groups=groups,
+            fundamentals=fundamentals,
+            ranks=ranks,
+            allow_unverified_links=allow_unverified_links,
+        )
+
+    def factor_matrix(
+        self,
+        *,
+        factor_set: str = "ff5_daily",
+        start: str | date | None = None,
+        end: str | date | None = None,
+    ) -> pd.DataFrame:
+        """Read evaluation-only academic factor returns as a ``date x factor`` DataFrame."""
+        return _factor_matrix(self, factor_set=factor_set, start=start, end=end)
+
+    def risk_free_daily(
+        self,
+        *,
+        series: str = "DTB3",
+        time_policy: str = "public_reconstructed",
+    ) -> pd.Series:
+        """Daily compounded risk-free return per session for label evaluation."""
+        return _risk_free_daily(self, series=series, time_policy=time_policy)
 
     def audit(
         self,
@@ -2135,6 +2305,7 @@ class Dataset:
         include_ratios: bool = True,
         include_sec_events: bool = True,
         include_earnings: bool = True,
+        include_extra: bool | Sequence[str] = True,
         provenance_columns: bool = False,
         output_dir: str | Path | None = None,
     ) -> pd.DataFrame:
@@ -2160,6 +2331,7 @@ class Dataset:
             include_ratios=include_ratios,
             include_sec_events=include_sec_events,
             include_earnings=include_earnings,
+            include_extra=include_extra,
             provenance_columns=provenance_columns,
             output_dir=output_dir,
         )

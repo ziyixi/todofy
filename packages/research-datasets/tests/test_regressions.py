@@ -210,6 +210,10 @@ class ContractRegressionTest(unittest.TestCase):
                 "Dataset.fundamental_features": lambda: ds.fundamental_features(
                     ["AAPL"], **window
                 ),
+                "extra_features": lambda: research_datasets.extra_features(
+                    ds, ds.candidates(["AAPL"], universe="static", **window)
+                ),
+                "Dataset.extra_features": lambda: ds.extra_features(["AAPL"], **window),
             }
             before = server.request_count
             for name, call in calls.items():
@@ -362,9 +366,12 @@ class ContractRegressionTest(unittest.TestCase):
             ("2.0.1", True),
             ("2.1.0rc1", True),
             ("2.1.0", True),
-            ("2.1.1", False),
-            ("2.1.1rc1", False),
-            ("2.2.0", False),
+            ("2.1.1", True),
+            ("2.2.0rc1", True),
+            ("2.2.0", True),
+            ("2.2.1", False),
+            ("2.2.1rc1", False),
+            ("2.3.0", False),
             ("next", False),
         ):
             manifest = {"schema_version": 2, "client_min_version": minimum}

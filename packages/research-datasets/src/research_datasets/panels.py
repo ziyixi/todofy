@@ -21,6 +21,7 @@ import pandas as pd
 
 from . import candidates as _candidates
 from . import clocks
+from . import extra_features as _extra_features
 from . import fundamentals as _fundamentals
 from . import fundamentals_derived as _fundamentals_derived
 from . import industry as _industry
@@ -33,7 +34,9 @@ from .clocks import day as _day
 from .clocks import policy as _policy
 from .constants import (
     DECISION_TIME,
+    DEFAULT_EXTRA_GROUPS,
     DEFAULT_HORIZONS,
+    EXTRA_GROUPS,
     KEYS,
     NEW_YORK_ZONE,
     QUARTER_DEFAULT_EXCLUDED_METRICS,
@@ -930,6 +933,7 @@ def panel(
     include_ratios: bool = True,
     include_sec_events: bool = True,
     include_earnings: bool = True,
+    include_extra: bool | Sequence[str] = True,
     provenance_columns: bool = False,
     output_dir: str | Path | None = None,
 ) -> pd.DataFrame:
@@ -946,6 +950,21 @@ def panel(
     if fundamentals not in ("derived", "legacy", "none"):
         raise ValueError(
             f"fundamentals must be 'derived', 'legacy', or 'none', got {fundamentals!r}"
+        )
+    if isinstance(include_extra, bool):
+        extra_groups = list(DEFAULT_EXTRA_GROUPS) if include_extra else []
+    elif isinstance(include_extra, Sequence) and not isinstance(
+        include_extra, (str, bytes)
+    ):
+        extra_groups = list(dict.fromkeys(include_extra))
+        unknown_extra = [g for g in extra_groups if g not in EXTRA_GROUPS]
+        if unknown_extra:
+            raise ValueError(
+                f"Unknown extra feature group(s) {unknown_extra}; valid groups are {EXTRA_GROUPS}"
+            )
+    else:
+        raise TypeError(
+            "include_extra must be a bool or a sequence of extra feature group names"
         )
     _policy(time_policy)
     fund_policy = _policy(fundamental_time_policy or time_policy)
@@ -1051,6 +1070,7 @@ def panel(
         primary_periods = earn_df.attrs.get("primary_period_end")
         parts.append(earn_df.drop(columns=KEYS))
 
+    extra_fund_cols: dict[str, Any] = {}
     if fundamentals == "derived" and (include_fundamentals or include_ratios):
         derived = _fundamentals_derived.derived_fundamentals(
             version,
@@ -1058,6 +1078,14 @@ def panel(
             time_policy=fund_policy,
             provenance=provenance_columns,
         )
+        if "shares_outstanding_i_value" in derived.columns:
+            extra_fund_cols["shares_outstanding_value"] = derived[
+                "shares_outstanding_i_value"
+            ].to_numpy()
+            if "shares_outstanding_i_status" in derived.columns:
+                extra_fund_cols["shares_outstanding_status"] = derived[
+                    "shares_outstanding_i_status"
+                ]
         manifest_lims = set(version.manifest.get("limitations", []))
         derived_limitations = [
             item
@@ -1086,6 +1114,14 @@ def panel(
                 provenance=provenance_columns,
             )
             parts.append(val.drop(columns=KEYS))
+            if "market_cap_issuer_value" in val.columns:
+                extra_fund_cols["market_cap_issuer_value"] = val[
+                    "market_cap_issuer_value"
+                ].to_numpy()
+                if "market_cap_issuer_status" in val.columns:
+                    extra_fund_cols["market_cap_issuer_status"] = val[
+                        "market_cap_issuer_status"
+                    ]
             if (
                 _valuation.VALUATION_LIMITATION not in manifest_lims
                 and _valuation.VALUATION_LIMITATION not in derived_limitations
@@ -1157,6 +1193,14 @@ def panel(
                 inputs=inputs,
             )
             parts.append(fund.drop(columns=KEYS))
+            if "instant_shares_outstanding_value" in fund.columns:
+                extra_fund_cols["shares_outstanding_value"] = fund[
+                    "instant_shares_outstanding_value"
+                ].to_numpy()
+                if "instant_shares_outstanding_status" in fund.columns:
+                    extra_fund_cols["shares_outstanding_status"] = fund[
+                        "instant_shares_outstanding_status"
+                    ]
 
         if include_ratios:
             ratios = _fundamentals.ratios_by_period(
@@ -1181,6 +1225,53 @@ def panel(
                     + [column for column in ratios.columns if column.startswith(stale)]
                 )
             )
+
+    extra_family_names = (
+        "reference_series",
+        "reference_checks",
+        "short_interest",
+        "insider_transactions",
+        "borrow_availability",
+        "text_changes",
+    )
+    extra_families_present = [f for f in extra_family_names if f in families]
+    extra_coverage_counts: dict[str, dict[str, int]] = {}
+    if extra_groups:
+        fund_frame = (
+            pd.DataFrame(extra_fund_cols, index=rows.index) if extra_fund_cols else None
+        )
+        extra_cand_cols = [
+            c
+            for c in (*KEYS, "decision_at", "in_universe", "is_benchmark")
+            if c in rows.columns
+        ]
+        extra_df = _extra_features.extra_features(
+            version,
+            rows[extra_cand_cols],
+            time_policy=time_policy,
+            groups=extra_groups,
+            fundamentals=fund_frame,
+        )
+        if not extra_df.columns.empty:
+            parts.append(extra_df)
+            for cov_col in (
+                "ins_coverage",
+                "si_coverage",
+                "txt_status",
+                "brw_observed",
+            ):
+                if cov_col in extra_df.columns:
+                    vc = extra_df[cov_col].value_counts(dropna=False)
+                    extra_coverage_counts[cov_col] = {
+                        ("null" if pd.isna(k) else str(k)): int(v)
+                        for k, v in vc.items()
+                        if int(v) > 0
+                    }
+    extra_provenance = {
+        "groups": extra_groups,
+        "families_present": extra_families_present,
+        "coverage_counts": extra_coverage_counts,
+    }
 
     labels = forward_returns(
         version,
@@ -1240,6 +1331,9 @@ def panel(
             "include_ratios": include_ratios,
             "include_sec_events": include_sec_events,
             "include_earnings": include_earnings,
+            "include_extra": (
+                include_extra if isinstance(include_extra, bool) else extra_groups
+            ),
             "provenance_columns": provenance_columns,
             "next_session": None if next_session is None else str(_day(next_session)),
             "membership_carried_from": candidates.attrs["parameters"][
@@ -1271,6 +1365,7 @@ def panel(
         columns=len(combined.columns),
         masks=masks,
         label_overlap=labels.attrs["label_overlap"],
+        extra=extra_provenance,
         **{
             name: daily_provenance.get(name, {})
             for name in (
