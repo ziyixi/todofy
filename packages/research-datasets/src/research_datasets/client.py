@@ -99,6 +99,9 @@ from .panels import (
 from .panels import (
     prepare as _prepare,
 )
+from .release_features import (
+    release_features as _release_features,
+)
 from .sec_events import (
     earnings_calendar_asof as _earnings_calendar_asof,
 )
@@ -156,14 +159,28 @@ def check_manifest(manifest: Mapping[str, Any]) -> None:
             f"manifest schema_version {schema} 新于本 SDK {__version__} 支持的 {MANIFEST_SCHEMA_MAX}。",
         )
     minimum = manifest.get("client_min_version")
-    if minimum in (None, ""):
-        return
-    required = _version_key(minimum)
-    if required is None or required > (_version_key(__version__) or ()):
-        raise DatasetError(
-            "CLIENT_TOO_OLD",
-            f"这个固定版本要求 SDK {minimum} 或更新，本 SDK 是 {__version__}。",
-        )
+    if minimum not in (None, ""):
+        required = _version_key(minimum)
+        if required is None or required > (_version_key(__version__) or ()):
+            raise DatasetError(
+                "CLIENT_TOO_OLD",
+                f"这个固定版本要求 SDK {minimum} 或更新，本 SDK 是 {__version__}。",
+            )
+    extraction = manifest.get("extraction")
+    if extraction is not None:
+        if not isinstance(extraction, Mapping):
+            raise DatasetError("INTEGRITY", "manifest 的 extraction 字段无效。")
+        default_ver = extraction.get("default_extractor_version")
+        if default_ver is not None and not isinstance(default_ver, str):
+            raise DatasetError(
+                "INTEGRITY", "manifest 的 default_extractor_version 字段无效。"
+            )
+        versions = extraction.get("extractor_versions")
+        if versions is not None and (
+            not isinstance(versions, list)
+            or not all(isinstance(item, Mapping) for item in versions)
+        ):
+            raise DatasetError("INTEGRITY", "manifest 的 extractor_versions 字段无效。")
 
 
 class DatasetError(Exception):
@@ -1973,6 +1990,93 @@ class Dataset:
         """Daily compounded risk-free return per session for label evaluation."""
         return _risk_free_daily(self, series=series, time_policy=time_policy)
 
+    def release_documents(
+        self,
+        symbols: str | Sequence[str] | None = None,
+        *,
+        start: str | date | None = None,
+        end: str | date | None = None,
+        columns: Sequence[str] | None = None,
+        by_asset: bool = False,
+    ) -> pd.DataFrame:
+        """Frozen SEC Item 2.02 EX-99 release document captures keyed by CIK."""
+        frame = self._read_family(
+            "release_documents",
+            symbols=symbols,
+            start=start,
+            end=end,
+            columns=columns,
+        )
+        if by_asset and not frame.empty:
+            frame = self._expand_by_asset(frame, symbols)
+        return frame
+
+    def extraction_results(
+        self,
+        symbols: str | Sequence[str] | None = None,
+        *,
+        start: str | date | None = None,
+        end: str | date | None = None,
+        columns: Sequence[str] | None = None,
+        by_asset: bool = False,
+    ) -> pd.DataFrame:
+        """Frozen LLM extraction call outcomes (excluding raw model output) keyed by CIK."""
+        frame = self._read_family(
+            "extraction_results",
+            symbols=symbols,
+            start=start,
+            end=end,
+            columns=columns,
+        )
+        if by_asset and not frame.empty:
+            frame = self._expand_by_asset(frame, symbols)
+        return frame
+
+    def extraction_facts(
+        self,
+        symbols: str | Sequence[str] | None = None,
+        *,
+        start: str | date | None = None,
+        end: str | date | None = None,
+        columns: Sequence[str] | None = None,
+        by_asset: bool = False,
+    ) -> pd.DataFrame:
+        """Frozen validated and rejected structured LLM extraction facts keyed by CIK."""
+        frame = self._read_family(
+            "extraction_facts",
+            symbols=symbols,
+            start=start,
+            end=end,
+            columns=columns,
+        )
+        if by_asset and not frame.empty:
+            frame = self._expand_by_asset(frame, symbols)
+        return frame
+
+    def release_features(
+        self,
+        candidates_or_symbols: pd.DataFrame | str | Sequence[str] | None = None,
+        *,
+        time_policy: str,
+        start: str | date | None = None,
+        end: str | date | None = None,
+        extractor_version: str | None = None,
+        fundamentals: pd.DataFrame | None = None,
+    ) -> pd.DataFrame:
+        """Compute point-in-time structured earnings-release extraction features."""
+        samples = (
+            candidates_or_symbols
+            if isinstance(candidates_or_symbols, pd.DataFrame)
+            else self.candidates(candidates_or_symbols, start=start, end=end)
+        )
+        return _release_features(
+            self,
+            samples,
+            time_policy=time_policy,
+            extractor_version=extractor_version,
+            fundamentals=fundamentals,
+        )
+
     def audit(
         self,
         symbols: str | Sequence[str] | None = None,
@@ -2306,6 +2410,7 @@ class Dataset:
         include_sec_events: bool = True,
         include_earnings: bool = True,
         include_extra: bool | Sequence[str] = True,
+        include_release: bool | str = False,
         provenance_columns: bool = False,
         output_dir: str | Path | None = None,
     ) -> pd.DataFrame:
@@ -2332,6 +2437,7 @@ class Dataset:
             include_sec_events=include_sec_events,
             include_earnings=include_earnings,
             include_extra=include_extra,
+            include_release=include_release,
             provenance_columns=provenance_columns,
             output_dir=output_dir,
         )

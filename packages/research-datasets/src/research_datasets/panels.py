@@ -26,6 +26,7 @@ from . import fundamentals as _fundamentals
 from . import fundamentals_derived as _fundamentals_derived
 from . import industry as _industry
 from . import labels as _labels
+from . import release_features as _release_features
 from . import sec_events as _sec_events
 from . import valuation as _valuation
 from .candidates import build_candidates
@@ -934,6 +935,7 @@ def panel(
     include_sec_events: bool = True,
     include_earnings: bool = True,
     include_extra: bool | Sequence[str] = True,
+    include_release: bool | str = False,
     provenance_columns: bool = False,
     output_dir: str | Path | None = None,
 ) -> pd.DataFrame:
@@ -966,6 +968,10 @@ def panel(
         raise TypeError(
             "include_extra must be a bool or a sequence of extra feature group names"
         )
+    if not isinstance(include_release, (bool, str)):
+        raise TypeError("include_release must be a bool or an extractor_version string")
+    if isinstance(include_release, str) and not include_release.strip():
+        raise ValueError("include_release string must be a non-empty extractor_version")
     _policy(time_policy)
     fund_policy = _policy(fundamental_time_policy or time_policy)
     horizon_list, _ = _labels.horizons(horizons)
@@ -1273,6 +1279,30 @@ def panel(
         "coverage_counts": extra_coverage_counts,
     }
 
+    release_extractor_version: str | None = None
+    if include_release is not False:
+        rel_fund_frame = (
+            pd.DataFrame(extra_fund_cols, index=rows.index) if extra_fund_cols else None
+        )
+        rel_cand_cols = [c for c in (*KEYS, "decision_at") if c in rows.columns]
+        rel_df = _release_features.release_features(
+            version,
+            rows[rel_cand_cols],
+            time_policy=time_policy,
+            extractor_version=(
+                include_release if isinstance(include_release, str) else None
+            ),
+            fundamentals=rel_fund_frame,
+        )
+        release_extractor_version = rel_df.attrs.get("extractor_version")
+        if not rel_df.columns.empty:
+            parts.append(rel_df)
+            if (
+                _release_features.RELEASE_LIMITATION not in manifest_lims
+                and _release_features.RELEASE_LIMITATION not in derived_limitations
+            ):
+                derived_limitations.append(_release_features.RELEASE_LIMITATION)
+
     labels = forward_returns(
         version,
         label_rows_input,
@@ -1334,6 +1364,8 @@ def panel(
             "include_extra": (
                 include_extra if isinstance(include_extra, bool) else extra_groups
             ),
+            "include_release": include_release,
+            "extractor_version": release_extractor_version,
             "provenance_columns": provenance_columns,
             "next_session": None if next_session is None else str(_day(next_session)),
             "membership_carried_from": candidates.attrs["parameters"][
