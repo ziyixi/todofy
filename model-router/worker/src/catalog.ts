@@ -2,7 +2,7 @@ import { create } from '@ziyixi/proto/protobuf';
 import { ModelSchema, type Model } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb';
 import type { Env } from './types.ts';
 import { invalid } from './errors.ts';
-import { openaiReservationRates } from './providers/pricing.ts';
+import { reservationRates } from './providers/pricing.ts';
 
 export interface CatalogRoute {
   upstreamModel: string;
@@ -67,7 +67,7 @@ export function modelCatalog(env: Env): Model[] {
       configured,
       efforts: route.efforts,
       reservationQuotaUnitsPerToken: route.quotaUnitsPerToken ?? 0,
-      ...openaiReservationRates(id),
+      ...reservationRates(id),
     });
   });
 }

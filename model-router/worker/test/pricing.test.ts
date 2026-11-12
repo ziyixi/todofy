@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { URL } from 'node:url';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import type { TokenUsage } from '../src/types.ts';
-import { estimateCostMicrousd } from '../src/providers/pricing.ts';
+import { estimateCostMicrousd, reservationRates } from '../src/providers/pricing.ts';
 import { addUsage, claudeUsage, geminiUsage, unknownUsage } from '../src/providers/usage.ts';
 
 function reported(value: Partial<TokenUsage> = {}): TokenUsage {
@@ -58,6 +58,30 @@ describe('native model token prices', () => {
     expect(estimateCostMicrousd('gpt-6.1-sol', reported({ inputTokens: 10, cachedInputTokens: 11 }))).toBeUndefined();
     expect(estimateCostMicrousd('gpt-6.1-sol', reported({ outputTokens: 2_147_483_647 }))).toBeUndefined();
     expect(estimateCostMicrousd('gpt-6.1-sol', reported({ cacheWriteTokens: 10 }))).toBeUndefined();
+  });
+
+  it('reservation rates cover claude-haiku-5-5 at long-context maxima and keep OpenAI values', () => {
+    expect(reservationRates('claude-haiku-5-5')).toEqual({
+      reservationInputMicrousdPerToken: 1,
+      reservationOutputMicrousdPerToken: 2.5,
+    });
+    expect(reservationRates('claude-opus-5-5')).toEqual({
+      reservationInputMicrousdPerToken: 8,
+      reservationOutputMicrousdPerToken: 20,
+    });
+    expect(reservationRates('openai/gpt-6.1-sol')).toEqual({
+      reservationInputMicrousdPerToken: 10,
+      reservationOutputMicrousdPerToken: 15,
+    });
+    expect(reservationRates('openai/gpt-6.1-terra')).toEqual({
+      reservationInputMicrousdPerToken: 5,
+      reservationOutputMicrousdPerToken: 7.5,
+    });
+    expect(reservationRates('openai/gpt-6-luna')).toEqual({
+      reservationInputMicrousdPerToken: 0.5,
+      reservationOutputMicrousdPerToken: 0.75,
+    });
+    expect(reservationRates('gemini-3.8-flash')).toEqual({});
   });
 });
 

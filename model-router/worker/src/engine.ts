@@ -45,7 +45,7 @@ interface Context {
 }
 export const PRIVATE_INFERENCE_APP = 'private-app';
 const knownApps = new Set(['console', 'mailsort', 'todofy', 'newsletter', PRIVATE_INFERENCE_APP]);
-const privateModels = new Set(['openai/gpt-6-luna', 'openai/gpt-6.1-terra', 'openai/gpt-6.1-sol']);
+const privateModels = new Set(['openai/gpt-6-luna', 'openai/gpt-6.1-terra', 'openai/gpt-6.1-sol', 'claude-haiku-5-5']);
 
 /** The external Newsletter token reaches only subscription Codex models. */
 function allowModel(app: string, provider: string): void {
@@ -108,7 +108,7 @@ export class RouterEngine extends DurableObject<Env> {
       if (req.conversation || req.allowFallback || !Number.isInteger(req.maxOutputTokens) || req.maxOutputTokens < 128 || req.maxOutputTokens > 8192)
         invalid('INVALID_PARAMETER', 'Use one independent generation with an output token cap between 128 and 8192.');
       if (!privateModels.has(req.model))
-        throw new RpcError(Code.PERMISSION_DENIED, 'MODEL_NOT_ALLOWED', 'This caller may use only its configured OpenAI models.');
+        throw new RpcError(Code.PERMISSION_DENIED, 'MODEL_NOT_ALLOWED', 'This caller may use only its allowlisted models.');
     }
     if (!req.input || new TextEncoder().encode(req.input).length > MAX_INPUT_BYTES)
       invalid('INVALID_INPUT', 'Input is empty or exceeds 2 MiB.');

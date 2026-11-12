@@ -183,7 +183,13 @@ describe('Codex and API model identity', () => {
       'openai/gpt-6.1-terra': [5, 7.5],
       'openai/gpt-6-luna': [0.5, 0.75],
     });
-    expect(catalog.filter(item => item.provider !== 'openai').every(item =>
+    expect(Object.fromEntries(catalog.filter(item => item.provider === 'anthropic').map(item => [
+      item.id, [item.reservationInputMicrousdPerToken, item.reservationOutputMicrousdPerToken],
+    ]))).toEqual({
+      'claude-opus-5-5': [8, 20],
+      'claude-haiku-5-5': [1, 2.5],
+    });
+    expect(catalog.filter(item => item.provider !== 'openai' && item.provider !== 'anthropic').every(item =>
       item.reservationInputMicrousdPerToken === undefined && item.reservationOutputMicrousdPerToken === undefined,
     )).toBe(true);
     expect(routeFor('gpt-6.1-sol').provider).toBe('codex');
