@@ -96,11 +96,12 @@ describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
     const app = 'private-app'
     const client = harness.forCaller(app)
     const models = (await client.listModels({})).models
-    expect(models.map((model) => model.id)).toEqual([api, 'openai/gpt-6.1-terra', 'openai/gpt-6-luna'])
+    expect(models.map((model) => model.id)).toEqual([api, 'openai/gpt-6.1-terra', 'openai/gpt-6-luna', 'claude-haiku-5-5'])
     expect(models[0]).toMatchObject({ configured: true, reservationInputMicrousdPerToken: 10, reservationOutputMicrousdPerToken: 15 })
+    expect(models[3]).toMatchObject({ provider: 'anthropic', reservationInputMicrousdPerToken: 1, reservationOutputMicrousdPerToken: 2.5 })
 
     const request = { model: api, input: 'Synthetic binding input', maxOutputTokens: 128 }
-    for (const model of [sol, gemini, 'openai/gpt-6-astra']) {
+    for (const model of [sol, gemini, 'openai/gpt-6-astra', 'claude-opus-5-5']) {
       await expect(client.generate({ ...request, model })).rejects.toMatchObject({ status: { reason: 'MODEL_NOT_ALLOWED' } })
     }
     const conversation = `conversations/${crypto.randomUUID()}`
@@ -123,6 +124,11 @@ describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
     expect((await harness.owner.getRequest({ name: answer.name })).app).toBe(app)
     expect((await client.generate({ ...request, maxOutputTokens: 8192 })).error).toBeUndefined()
     expect(harness.calls.map((call) => call.body.max_output_tokens)).toEqual([128, 8192])
+    const haikuMin = await client.generate({ model: 'claude-haiku-5-5', input: 'Synthetic binding input', maxOutputTokens: 128 })
+    expect(haikuMin.error?.reason).toBe('MODEL_NOT_CONFIGURED')
+    expect((await harness.owner.getRequest({ name: haikuMin.name })).app).toBe(app)
+    const haikuMax = await client.generate({ model: 'claude-haiku-5-5', input: 'Synthetic binding input', maxOutputTokens: 8192 })
+    expect(haikuMax.error?.reason).toBe('MODEL_NOT_CONFIGURED')
   })
 
   it('limits the external Newsletter token to Codex models before registering a request', async () => {

@@ -39,13 +39,29 @@ function openaiTokenPrice(model: string, longContext: boolean) {
   };
 }
 
-export function openaiReservationRates(model: string) {
-  const rates = openaiTokenPrice(model, true);
-  if (!rates) return {};
-  return {
-    reservationInputMicrousdPerToken: Math.max(rates.input, rates.cachedInput, rates.cacheWrite30m, rates.cacheWrite12h),
-    reservationOutputMicrousdPerToken: rates.output,
-  };
+export function reservationRates(model: string) {
+  const openai = openaiTokenPrice(model, true);
+  if (openai) {
+    return {
+      reservationInputMicrousdPerToken: Math.max(openai.input, openai.cachedInput, openai.cacheWrite30m, openai.cacheWrite12h),
+      reservationOutputMicrousdPerToken: openai.output,
+    };
+  }
+  if (model === 'claude-opus-5-5' || model === 'claude-haiku-5-5') {
+    const anthropic = tokenPrice(model, 100_001);
+    if (anthropic) {
+      return {
+        reservationInputMicrousdPerToken: Math.max(
+          anthropic.input,
+          anthropic.cachedInput ?? 0,
+          anthropic.cacheWrite5m ?? 0,
+          anthropic.cacheWrite1h ?? 0,
+        ),
+        reservationOutputMicrousdPerToken: anthropic.output,
+      };
+    }
+  }
+  return {};
 }
 
 function tokenPrice(model: string, inputTokens: number): TokenPrice | undefined {

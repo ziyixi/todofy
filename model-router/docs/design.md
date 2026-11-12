@@ -36,6 +36,7 @@ Todofy 自己维护邮件与日报的 Gemini fallback 顺序。Gemini 3.7 已自
 
 Router 复用现有 HTTP、截止时间、Schema 和用量处理，直接调用非流式 Responses API，使用 `store: false`。
 当前目录提供 Astra、Sol 6.1、Terra 6.1 和 Luna；它们与 Codex 各自有独立的 Router ID、连接状态和统计。
+私有推理绑定可使用 Luna、Terra 6.1、Sol 6.1 与 Claude Haiku 5.5，并读取目录公布的预留费率。
 API 的实际响应模型记在 `reported_model`，请求索引保留目录 ID，按模型筛选不会因供应商版本名变化而丢失记录。
 历史 Codex 记录只在读取时纠正 provider 显示，原记录及正文不改写。
 
