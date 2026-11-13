@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -38,21 +38,24 @@ from .concepts import (
 )
 from .constants import KEYS
 
-STATE_COLUMNS: tuple[str, ...] = (
-    "cik",
-    "view",
-    "available_at",
-    "value",
-    "raw_value",
-    "status",
-    "period_start",
-    "period_end",
-    "basis",
-    "accessions",
-    "tag",
-    "currency",
-    "reference_date",
-)
+
+class _StateRow(NamedTuple):
+    cik: str
+    view: str
+    available_at: int
+    value: float
+    raw_value: str | None
+    status: str
+    period_start: date | None
+    period_end: date | None
+    basis: str
+    accessions: str
+    tag: str
+    currency: str
+    reference_date: date | None
+
+
+STATE_COLUMNS = _StateRow._fields
 
 FISCAL_QUARTER_COLUMNS: tuple[str, ...] = (
     "cik",
@@ -519,7 +522,7 @@ class IssuerStateMachine:
         self.by_period: dict[tuple[str, date | None, date], set[str]] = {}
         self._base_values: dict[tuple[str, date | None, date], PeriodValue] = {}
         self.last_emitted: dict[str, tuple[Any, ...]] = {}
-        self.rows: list[dict[str, Any]] = []
+        self.rows: list[_StateRow] = []
         self.annual_only_steps: list[tuple[int, bool]] = []
         self.quarter_ledger: dict[tuple[str, date], dict[str, Any]] = {}
 
@@ -1804,21 +1807,21 @@ class IssuerStateMachine:
                     )
                     self.last_emitted[view_name] = tombstone
                     self.rows.append(
-                        {
-                            "cik": self.cik,
-                            "view": view_name,
-                            "available_at": batch_clock,
-                            "value": float("nan"),
-                            "raw_value": None,
-                            "status": "metric_missing",
-                            "period_start": None,
-                            "period_end": None,
-                            "basis": "",
-                            "accessions": "",
-                            "tag": "",
-                            "currency": "",
-                            "reference_date": None,
-                        }
+                        _StateRow(
+                            self.cik,
+                            view_name,
+                            batch_clock,
+                            float("nan"),
+                            None,
+                            "metric_missing",
+                            None,
+                            None,
+                            "",
+                            "",
+                            "",
+                            "",
+                            None,
+                        )
                     )
                 continue
 
@@ -1843,21 +1846,21 @@ class IssuerStateMachine:
                 else chosen.status
             )
             self.rows.append(
-                {
-                    "cik": self.cik,
-                    "view": view_name,
-                    "available_at": batch_clock,
-                    "value": num if status in {"ok", "approximate"} else float("nan"),
-                    "raw_value": chosen.raw_value,
-                    "status": status,
-                    "period_start": chosen.period_start,
-                    "period_end": chosen.period_end,
-                    "basis": chosen.basis,
-                    "accessions": chosen.accessions,
-                    "tag": chosen.tag,
-                    "currency": chosen.currency,
-                    "reference_date": chosen.reference_date,
-                }
+                _StateRow(
+                    self.cik,
+                    view_name,
+                    batch_clock,
+                    num if status in {"ok", "approximate"} else float("nan"),
+                    chosen.raw_value,
+                    status,
+                    chosen.period_start,
+                    chosen.period_end,
+                    chosen.basis,
+                    chosen.accessions,
+                    chosen.tag,
+                    chosen.currency,
+                    chosen.reference_date,
+                )
             )
 
     def _select_view_state(
@@ -2309,7 +2312,7 @@ def _iter_fact_frames(
 
 
 def _format_state_frame(
-    rows: list[dict[str, Any]],
+    rows: list[_StateRow],
     *,
     time_policy: str,
     stats: Mapping[str, int],
@@ -2336,6 +2339,7 @@ def _format_state_frame(
         return empty
 
     frame = pd.DataFrame(rows, columns=list(STATE_COLUMNS))
+    rows.clear()
     frame["available_at"] = pd.to_datetime(frame["available_at"], unit="ns", utc=True)
     frame["value"] = frame["value"].astype("float64")
     frame["status"] = pd.Categorical(
@@ -2496,7 +2500,7 @@ def fundamental_states(
         "dropped_unmapped_tags": 0,
         "dropped_unit_mismatch": 0,
     }
-    all_rows: list[dict[str, Any]] = []
+    all_rows: list[_StateRow] = []
     annual_only_steps: dict[str, list[tuple[int, bool]]] = {}
     by_cik_buffer: dict[str, list[FactVersion]] = {}
 
