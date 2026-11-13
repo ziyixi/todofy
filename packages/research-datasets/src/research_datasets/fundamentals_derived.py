@@ -2848,6 +2848,13 @@ def derived_fundamentals(
         else False
         for i in range(len(samples))
     ]
+    signal_ordinals = np.asarray([day.toordinal() for day in signal_days])
+    mapped = np.asarray([bool(cik) for cik in sample_ciks])
+    parser = np.asarray([diag.max_parser for diag in check_diags])
+    overrides = np.asarray([diag.override_status for diag in check_diags], dtype=object)
+    unsupported = overrides == "issuer_not_sec_filer"
+    eligible = mapped & valid_decision & ~unsupported
+    mapping_status = np.asarray(missing_reasons, dtype=object)
 
     work_samples = pd.DataFrame(
         {
@@ -2857,22 +2864,20 @@ def derived_fundamentals(
         index=samples.index,
     )
 
-    join_cols = [
-        "value",
-        "status",
-        "period_end",
-        "available_at",
-        "basis",
-        "accessions",
-        "tag",
-        "currency",
-        "reference_date",
-    ]
-    ciks_with_view: dict[str, set[str]] = {}
-    if not states.empty:
-        for view_name, grp in states.groupby("view", observed=True):
-            ciks_with_view[str(view_name)] = set(grp["cik"].astype(str))
-
+    # Convert each state's date once, before broadcasting it onto decision rows.
+    join_cols = ["value", "status", "period_ordinal"]
+    if provenance:
+        join_cols.extend(
+            [
+                "period_end",
+                "available_at",
+                "basis",
+                "accessions",
+                "tag",
+                "currency",
+                "reference_date",
+            ]
+        )
     new_cols: dict[str, Any] = {}
     for view in selected_views:
         c_name, suffix = parse_view_name(view)
@@ -2881,7 +2886,14 @@ def derived_fundamentals(
         default_stale_limit = thresholds.get(suffix, thresholds.get(base_suffix, 200))
         fy_stale_limit = thresholds.get("fy", 460)
 
-        sub = states[states["view"] == view] if not states.empty else states
+        rows = states.loc[states["view"].eq(view)]
+        sub = rows.assign(
+            period_ordinal=rows["period_end"].map(
+                lambda value: (
+                    day.toordinal() if (day := _parse_iso_date(value)) else np.nan
+                )
+            )
+        )
         joined = asof.asof_join(
             work_samples,
             sub,
@@ -2893,54 +2905,37 @@ def derived_fundamentals(
         )
 
         vals = joined["value"].to_numpy(dtype="float64", copy=True)
-        raw_status = joined["status"].astype(object).to_numpy(copy=True)
-        p_ends = joined["period_end"].tolist()
-        ages = np.full(len(samples), np.nan, dtype="float64")
-        known_ciks = ciks_with_view.get(view, set())
+        final_status = joined["status"].to_numpy(dtype=object, copy=True)
+        has_state = eligible & pd.notna(final_status)
+        no_state = eligible & ~has_state
+        needs_new_parser = parser < spec_min_parser
+        final_status[no_state] = np.where(
+            needs_new_parser[no_state], "not_captured", "metric_missing"
+        )
+        if no_state.any():
+            known_ciks = sub["cik"].unique()
+            final_status[no_state & work_samples["cik"].isin(known_ciks)] = (
+                "not_yet_available"
+            )
+            no_state_checked = no_state & pd.notna(overrides)
+            final_status[no_state_checked] = overrides[no_state_checked]
+        final_status[
+            has_state & (final_status == "metric_missing") & needs_new_parser
+        ] = "not_captured"
+        final_status[~eligible] = "issuer_not_sec_filer"
+        final_status[mapped & ~valid_decision] = "invalid_value"
+        final_status[~mapped] = mapping_status[~mapped]
+        vals[~has_state] = np.nan
 
-        final_status: list[str] = []
-        for i in range(len(samples)):
-            cik = sample_ciks[i]
-            if not cik:
-                vals[i] = np.nan
-                final_status.append(missing_reasons[i] or "mapping_missing")
-                continue
-            if not valid_decision[i]:
-                vals[i] = np.nan
-                final_status.append("invalid_value")
-                continue
-            diag = check_diags[i]
-            if diag.override_status == "issuer_not_sec_filer":
-                vals[i] = np.nan
-                final_status.append("issuer_not_sec_filer")
-                continue
-            st = raw_status[i]
-            if pd.isna(st) or not st:
-                vals[i] = np.nan
-                if diag.override_status is not None:
-                    final_status.append(diag.override_status)
-                elif cik in known_ciks:
-                    final_status.append("not_yet_available")
-                elif spec_min_parser > diag.max_parser:
-                    final_status.append("not_captured")
-                else:
-                    final_status.append("metric_missing")
-                continue
-            st_str = str(st)
-            if st_str == "metric_missing" and spec_min_parser > diag.max_parser:
-                st_str = "not_captured"
-            pe = _parse_iso_date(p_ends[i])
-            if pe is not None:
-                age_val = float((signal_days[i] - pe).days)
-                ages[i] = age_val
-                limit = (
-                    fy_stale_limit
-                    if base_suffix == "ttm" and annual_only_flags[i]
-                    else default_stale_limit
-                )
-                if st_str in {"ok", "approximate"} and age_val > limit:
-                    st_str = "stale"
-            final_status.append(st_str)
+        ages = signal_ordinals - joined["period_ordinal"].to_numpy(dtype="float64")
+        ages[~has_state] = np.nan
+        age_limit = (
+            np.where(annual_only_flags, fy_stale_limit, default_stale_limit)
+            if base_suffix == "ttm"
+            else default_stale_limit
+        )
+        usable = (final_status == "ok") | (final_status == "approximate")
+        final_status[usable & (ages > age_limit)] = "stale"
 
         new_cols[f"{view}_value"] = vals
         new_cols[f"{view}_status"] = pd.Categorical(

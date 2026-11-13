@@ -16,6 +16,7 @@ from research_datasets import (
     normalize_facts,
     valuation,
 )
+from research_datasets.valuation import _cover_symbol_resolver
 
 ASSET_A = "00000000-0000-4000-8000-000000000001"
 ASSET_B = "00000000-0000-4000-8000-000000000002"
@@ -126,6 +127,49 @@ def _sample_rows(pairs: list[tuple[str, str, str]]) -> pd.DataFrame:
 
 
 class ValuationTest(unittest.TestCase):
+    def test_cover_symbol_resolution_preserves_history_and_alias_precedence(
+        self,
+    ) -> None:
+        session = date(2025, 5, 1)
+        universe = [
+            {"asset_id": ASSET_A, "symbol": "ABC.A"},
+            {"asset_id": ASSET_B, "symbol": "ABC-B"},
+            {"asset_id": ASSET_SINGLE, "symbol": "ABCA"},
+        ]
+        history = [
+            {
+                "asset_id": ASSET_A,
+                "symbol": "ABC.A",
+                "valid_from": "2025-05-01",
+                "valid_to": "2025-05-01",
+                "status": "verified",
+            },
+            {
+                "asset_id": ASSET_B,
+                "symbol": "ABC.A",
+                "valid_from": "",
+                "valid_to": "",
+                "status": "provisional",
+            },
+            {
+                "asset_id": ASSET_B,
+                "symbol": "ABC.B",
+                "valid_from": "",
+                "valid_to": "",
+                "status": "unknown",
+            },
+        ]
+        resolve = _cover_symbol_resolver(universe, history)
+
+        self.assertEqual(resolve(" abc.a ", session), ASSET_A)
+        self.assertEqual(resolve("abc.a", session + timedelta(days=1)), ASSET_B)
+        self.assertEqual(resolve("abc-b", session), ASSET_B)
+        self.assertIsNone(resolve("ABCA", session))
+        self.assertEqual(resolve("ABCA", session + timedelta(days=1)), ASSET_B)
+        self.assertEqual(
+            _cover_symbol_resolver(universe, [])("ABCA", session), ASSET_SINGLE
+        )
+
     def test_dual_class_market_cap_is_issuer_level(self) -> None:
         """Both share classes receive identical issuer market cap and class-specific security cap."""
         cal = _business_days("2025-04-01", "2025-05-30")

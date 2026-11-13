@@ -7,6 +7,11 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 Private operating follow-ups are tracked in `private/HANDOFF.md`.
 
+Branch `codex/panel-valuation-cost` joins statement ages and statuses in column arrays and indexes
+the loaded frozen symbols for cover-page share-class resolution. The weekly and daily synthetic
+panels match the previous source with both time policies, detailed provenance and group labels.
+Run exact branch CI and measure the same pinned reader on the complete archive in Colab.
+
 Branch `codex/panel-frame-lifetimes` passes only keys, the decision clock and requested grouping
 columns to label construction, and releases large feature inputs after use. Synthetic weekly and
 daily panels match the preceding reader under both clock policies, including neutralized labels.
