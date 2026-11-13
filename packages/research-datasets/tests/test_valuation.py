@@ -549,6 +549,82 @@ class ValuationTest(unittest.TestCase):
         self.assertAlmostEqual(res.loc[0, "valuation_split_factor"], 1.0)
         self.assertAlmostEqual(res.loc[1, "valuation_split_factor"], 2.0)
 
+    def test_stock_dividend_ratio_status_across_effect_date(self) -> None:
+        material = {
+            "manifest": {"calendar": _business_days("2025-05-01", "2025-05-16")},
+            "universe": pd.DataFrame(
+                [
+                    {
+                        "asset_id": ASSET_SINGLE,
+                        "symbol": "SOLO",
+                        "cik": CIK_SINGLE,
+                        "issuer_mapping_status": "verified",
+                    }
+                ]
+            ),
+            "fundamentals": pd.DataFrame(
+                [
+                    _fact(
+                        "shares",
+                        "EntityCommonStockSharesOutstanding",
+                        "1000000",
+                        None,
+                        "2025-05-01",
+                        taxonomy="dei",
+                        unit="shares",
+                        currency="",
+                        period_kind="instant",
+                    )
+                ]
+            ),
+            "raw": pd.DataFrame(
+                [
+                    {"asset_id": ASSET_SINGLE, "date": day, "close": 100.0}
+                    for day in ("2025-05-09", "2025-05-12")
+                ]
+            ),
+        }
+        samples = _sample_rows(
+            [
+                (ASSET_SINGLE, "2025-05-09", "2025-05-12T10:00:00Z"),
+                (ASSET_SINGLE, "2025-05-12", "2025-05-13T10:00:00Z"),
+            ]
+        )
+        cases = (
+            ("actions-v2", 1.0, None, 1.0, "split_unverified"),
+            ("actions-v1", 1.05, 2.05, 1.0, "split_unverified"),
+            ("actions-v1", 0.05, 1.05, 1.05, "ok"),
+            ("actions-v2", 1.05, 1.05, 1.05, "ok"),
+            (None, None, 1.05, 1.05, "ok"),
+        )
+        for version, rate, ratio, factor, status in cases:
+            with self.subTest(version=version, rate=rate, ratio=ratio):
+                material["corporate_actions"] = pd.DataFrame(
+                    [
+                        {
+                            "asset_id": ASSET_SINGLE,
+                            "role": "subject",
+                            "type": "stock_dividend",
+                            "effect_date": "2025-05-12",
+                            "normalizer_version": version,
+                            "rate": rate,
+                            "split_ratio": ratio,
+                        }
+                    ]
+                )
+                res = valuation(
+                    material,
+                    samples,
+                    time_policy="public_reconstructed",
+                    provenance=True,
+                )
+                for name in ("market_cap_issuer", "market_cap_security"):
+                    self.assertEqual(res[f"{name}_status"].tolist(), ["ok", status])
+                    np.testing.assert_allclose(
+                        res[f"{name}_value"], [1e8, 1e8 * factor]
+                    )
+                np.testing.assert_allclose(res["valuation_split_factor"], [1.0, factor])
+
     def test_statement_eps_reference_date_is_filing_date(self) -> None:
         """ASC 260 statement EPS/shares use filing date as split reference, whereas cover shares use period_end."""
         facts = pd.DataFrame(

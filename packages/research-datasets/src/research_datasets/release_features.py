@@ -660,9 +660,13 @@ def release_features(
 
     mcap_arr: np.ndarray | None = None
     if fundamentals is not None and "market_cap_issuer_value" in fundamentals.columns:
-        mcap_arr = pd.to_numeric(
+        market_cap = pd.to_numeric(
             fundamentals["market_cap_issuer_value"], errors="coerce"
-        ).to_numpy(dtype="float64")
+        )
+        if "market_cap_issuer_status" in fundamentals.columns:
+            unverified = fundamentals["market_cap_issuer_status"].eq("split_unverified")
+            market_cap = market_cap.mask(unverified.fillna(False))
+        mcap_arr = market_cap.to_numpy(dtype="float64")
 
     n_rows = len(candidates)
     status_out = ["document_missing"] * n_rows

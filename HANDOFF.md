@@ -7,6 +7,13 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 Private operating follow-ups are tracked in `private/HANDOFF.md`.
 
+Branch `codex/verified-return-factors` marks market caps `split_unverified` when the share-count interval
+crosses an unresolved stock dividend. The affected release buyback ratio is missing when it receives that
+market-cap status. Existing frozen files can still be read. All 179 SDK tests passed locally, including
+synthetic regressions for the effect date and both normalizer versions. Run branch CI before using the
+new SDK pin, then verify the refreshed archive with the published SDK. Private application release
+details remain in `private/HANDOFF.md`.
+
 Branch `claude-schema-diagnostic` reports `claude_schema_complexity` for Anthropic's documented structured-output
 compilation limit response. Other HTTP refusals keep their existing mapping. The diagnostic is a fixed value, and
 the upstream error body stays private. The 42 adapter tests, worker typecheck and lint targets passed. The

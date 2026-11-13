@@ -448,9 +448,6 @@ def _build_split_adjuster(
                         or rec.get("kind")
                         or ""
                     ).lower()
-                    r = _safe_positive_decimal_float(rec.get(ratio_col))
-                    if r is None or r == 1.0:
-                        continue
                     if kind and kind not in {
                         "split",
                         "forward_split",
@@ -458,13 +455,26 @@ def _build_split_adjuster(
                         "stock_dividend",
                     }:
                         continue
+                    r = _safe_positive_decimal_float(rec.get(ratio_col))
+                    st = str(rec.get("status") or "")
+                    unverified = st in {"disputed", "unverified"}
+                    unknown_ratio = False
+                    if kind == "stock_dividend":
+                        rate = _safe_positive_decimal_float(rec.get("rate"))
+                        is_legacy = str(rec.get("normalizer_version")) == "actions-v1"
+                        unknown_ratio = r is None or (
+                            is_legacy and (rate is None or rate >= 1.0)
+                        )
+                    if unknown_ratio:
+                        # A v1 freeze lacks the terms needed to verify a multiplier.
+                        r = 1.0
+                        unverified = True
+                    elif r is None or r == 1.0:
+                        continue
                     aid = str(rec.get("asset_id") or "")
                     d = _parse_date(rec.get(date_col))
-                    st = str(rec.get("status") or "")
                     if aid and d is not None:
-                        ev_map.setdefault(aid, []).append(
-                            (d, r, st in {"disputed", "unverified"})
-                        )
+                        ev_map.setdefault(aid, []).append((d, r, unverified))
         return _SplitAdjuster(
             mode="structured",
             events_by_asset=ev_map,
