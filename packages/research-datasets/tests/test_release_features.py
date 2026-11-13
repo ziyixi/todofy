@@ -8,7 +8,6 @@ from datetime import date
 
 import numpy as np
 import pandas as pd
-from tests.test_fundamentals_derived import make_fact
 
 import research_datasets
 from research_datasets import (
@@ -20,6 +19,7 @@ from research_datasets import (
     default_extractor_version,
     release_features,
 )
+from tests.test_fundamentals_derived import make_fact
 
 ASSET_A = "11111111-1111-4111-8111-111111111111"
 CIK_A = "0000100001"
