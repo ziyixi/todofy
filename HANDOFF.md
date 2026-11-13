@@ -7,6 +7,10 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 Private operating follow-ups are tracked in `private/HANDOFF.md`.
 
+Branch `codex/statement-replay-memory` releases each issuer's normalized facts after its states or quarter
+ledger have been built. The calculation and cache format use the existing rules. Check branch CI and
+measure both cold statement replay and the complete panel against one fixed dataset before updating the pin.
+
 Branch `codex/weekly-panel-materialization` emits base feature rows only on the weekly or monthly
 panel's signal days. Rolling windows and source coverage still use the daily grid, and each rank
 still compares the full frozen population. A synthetic weekly panel with 100 securities and 1,350

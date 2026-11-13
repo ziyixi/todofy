@@ -2523,15 +2523,18 @@ def fundamental_states(
             totals[key] = totals.get(key, 0) + count
         for v in versions:
             by_cik_buffer.setdefault(v.cik, []).append(v)
+        versions.clear()
 
     for cik in sorted(by_cik_buffer):
-        issuer_versions = by_cik_buffer[cik]
+        # An issuer is replayed once. Release its facts before accumulating more states.
+        issuer_versions = by_cik_buffer.pop(cik)
         issuer_versions.sort(key=lambda v: (v.available_ns, v.observation_sequence))
         machine = IssuerStateMachine(cik, target_views=target_views)
         machine.ingest(issuer_versions)
         all_rows.extend(machine.rows)
         if machine.annual_only_steps:
             annual_only_steps[cik] = machine.annual_only_steps
+        del issuer_versions, machine
 
     limitations = list(manifest.get("limitations", [])) + [
         "Derived fundamentals (single quarters, TTM, YoY) are computed from as-filed XBRL facts.",
@@ -2584,16 +2587,18 @@ def fiscal_quarters(
         )
         for v in versions:
             by_cik_buffer.setdefault(v.cik, []).append(v)
+        versions.clear()
 
     ledger_rows: list[dict[str, Any]] = []
     for cik in sorted(by_cik_buffer):
-        issuer_versions = by_cik_buffer[cik]
+        issuer_versions = by_cik_buffer.pop(cik)
         issuer_versions.sort(key=lambda v: (v.available_ns, v.observation_sequence))
         machine = IssuerStateMachine(cik, target_views=(), record_quarters=concept_list)
         machine.ingest(issuer_versions)
         for _, entry in sorted(machine.quarter_ledger.items()):
             row = {col: entry[col] for col in FISCAL_QUARTER_COLUMNS}
             ledger_rows.append(row)
+        del issuer_versions, machine
 
     if not ledger_rows:
         empty = pd.DataFrame(columns=list(FISCAL_QUARTER_COLUMNS))
