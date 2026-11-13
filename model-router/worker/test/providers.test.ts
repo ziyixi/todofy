@@ -154,6 +154,19 @@ describe('Claude adapter', () => {
     expect(JSON.stringify(result)).not.toContain('private provider text');
   });
 
+  it.each([
+    ['Schema is too complex for compilation.', 'claude_schema_complexity'],
+    ['Schema is too complex for compilation. Private provider detail.', 'claude_http_400'],
+  ])('classifies only the exact schema complexity refusal (%s)', async (message, expected) => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ type: 'error', error: { type: 'invalid_request_error', message } }, { status: 400, headers: { 'Retry-After': '7' } }));
+    const ctx = { ...context('anthropic', fetcher), route: routeFor('claude-haiku-5-5'), deadlineMs: Date.now() + 180_000 };
+    const result = await generateClaude(config({ model: 'claude-haiku-5-5', outputSchemaJson: JSON.stringify(schema) }), 'synthetic', ctx);
+    expect(requestBody(fetcher)['stream']).toBe(true);
+    expect(result.error).toMatchObject({ code: 3, reason: 'MODEL_INVALID_REQUEST', message: expected, retryAfterSeconds: 7 });
+    expect(result.usage).toMatchObject({ available: true, estimatedCostMicrousd: 0 });
+    expect(JSON.stringify(result)).not.toContain(message);
+  });
+
   it('reports the Router deadline as a timeout and only a real cancellation as cancelled', async () => {
     const hang = vi.fn<typeof fetch>().mockImplementation((_input, init) => new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new Error('synthetic aborted')))));
     for (const [reason, code, expected] of [[new DOMException('deadline', 'TimeoutError'), 4, 'MODEL_TIMEOUT'], [undefined, 1, 'MODEL_CANCELLED']] as const) {

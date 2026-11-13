@@ -7,6 +7,12 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 Private operating follow-ups are tracked in `private/HANDOFF.md`.
 
+Branch `claude-schema-diagnostic` reports `claude_schema_complexity` for Anthropic's documented structured-output
+compilation limit response. Other HTTP refusals keep their existing mapping. The diagnostic is a fixed value, and
+the upstream error body stays private. The 42 adapter tests, worker typecheck and lint targets passed. The
+synthetic streaming tests cover the exact refusal and a similar unrecognized message. After branch CI, verify
+the Router trace if this refusal recurs on a synthetic request.
+
 Branch `codex/research-fiscal-periods` fixes SDK quarter derivation for 12-week interim periods and a
 16- or 17-week fourth quarter. The fallback requires matching filing periods at the same fiscal start
 and annual evidence for the fourth quarter. It fills gaps after evaluating the existing quarter choices.

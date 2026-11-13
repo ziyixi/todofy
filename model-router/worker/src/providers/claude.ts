@@ -132,7 +132,11 @@ export async function generateClaude(request: GenerateRequest, context: Provider
       const spendLimit = record(detail?.['details'])?.['error_code'] === 'enforced_spend_limit_reached'
         || (typeof message === 'string' && /^(?:You have reached your specified (?:workspace )?API usage limits|Your credit balance is too low)\b/.test(message));
       if ((error.status === 400 || error.status === 429) && spendLimit) return { ...base, error: providerStatus(8, 'claude_spend_limit', 'MODEL_SPEND_LIMIT') };
-      return { ...base, error: httpError('claude', error.status, error.headers) };
+      const status = httpError('claude', error.status, error.headers);
+      if (error.status === 400 && detail?.['type'] === 'invalid_request_error' && message === 'Schema is too complex for compilation.') {
+        status.message = 'claude_schema_complexity';
+      }
+      return { ...base, error: status };
     }
     if (partialUsage !== null) return fail(14, 'claude_stream_interrupted');
     if (error instanceof APIConnectionError) return fail(14, 'claude_connection');
