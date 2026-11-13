@@ -11,7 +11,7 @@ Branch `codex/ttm-ytd-date-index` gives derived financial periods and tied filin
 stable order and updates the derived cache version. Equally close prior periods with the same start
 use the earlier end. The issuer replay reuses evaluated periods until an amendment or retraction changes
 the underlying facts. The trailing four-quarter path uses the same date tolerance and reads sorted ends.
-TTM bridges look up bounded annual and prior-period candidates while preserving the existing tie order.
+Quarter selection and TTM bridges use bounded date lookups while preserving the existing tie order.
 Run branch CI, compare independent cold builds, and verify year slices on the same frozen dataset.
 
 The SDK coverage follow-up reads the archive start from the frozen manifest's part index so it stays

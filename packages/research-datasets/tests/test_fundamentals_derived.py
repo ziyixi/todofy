@@ -155,6 +155,25 @@ class ConceptCatalogueTest(unittest.TestCase):
 
 
 class DerivedQuartersTest(unittest.TestCase):
+    def test_direct_quarter_start_range_keeps_boundary_and_period_order(self) -> None:
+        facts = [
+            make_fact("q1", "Revenues", "50", "2025-01-01", "2025-03-31"),
+            make_fact("q2", "Revenues", "100", "2025-04-01", "2025-06-19"),
+            make_fact("q3", "Revenues", "125", "2025-06-20", "2025-09-08"),
+            make_fact("q4", "Revenues", "150", "2025-09-04", "2025-12-05"),
+            make_fact("slot-q4", "Revenues", "175", "2025-09-14", "2025-12-04"),
+            make_fact("early-q4", "Revenues", "200", "2025-09-03", "2025-12-07"),
+        ]
+        ledger = fiscal_quarters(
+            make_material(facts),
+            time_policy="public_reconstructed",
+            concepts=("revenue",),
+        )
+
+        fourth = ledger[ledger["fiscal_quarter"] == 4].iloc[0]
+        self.assertEqual(fourth["period_start"], date(2025, 9, 4))
+        self.assertEqual(fourth["value_first"], 150.0)
+
     def test_repeated_ingest_recomputes_only_changed_base_periods(self) -> None:
         cash_tag = "CashAndCashEquivalentsAtCarryingValue"
         rows = [

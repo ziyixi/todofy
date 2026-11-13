@@ -898,12 +898,13 @@ class IssuerStateMachine:
         if not period_map:
             return result
 
-        # Index duration periods for this concept.
-        dur_entries: list[tuple[date, date, int, PeriodValue]] = []
+        # Bound candidates by start day before applying the quarter's eligibility rules.
+        dur_entries: list[tuple[int, date, int, PeriodValue]] = []
         for (ps, pe), pv in period_map.items():
             if ps is not None:
-                dur_entries.append((ps, pe, _inclusive_days(ps, pe), pv))
-        dur_entries.sort(key=lambda item: (item[1], item[0]))
+                dur_entries.append((ps.toordinal(), pe, _inclusive_days(ps, pe), pv))
+        dur_entries.sort(key=lambda item: item[0])
+        start_days = [entry[0] for entry in dur_entries]
 
         def pick_direct_3m(
             expected_start: date | None,
@@ -912,41 +913,55 @@ class IssuerStateMachine:
             expected_end: date | None,
             upper_end: date | None,
         ) -> PeriodValue | None:
-            matches: list[PeriodValue] = []
-            for ps, pe, days, pv in dur_entries:
+            fy_day = fy_start.toordinal()
+            slot_first, slot_last = fy_day + slot_range[0], fy_day + slot_range[1]
+            first, last = slot_first, slot_last
+            expected_day = expected_start.toordinal() if expected_start else None
+            if expected_day is not None:
+                margin = 5 if expected_end is not None else 3
+                first = min(first, expected_day - margin)
+                last = max(last, expected_day + margin)
+
+            lo = bisect_left(start_days, first)
+            hi = bisect_right(start_days, last)
+            best: tuple[date, int] | None = None
+            match: PeriodValue | None = None
+            for ps, pe, days, pv in dur_entries[lo:hi]:
                 if not (77 <= days <= 105):
                     continue
                 if upper_end is not None and pe >= upper_end:
                     continue
-                if (
-                    expected_end is not None
-                    and abs((pe - expected_end).days) <= 3
-                    and expected_start is not None
-                    and abs((ps - expected_start).days) <= 5
-                ):
-                    matches.append(pv)
-                    continue
-                if expected_start is not None and abs((ps - expected_start).days) <= 3:
-                    matches.append(pv)
-                    continue
-                offset = (ps - fy_start).days
-                if slot_range[0] <= offset <= slot_range[1]:
-                    matches.append(pv)
-            return matches[-1] if matches else None
+                start_matches = expected_day is not None and (
+                    abs(ps - expected_day) <= 3
+                    or (
+                        abs(ps - expected_day) <= 5
+                        and expected_end is not None
+                        and abs((pe - expected_end).days) <= 3
+                    )
+                )
+                if slot_first <= ps <= slot_last or start_matches:
+                    key = (pe, ps)
+                    if best is None or key > best:
+                        best, match = key, pv
+            return match
 
         def pick_ytd(
             fy_start: date, min_days: int, max_days: int, require_fy: bool = False
         ) -> PeriodValue | None:
-            matches: list[PeriodValue] = []
-            for ps, pe, days, pv in dur_entries:
-                if abs((ps - fy_start).days) > 3:
-                    continue
+            fy_day = fy_start.toordinal()
+            lo = bisect_left(start_days, fy_day - 3)
+            hi = bisect_right(start_days, fy_day + 3)
+            best: tuple[date, int] | None = None
+            match: PeriodValue | None = None
+            for ps, pe, days, pv in dur_entries[lo:hi]:
                 if not (min_days <= days <= max_days):
                     continue
-                if require_fy and (ps, pe) not in fy_periods:
+                if require_fy and (date.fromordinal(ps), pe) not in fy_periods:
                     continue
-                matches.append(pv)
-            return matches[-1] if matches else None
+                key = (pe, ps)
+                if best is None or key > best:
+                    best, match = key, pv
+            return match
 
         def subtract_ytd(
             cur_ytd: PeriodValue,
