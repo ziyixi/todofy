@@ -1063,7 +1063,14 @@ def panel(
     )
     selected_assets = list(dict.fromkeys(candidates["asset_id"].astype(str)))
     derived_limitations: list[str] = []
-    label_rows_input = rows
+    label_columns = [*KEYS, "decision_at", *neutralize]
+    if "size" in neutralize:
+        label_columns.extend(
+            ("market_cap", "dollar_volume_21d_log", "raw_dollar_volume")
+        )
+    label_rows_input = rows[
+        [c for c in dict.fromkeys(label_columns) if c in rows]
+    ].copy()
 
     if (
         include_sec_events
@@ -1084,6 +1091,7 @@ def panel(
                 vocabulary=version.manifest.get("sec_event_kinds"),
             )
             parts.append(typed.drop(columns=KEYS))
+            del typed
 
     ann_df: pd.DataFrame | None = None
     primary_periods: Any = None
@@ -1123,6 +1131,7 @@ def panel(
         )
         primary_periods = earn_df.attrs.get("primary_period_end")
         parts.append(earn_df.drop(columns=KEYS))
+        del earn_df, dr_df, adj_df, ev_obs_cal, earn_obs_cal
 
     extra_fund_cols: dict[str, Any] = {}
     if fundamentals == "derived" and (include_fundamentals or include_ratios):
@@ -1148,8 +1157,8 @@ def panel(
         ]
         ind: pd.DataFrame | None = None
         val: pd.DataFrame | None = None
+        derived_part = len(parts)
         if include_fundamentals:
-            parts.append(derived.drop(columns=KEYS))
             ind = _industry.industry(version, samples, time_policy=fund_policy)
             parts.append(ind.drop(columns=KEYS))
             if (
@@ -1160,6 +1169,7 @@ def panel(
         if include_ratios:
             factors = _fundamentals_derived.fundamental_factors(derived)
             parts.append(factors.drop(columns=KEYS))
+            del factors
             val = _valuation.valuation(
                 version,
                 samples,
@@ -1181,16 +1191,22 @@ def panel(
                 and _valuation.VALUATION_LIMITATION not in derived_limitations
             ):
                 derived_limitations.append(_valuation.VALUATION_LIMITATION)
-        if val is not None or ind is not None:
-            label_rows_input = rows.copy()
-            if val is not None and "market_cap_issuer_value" in val.columns:
-                label_rows_input["market_cap_issuer_value"] = val[
-                    "market_cap_issuer_value"
-                ].to_numpy()
-            if ind is not None:
-                for col in ("ff12", "sic_division", "sic_major_group", "sic"):
-                    if col in ind.columns:
-                        label_rows_input[col] = ind[col].to_numpy()
+        if include_fundamentals:
+            # The sampled statement block can be copied after valuation has used it.
+            parts.insert(derived_part, derived.drop(columns=KEYS))
+        if (
+            val is not None
+            and "market_cap_issuer_value" in val.columns
+            and ("size" in neutralize or "market_cap_issuer_value" in neutralize)
+        ):
+            label_rows_input["market_cap_issuer_value"] = val[
+                "market_cap_issuer_value"
+            ].to_numpy()
+        if ind is not None:
+            for col in ("ff12", "sic_division", "sic_major_group", "sic"):
+                if col in neutralize and col in ind.columns:
+                    label_rows_input[col] = ind[col].to_numpy()
+        del derived, ind, val
         if include_earnings and include_fundamentals and "fundamentals" in families:
             ciks_series = _fundamentals_derived.cik_at(
                 version,
@@ -1219,6 +1235,7 @@ def panel(
                 primary_period_end=primary_periods,
             )
             parts.append(sue_df.drop(columns=KEYS))
+            del sue_df, raw_prices, q_ledger
     elif fundamentals == "legacy" and (include_fundamentals or include_ratios):
         # One read of the facts and one prepared engine serve features and ratios.
         metrics = {
@@ -1255,6 +1272,7 @@ def panel(
                     extra_fund_cols["shares_outstanding_status"] = fund[
                         "instant_shares_outstanding_status"
                     ]
+            del fund
 
         if include_ratios:
             ratios = _fundamentals.ratios_by_period(
@@ -1279,6 +1297,7 @@ def panel(
                     + [column for column in ratios.columns if column.startswith(stale)]
                 )
             )
+            del ratios
 
     extra_family_names = (
         "reference_series",
@@ -1364,6 +1383,7 @@ def panel(
         neutralize=neutralize,
         time_policy=fund_policy,
     )
+    del label_rows_input
     # Candidate columns (keys, clocks, membership) win over the label's copies. The
     # labels' calendar has no live session, so non-members are counted from the
     # candidates' membership (it includes the live row's) plus the rows dropped.
@@ -1376,6 +1396,7 @@ def panel(
             horizons=horizon_list,
         )
         parts.append(lflags.drop(columns=KEYS))
+        del lflags
     member = np.asarray(rows["in_universe"].fillna(rule is None), dtype=bool)
     outside = (
         int((~member).sum()) + candidates.attrs["counts"]["not_in_universe_dropped"]
@@ -1384,9 +1405,13 @@ def panel(
         horizon: {**counts, "not_in_universe": outside}
         for horizon, counts in labels.attrs["masks"].items()
     }
+    label_parameters = labels.attrs["parameters"]
+    label_overlap = labels.attrs["label_overlap"]
+    label_limitations = labels.attrs["limitations"]
+    del labels
 
     combined = pd.concat(parts, axis=1)
-    label_parameters = labels.attrs["parameters"]
+    del parts
     provenance = run_record(
         dataset_id=str(version.id),
         manifest_sha256=version.manifest_sha256,
@@ -1443,7 +1468,7 @@ def panel(
         rows=len(combined),
         columns=len(combined.columns),
         masks=masks,
-        label_overlap=labels.attrs["label_overlap"],
+        label_overlap=label_overlap,
         extra=extra_provenance,
         source_coverage=source_coverage,
         **{
@@ -1458,7 +1483,7 @@ def panel(
             dict.fromkeys(
                 [
                     *LIMITATIONS,
-                    *labels.attrs["limitations"],
+                    *label_limitations,
                     *derived_limitations,
                     *_live_limitations(
                         candidates.attrs["parameters"],

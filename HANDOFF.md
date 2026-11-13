@@ -7,6 +7,11 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 Private operating follow-ups are tracked in `private/HANDOFF.md`.
 
+Branch `codex/panel-frame-lifetimes` passes only keys, the decision clock and requested grouping
+columns to label construction, and releases large feature inputs after use. Synthetic weekly and
+daily panels match the preceding reader under both clock policies, including neutralized labels.
+Run branch CI and measure both frequencies on the complete freeze before updating the SDK pin.
+
 Branch `codex/statement-replay-memory` releases each issuer's normalized facts after its states or quarter
 ledger have been built. The calculation and cache format use the existing rules. Check branch CI and
 measure both cold statement replay and the complete panel against one fixed dataset before updating the pin.
