@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from datetime import date, timedelta
 from typing import Any
+from unittest.mock import call, patch
 
 import numpy as np
 import pandas as pd
@@ -24,6 +25,7 @@ from research_datasets import (
     fundamental_states,
     prepare_fundamental_features,
 )
+from research_datasets.fundamentals_derived import IssuerStateMachine, normalize_facts
 from tests import test_sdk as bundle
 
 ASSET_A = "00000000-0000-4000-8000-000000000001"
@@ -153,6 +155,59 @@ class ConceptCatalogueTest(unittest.TestCase):
 
 
 class DerivedQuartersTest(unittest.TestCase):
+    def test_repeated_ingest_recomputes_only_changed_base_periods(self) -> None:
+        cash_tag = "CashAndCashEquivalentsAtCarryingValue"
+        rows = [
+            make_fact(
+                "previous-cash",
+                cash_tag,
+                "75",
+                None,
+                "2025-03-31",
+                public_at="2025-04-30T12:00:00Z",
+            ),
+            make_fact("cash", cash_tag, "100", None, "2025-03-31"),
+            make_fact("assets", "Assets", "300", None, "2025-03-31"),
+            make_fact(
+                "cash",
+                cash_tag,
+                "200",
+                None,
+                "2025-06-30",
+                public_at="2025-08-01T12:00:00Z",
+                observation_sequence=2,
+            ),
+            make_fact(
+                "cash",
+                cash_tag,
+                "200",
+                None,
+                "2025-06-30",
+                public_at="2025-08-02T12:00:00Z",
+                observation_sequence=3,
+                is_retracted=True,
+            ),
+        ]
+        versions, _ = normalize_facts(
+            pd.DataFrame(rows), time_policy="observed_content"
+        )
+        machine = IssuerStateMachine(CIK, target_views=("cash_i", "total_assets_i"))
+        machine.ingest(versions[:3])
+        with patch.object(
+            machine, "_evaluate_base", wraps=machine._evaluate_base
+        ) as evaluate:
+            machine.ingest(versions[3:])
+
+        cash_states = [row for row in machine.rows if row["view"] == "cash_i"]
+        self.assertEqual([row["value"] for row in cash_states], [75, 100, 200, 75])
+        self.assertEqual(
+            evaluate.call_args_list,
+            [
+                call("cash", None, date(2025, 3, 31)),
+                call("cash", None, date(2025, 6, 30)),
+            ],
+        )
+
     def test_cash_flow_quarters_are_derived_not_stuck_at_q1(self) -> None:
         ocf_tag = "NetCashProvidedByUsedInOperatingActivities"
         capex_tag = "PaymentsToAcquirePropertyPlantAndEquipment"

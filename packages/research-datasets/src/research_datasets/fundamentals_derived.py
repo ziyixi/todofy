@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from bisect import bisect_right
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -516,6 +517,7 @@ class IssuerStateMachine:
         self.record_quarters: tuple[str, ...] = tuple(dict.fromkeys(record_quarters))
         self.current: dict[str, FactVersion] = {}
         self.by_period: dict[tuple[str, date | None, date], set[str]] = {}
+        self._base_values: dict[tuple[str, date | None, date], PeriodValue] = {}
         self.last_emitted: dict[str, tuple[Any, ...]] = {}
         self.rows: list[dict[str, Any]] = []
         self.annual_only_steps: list[tuple[int, bool]] = []
@@ -534,12 +536,15 @@ class IssuerStateMachine:
             idx = end_idx
 
     def _apply_batch(self, batch: Sequence[FactVersion], batch_clock: int) -> None:
+        # An observation can move between periods. Invalidate both affected values
+        # and let the next refresh evaluate each period after the whole batch.
         for version in batch:
             previous = self.current.get(version.fact_id)
             if previous is not None:
                 old_key = (previous.concept, previous.period_start, previous.period_end)
                 bucket = self.by_period.get(old_key)
                 if bucket is not None:
+                    self._base_values.pop(old_key, None)
                     bucket.discard(version.fact_id)
                     if not bucket:
                         del self.by_period[old_key]
@@ -549,6 +554,7 @@ class IssuerStateMachine:
                 self.current[version.fact_id] = version
                 new_key = (version.concept, version.period_start, version.period_end)
                 self.by_period.setdefault(new_key, set()).add(version.fact_id)
+                self._base_values.pop(new_key, None)
 
         self._refresh_views(batch_clock)
 
@@ -615,15 +621,6 @@ class IssuerStateMachine:
             currency=first.currency,
             reference_date=first.reference_date,
         )
-
-    def _has_nonzero_nci(self) -> bool:
-        for concept_name, start, end in list(self.by_period):
-            if concept_name not in {"net_income_nci", "minority_interest"}:
-                continue
-            pv = self._evaluate_base(concept_name, start, end)
-            if pv is not None and pv.usable and pv.decimal_value != 0:
-                return True
-        return False
 
     def _evaluate_composite_period(
         self,
@@ -1191,7 +1188,22 @@ class IssuerStateMachine:
         for pv in quarters_map.values():
             if pv.usable:
                 usable_quarters_by_end[pv.period_end] = pv
-        q_list = [usable_quarters_by_end[k] for k in sorted(usable_quarters_by_end)]
+        quarter_ends = sorted(end.toordinal() for end in usable_quarters_by_end)
+
+        def prev_quarter(current: PeriodValue) -> PeriodValue | None:
+            assert current.period_start is not None
+            expected_end = current.period_start.toordinal() - 1
+            earliest = expected_end - 5
+            latest = min(expected_end + 5, current.period_end.toordinal() - 1)
+            position = bisect_right(quarter_ends, latest)
+            while position and quarter_ends[position - 1] >= earliest:
+                position -= 1
+                previous = usable_quarters_by_end[
+                    date.fromordinal(quarter_ends[position])
+                ]
+                if previous.currency == current.currency:
+                    return previous
+            return None
 
         candidate_ends: set[date] = set(fy_by_end) | {
             pv.period_end for pv in quarters_map.values()
@@ -1322,32 +1334,14 @@ class IssuerStateMachine:
             # 3. Sum of 4 contiguous quarters spanning 350..380 days.
             q4 = usable_quarters_by_end.get(e)
             if q4 is not None and q4.period_start is not None:
-
-                def _prev_quarter(cur_q: PeriodValue) -> PeriodValue | None:
-                    assert cur_q.period_start is not None
-                    matches = [
-                        cand
-                        for cand in q_list
-                        if cand.currency == cur_q.currency
-                        and cand.period_end < cur_q.period_end
-                        and abs(
-                            (
-                                cur_q.period_start
-                                - (cand.period_end + timedelta(days=1))
-                            ).days
-                        )
-                        <= 5
-                    ]
-                    return matches[-1] if matches else None
-
-                q3 = _prev_quarter(q4)
+                q3 = prev_quarter(q4)
                 q2 = (
-                    _prev_quarter(q3)
+                    prev_quarter(q3)
                     if q3 is not None and q3.period_start is not None
                     else None
                 )
                 q1 = (
-                    _prev_quarter(q2)
+                    prev_quarter(q2)
                     if q2 is not None and q2.period_start is not None
                     else None
                 )
@@ -1539,7 +1533,6 @@ class IssuerStateMachine:
         return has_annual
 
     def _refresh_views(self, batch_clock: int) -> None:
-        has_nci = self._has_nonzero_nci()
         is_annual_only = self._is_currently_annual_only()
         if (
             not self.annual_only_steps
@@ -1547,17 +1540,28 @@ class IssuerStateMachine:
         ):
             self.annual_only_steps.append((batch_clock, is_annual_only))
 
-        base_cache: dict[tuple[str, date | None, date], PeriodValue] = {}
         concept_periods: dict[str, dict[tuple[date | None, date], PeriodValue]] = {}
-        for c_name, start, end in list(self.by_period):
-            pv = self._evaluate_base(c_name, start, end)
-            if pv is not None:
-                base_cache[(c_name, start, end)] = pv
-                concept_periods.setdefault(c_name, {})[(start, end)] = pv
+        for key in self.by_period:
+            pv = self._base_values.get(key)
+            if pv is None:
+                pv = self._evaluate_base(*key)
+                if pv is None:
+                    continue
+                self._base_values[key] = pv
+            c_name, start, end = key
+            concept_periods.setdefault(c_name, {})[(start, end)] = pv
+
+        has_nci = any(
+            pv.usable and pv.decimal_value != 0
+            for name in ("net_income_nci", "minority_interest")
+            for pv in concept_periods.get(name, {}).values()
+        )
 
         # Candidate period keys per composite.
-        all_duration_keys = {(ps, pe) for (_, ps, pe) in base_cache if ps is not None}
-        all_instant_keys = {(None, pe) for (_, ps, pe) in base_cache if ps is None}
+        all_duration_keys = {
+            (ps, pe) for (_, ps, pe) in self.by_period if ps is not None
+        }
+        all_instant_keys = {(None, pe) for (_, ps, pe) in self.by_period if ps is None}
         for comp_name, comp_spec in COMPOSITES.items():
             keys = (
                 all_instant_keys if comp_spec.kind == "instant" else all_duration_keys
@@ -1565,7 +1569,7 @@ class IssuerStateMachine:
             comp_map: dict[tuple[date | None, date], PeriodValue] = {}
             for ps, pe in keys:
                 pv = self._evaluate_composite_period(
-                    comp_name, ps, pe, base_cache, has_nci
+                    comp_name, ps, pe, self._base_values, has_nci
                 )
                 if pv is not None:
                     comp_map[(ps, pe)] = pv

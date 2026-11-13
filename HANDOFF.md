@@ -7,6 +7,13 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 Private operating follow-ups are tracked in `private/HANDOFF.md`.
 
+Branch `codex/statement-period-reuse` reuses evaluated statement periods within each issuer's replay.
+An amendment or retraction invalidates the affected periods before the next state is emitted.
+Trailing twelve-month figures find the last eligible quarter within the existing date tolerance using sorted period ends.
+Synthetic comparisons match the previous timelines, sample joins and quarter ledgers under both
+time policies. Before publishing, run branch CI and measure cold and cached panel builds. After
+publication, compare year slices and continuous output on the same complete freeze.
+
 The SDK coverage follow-up reads the archive start from the frozen manifest's part index so it stays
 the same when candidate securities change between year slices. Synthetic fixtures verify both time
 policies and the calendar fallback when the first settlement is absent from the trading calendar.
