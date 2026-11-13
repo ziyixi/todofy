@@ -7,6 +7,10 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 Private operating follow-ups are tracked in `private/HANDOFF.md`.
 
+The synthetic SDK panel benchmark now implements the frozen reader's `total_returns` method and date bounds.
+The existing 12-security, 300-session benchmark completed both weekly and daily panels. Run branch CI before
+landing the fixture change. Production reader behavior is covered by the existing acceptance runs.
+
 The SDK coverage follow-up reads the archive start from the frozen manifest's part index so it stays
 the same when candidate securities change between year slices. Synthetic fixtures verify both time
 policies and the calendar fallback when the first settlement is absent from the trading calendar.
