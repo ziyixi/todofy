@@ -7,6 +7,13 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 Private operating follow-ups are tracked in `private/HANDOFF.md`.
 
+Branch `codex/research-fiscal-periods` fixes SDK quarter derivation for 12-week interim periods and a
+16- or 17-week fourth quarter. The fallback requires matching filing periods at the same fiscal start
+and annual evidence for the fourth quarter. It fills gaps after evaluating the existing quarter choices.
+Derived caches use a new version. All 61 targeted SDK tests passed locally. The archived comparison
+recovered fresh quarterly values for five issuers with this calendar, with unchanged comparison issuers
+and same-period TTM/FY revenue. Land after branch CI and confirm the refreshed archive with the published SDK.
+
 Branch `codex/checked-source-rollout` adds Standard OpenAI reservation rates to the Router catalog and restricts
 a new private service caller to approved models and bounded text generation. Router type checks, pricing and native
 binding tests passed locally. Publish the Router before enabling its consumer binding. After publication, verify the

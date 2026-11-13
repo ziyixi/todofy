@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 import numpy as np
@@ -834,6 +834,187 @@ class FamilySchemaCompatibilityTest(unittest.TestCase):
 
 
 class TrailingAndFiscalQuartersTest(unittest.TestCase):
+    def test_twelve_week_interims_and_long_fourth_quarters(self) -> None:
+        start = date(2022, 8, 29)
+        q2_end = start + timedelta(days=167)
+        q3_end = start + timedelta(days=251)
+        samples = pd.DataFrame(
+            {
+                "asset_id": [ASSET_A] * 4,
+                "signal_session": ["2023-06-02"] * 2 + ["2023-10-05"] * 2,
+                "decision_at": [
+                    "2023-06-03T11:59:59Z",
+                    "2023-06-03T12:00:00Z",
+                    "2023-10-06T11:59:59Z",
+                    "2023-10-06T12:00:00Z",
+                ],
+            }
+        )
+        views = (
+            "capex_q",
+            "operating_cash_flow_q",
+            "fcf_q",
+            "revenue_ttm",
+            "revenue_fy",
+        )
+        concepts = (
+            ("PaymentsToAcquirePropertyPlantAndEquipment", (10, 25, 45, 85)),
+            ("NetCashProvidedByUsedInOperatingActivities", (50, 110, 180, 280)),
+            ("Revenues", (100, 230, 370, 570)),
+        )
+        for year_days in (364, 371):
+            with self.subTest(year_days=year_days):
+                year_end = start + timedelta(days=year_days - 1)
+                periods = (
+                    (84, "10-Q", "2022-12-09"),
+                    (168, "10-Q", "2023-03-10"),
+                    (252, "10-Q", "2023-06-03"),
+                    (year_days, "10-K", "2023-10-06"),
+                )
+                rows = [
+                    make_fact(
+                        f"{tag}-{days}",
+                        tag,
+                        str(value),
+                        str(start),
+                        str(start + timedelta(days=days - 1)),
+                        form=form,
+                        accession=f"acc-{days}",
+                        public_at=f"{filed}T12:00:00Z",
+                    )
+                    for tag, values in concepts
+                    for value, (days, form, filed) in zip(values, periods, strict=True)
+                ]
+                result = derived_fundamentals(
+                    make_material(rows),
+                    samples,
+                    time_policy="public_reconstructed",
+                    views=views,
+                    provenance=True,
+                )
+                self.assertEqual(result["capex_q_value"].tolist(), [15, 20, 20, 40])
+                self.assertEqual(
+                    result["capex_q_period_end"].tolist(),
+                    [q2_end, q3_end, q3_end, year_end],
+                )
+                self.assertEqual(result["capex_q_basis"].iloc[-1], "fy_minus_ytd")
+                self.assertEqual(result["operating_cash_flow_q_value"].iloc[-1], 100)
+                self.assertEqual(result["fcf_q_value"].iloc[-1], 60)
+                self.assertEqual(result["revenue_ttm_value"].iloc[-1], 570)
+                self.assertEqual(
+                    result["revenue_ttm_value"].iloc[-1],
+                    result["revenue_fy_value"].iloc[-1],
+                )
+
+                # Withheld annual operands cannot refresh the quarter at an earlier cutoff.
+                without_fy = derived_fundamentals(
+                    make_material([row for row in rows if row["form"] != "10-K"]),
+                    samples.iloc[:3],
+                    time_policy="public_reconstructed",
+                    views=views,
+                    provenance=True,
+                )
+                pd.testing.assert_frame_equal(result.iloc[:3], without_fy)
+                # A fiscal calendar cannot make different currency operands subtractable.
+                mixed_currency = [
+                    {**row, "unit": "CAD", "currency": "CAD"}
+                    if row["fact_id"] == f"{concepts[0][0]}-{year_days}"
+                    else row
+                    for row in rows
+                ]
+                mixed = derived_fundamentals(
+                    make_material(mixed_currency),
+                    samples,
+                    time_policy="public_reconstructed",
+                    views=("capex_q",),
+                    provenance=True,
+                )
+                self.assertEqual(mixed["capex_q_period_end"].iloc[-1], q3_end)
+                self.assertEqual(mixed["capex_q_value"].iloc[-1], 20)
+
+    def test_twelve_week_fallback_preserves_reported_fourth_quarter(self) -> None:
+        start = date(2022, 8, 29)
+        capex = "PaymentsToAcquirePropertyPlantAndEquipment"
+        revenue = "Revenues"
+        filing_time = "2023-10-06T12:00:00Z"
+        rows = [
+            make_fact(
+                f"{tag}-{first}-{last}",
+                tag,
+                str(value),
+                str(start + timedelta(days=first)),
+                str(start + timedelta(days=last - 1)),
+                form=form,
+                public_at=filing_time,
+            )
+            for tag, first, last, value, form in (
+                (revenue, 0, 84, 100, "10-Q"),
+                (revenue, 0, 168, 230, "10-Q"),
+                (revenue, 0, 252, 370, "10-Q"),
+                (revenue, 0, 364, 570, "10-K"),
+                (capex, 0, 84, 10, "10-Q"),
+                (capex, 0, 168, 25, "10-Q"),
+                (capex, 0, 252, 45, "10-Q"),
+                (capex, 270, 350, 31, "10-K"),
+                (capex, 252, 357, 34, "10-K"),
+                (capex, 0, 364, 85, "10-K"),
+            )
+        ]
+        samples = pd.DataFrame(
+            {
+                "asset_id": [ASSET_A],
+                "signal_session": ["2023-10-05"],
+                "decision_at": [filing_time],
+            }
+        )
+        result = derived_fundamentals(
+            make_material(rows),
+            samples,
+            time_policy="public_reconstructed",
+            views=("capex_q",),
+            provenance=True,
+        ).iloc[0]
+        self.assertEqual(result["capex_q_value"], 31)
+        self.assertEqual(result["capex_q_basis"], "reported")
+        self.assertEqual(result["capex_q_period_end"], start + timedelta(days=349))
+
+    def test_252_day_ytd_does_not_override_calendar_year_evidence(self) -> None:
+        start = date(2025, 1, 1)
+        rows = [
+            make_fact(
+                f"capex-{days}",
+                "PaymentsToAcquirePropertyPlantAndEquipment",
+                str(value),
+                str(start),
+                str(start + timedelta(days=days - 1)),
+                form=form,
+            )
+            for days, form, value in (
+                (84, "10-Q", 10),
+                (168, "10-Q", 25),
+                (252, "10-Q", 45),
+                (273, "10-Q", 60),
+                (365, "10-K", 85),
+            )
+        ]
+        samples = pd.DataFrame(
+            {
+                "asset_id": [ASSET_A],
+                "signal_session": ["2026-01-02"],
+                "decision_at": ["2026-01-03T12:00:00Z"],
+            }
+        )
+        result = derived_fundamentals(
+            make_material(rows),
+            samples,
+            time_policy="public_reconstructed",
+            views=("capex_q",),
+            provenance=True,
+        ).iloc[0]
+        self.assertEqual(result["capex_q_value"], 25)
+        self.assertEqual(result["capex_q_period_end"], date(2025, 12, 31))
+        self.assertEqual(result["capex_q_basis"], "fy_minus_ytd")
+
     def test_ttm_equals_fy_at_year_end(self) -> None:
         rows = [
             make_fact(
