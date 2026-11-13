@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -1211,9 +1211,30 @@ class IssuerStateMachine:
             pv.period_end for pv in quarters_map.values()
         }
         if spec.additive:
-            for ps, pe in period_map:
-                if ps is not None and 77 <= _inclusive_days(ps, pe) <= 290:
+            ytd_by_end: dict[date, list[PeriodValue]] = {}
+            periods_by_start: dict[int, list[tuple[int, int, PeriodValue]]] = {}
+            for order, ((ps, pe), pv) in enumerate(period_map.items()):
+                if ps is None:
+                    continue
+                days = _inclusive_days(ps, pe)
+                in_ytd_range = 77 <= days <= 290
+                if in_ytd_range:
                     candidate_ends.add(pe)
+                if pv.usable:
+                    periods_by_start.setdefault(ps.toordinal(), []).append(
+                        (order, days, pv)
+                    )
+                    if in_ytd_range:
+                        ytd_by_end.setdefault(pe, []).append(pv)
+            for ytd in ytd_by_end.values():
+                ytd.sort(
+                    key=lambda pv: _inclusive_days(
+                        pv.period_start or pv.period_end, pv.period_end
+                    ),
+                    reverse=True,
+                )
+
+            annual_ends = sorted(end.toordinal() for end in fy_by_end)
 
         for e in sorted(candidate_ends):
             # 1. Fiscal year end -> reported/composite FY directly.
@@ -1236,54 +1257,45 @@ class IssuerStateMachine:
 
             # 2. YTD bridge: FY_prev + YTD_cur(S, e) - YTD_prev(S_prev, e - 1y +-7d).
             if spec.additive:
-                ytd_cur_list = [
-                    pv
-                    for (ps, pe), pv in period_map.items()
-                    if pe == e
-                    and ps is not None
-                    and pv.usable
-                    and 77 <= _inclusive_days(ps, pe) <= 290
-                ]
-                ytd_cur_list.sort(
-                    key=lambda pv: _inclusive_days(pv.period_start or e, pv.period_end),
-                    reverse=True,
-                )
                 bridged: PeriodValue | None = None
-                for ytd_cur in ytd_cur_list:
+                for ytd_cur in ytd_by_end.get(e, ()):
                     assert ytd_cur.period_start is not None
                     s_cur = ytd_cur.period_start
                     len_cur = _inclusive_days(s_cur, e)
-                    fy_prev_cands = [
-                        fpv
-                        for fpv in fy_by_end.values()
-                        if fpv.usable
-                        and fpv.period_start is not None
-                        and fpv.currency == ytd_cur.currency
-                        and abs((s_cur - (fpv.period_end + timedelta(days=1))).days)
-                        <= 5
-                    ]
-                    if not fy_prev_cands:
+                    expected_annual_end = s_cur.toordinal() - 1
+                    annual_first = bisect_left(annual_ends, expected_annual_end - 5)
+                    annual_last = bisect_right(annual_ends, expected_annual_end + 5)
+                    fy_prev = None
+                    for end in reversed(annual_ends[annual_first:annual_last]):
+                        annual = fy_by_end[date.fromordinal(end)]
+                        if (
+                            annual.usable
+                            and annual.period_start is not None
+                            and annual.currency == ytd_cur.currency
+                        ):
+                            fy_prev = annual
+                            break
+                    if fy_prev is None:
                         continue
-                    fy_prev = max(fy_prev_cands, key=lambda fpv: fpv.period_end)
                     assert fy_prev.period_start is not None
-                    s_prev_fy = fy_prev.period_start
-                    exp_prev_end = _prev_year_date(e)
-                    ytd_prev_cands = [
-                        ppv
-                        for (pps, ppe), ppv in period_map.items()
-                        if pps is not None
-                        and ppv.usable
-                        and ppv.currency == ytd_cur.currency
-                        and abs((pps - s_prev_fy).days) <= 3
-                        and abs((ppe - exp_prev_end).days) <= 7
-                        and abs(_inclusive_days(pps, ppe) - len_cur) <= 7
-                    ]
-                    if not ytd_prev_cands:
+                    prior_start = fy_prev.period_start.toordinal()
+                    expected_prior_end = _prev_year_date(e)
+                    matches = []
+                    for start in range(prior_start - 3, prior_start + 4):
+                        for order, days, period in periods_by_start.get(start, ()):
+                            distance = abs(
+                                (period.period_end - expected_prior_end).days
+                            )
+                            if (
+                                period.currency == ytd_cur.currency
+                                and distance <= 7
+                                and abs(days - len_cur) <= 7
+                            ):
+                                matches.append((distance, order, period))
+                    if not matches:
                         continue
-                    ytd_prev = min(
-                        ytd_prev_cands,
-                        key=lambda ppv: abs((ppv.period_end - exp_prev_end).days),
-                    )
+                    # Equal-distance periods keep the order of the original period map.
+                    ytd_prev = min(matches)[2]
                     ttm_start = ytd_prev.period_end + timedelta(days=1)
                     if not (350 <= _inclusive_days(ttm_start, e) <= 380):
                         continue
