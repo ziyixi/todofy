@@ -16,7 +16,7 @@ from pandas.testing import assert_frame_equal
 import research_datasets
 from research_datasets import EventSpec, clocks
 from research_datasets.events import default_specs
-from research_datasets.panels import OBSERVATION_COLUMNS
+from research_datasets.panels import OBSERVATION_COLUMNS, _read_feature_rows
 from tests import reference
 from tests import test_sdk as bundle
 
@@ -1013,6 +1013,46 @@ def random_material(seed: int) -> tuple[dict[str, Any], list[str], int]:
 
 
 class ReferenceTest(unittest.TestCase):
+    def test_sampled_rows_keep_daily_coverage_and_full_population_ranks(self) -> None:
+        material, _, _ = random_material(3)
+        version = MaterialVersion(material)
+        signal_days = sorted(
+            {
+                clocks.day(day)
+                for day in [*version.calendar[20::7], version.calendar[-1]]
+            }
+        )
+        options = {
+            "start": signal_days[0],
+            "end": signal_days[-1],
+            "benchmark": BENCHMARK,
+            "specs": RANDOM_SPECS,
+        }
+        for policy in research_datasets.POLICIES:
+            with self.subTest(policy=policy):
+                daily = research_datasets.daily_features(
+                    version, [ASSET, OTHER], time_policy=policy, **options
+                )
+                sampled, summary, _ = _read_feature_rows(
+                    version,
+                    [ASSET, OTHER],
+                    time_policy=policy,
+                    next_session=None,
+                    output_days=signal_days,
+                    **options,
+                )
+                expected = daily[daily["signal_session"].isin(signal_days)].reset_index(
+                    drop=True
+                )
+                assert_frame_equal(sampled, expected, check_exact=True)
+                for name in (
+                    "source_coverage",
+                    "rank_population",
+                    "skipped_sources",
+                    "undatable_events",
+                ):
+                    self.assertEqual(summary[name], daily.attrs["provenance"][name])
+
     def test_vectorized_events_and_coverage_match_reference(self) -> None:
         seen = dict.fromkeys(
             ["inverted", "sec_results", "news_typed", *research_datasets.POLICIES], 0

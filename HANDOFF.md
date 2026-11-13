@@ -7,6 +7,12 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 Private operating follow-ups are tracked in `private/HANDOFF.md`.
 
+Branch `codex/weekly-panel-materialization` emits base feature rows only on the weekly or monthly
+panel's signal days. Rolling windows and source coverage still use the daily grid, and each rank
+still compares the full frozen population. A synthetic weekly panel with 100 securities and 1,350
+sessions peaked at 0.73 GB, down from 0.81 GB. Run branch CI and verify the full freeze in a fresh
+CPU runtime before updating the SDK pin.
+
 Branch `codex/ttm-ytd-date-index` gives derived financial periods and tied filing accessions a
 stable order and updates the derived cache version. Equally close prior periods with the same start
 use the earlier end. The issuer replay reuses evaluated periods until an amendment or retraction changes

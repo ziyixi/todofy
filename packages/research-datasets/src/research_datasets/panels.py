@@ -249,6 +249,7 @@ def _feature_rows(
     population: frozenset[str] = frozenset(),
     specs: Sequence[EventSpec] | None = None,
     next_session: date | None = None,
+    output_positions: np.ndarray | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Daily features for contiguous signal sessions and the event reduction summary.
 
@@ -259,6 +260,7 @@ def _feature_rows(
     sessions = clocks.Calendar(calendar, next_session=next_session)
     first, last = sessions.index(signals[0]), sessions.index(signals[-1])
     start = max(0, first - WARMUP_SESSIONS)
+    output = slice(first, last + 1) if output_positions is None else output_positions
     assets = [*asset_ids, *sorted(population.difference(asset_ids))]
     position = {asset: index for index, asset in enumerate(assets)}
     events, summary = event_features(
@@ -273,6 +275,8 @@ def _feature_rows(
         news_versions=news_versions,
         population=[position[asset] for asset in sorted(population)],
         specs=specs,
+        output_windows=None if output_positions is None else output_positions - start,
+        signal_days=calendar[first : last + 1],
     )
     closes = _wide(adjusted, calendar, asset_ids, "close")
     closes = closes.where(np.isfinite(closes) & (closes > 0))
@@ -287,20 +291,24 @@ def _feature_rows(
     )
 
     def rows(frame: pd.DataFrame) -> np.ndarray:
-        return frame.iloc[first : last + 1].to_numpy().T.ravel()
+        return frame.iloc[output].to_numpy().T.ravel()
 
-    count, length = len(asset_ids), last - first + 1
+    output_days = np.asarray(calendar, dtype=object)[output]
+    count, length = len(asset_ids), len(output_days)
     decisions = sessions.decisions
     frame = pd.DataFrame(
         {
             "asset_id": np.repeat(np.array(asset_ids, dtype=object), length),
-            "signal_session": np.tile(
-                np.array(calendar[first : last + 1], dtype=object), count
+            "signal_session": np.tile(output_days, count),
+            "previous_decision_at": clocks.utc(np.tile(decisions[output], count)),
+            "decision_at": clocks.utc(
+                np.tile(
+                    decisions[first + 1 : last + 2]
+                    if output_positions is None
+                    else decisions[output_positions + 1],
+                    count,
+                )
             ),
-            "previous_decision_at": clocks.utc(
-                np.tile(decisions[first : last + 1], count)
-            ),
-            "decision_at": clocks.utc(np.tile(decisions[first + 1 : last + 2], count)),
             "momentum20": rows(momentum),
             "volatility20": rows(volatility),
             "price_history_missing": ~rows(consecutive).astype(bool),
@@ -674,27 +682,19 @@ def prepare(
 # ---------------------------------------------------------------------------
 
 
-def daily_features(
+def _read_feature_rows(
     version: Any,
-    symbols: str | Sequence[str] | None = None,
+    symbols: str | Sequence[str] | None,
     *,
     time_policy: str,
-    start: str | date | None = None,
-    end: str | date | None = None,
-    benchmark: str | None = None,
+    start: str | date | None,
+    end: str | date | None,
+    benchmark: str | None,
     specs: Sequence[EventSpec] | None = None,
     sampling: str = "daily",
-    next_session: str | date | None = None,
-) -> pd.DataFrame:
-    """Return daily price/volume/event-count PIT features as a ``pd.DataFrame`` (no split boundaries needed).
-
-    ``{name}_events_rank_21d`` ranks among the universe's securities that are neither
-    flagged benchmarks nor ``benchmark``, whatever the selection. ``specs`` replaces the
-    default one-per-source event specifications. A security selected twice gives one
-    set of rows. Features are computed on the daily grid, then ``sampling`` keeps the
-    last session of each completed week or month. ``next_session`` gives the last frozen
-    session a live decision instant and event window.
-    """
+    next_session: str | date | None,
+    output_days: Sequence[date] | None = None,
+) -> tuple[pd.DataFrame, dict[str, Any], dict[str, Any]]:
     _policy(time_policy)
     asset_ids = list(dict.fromkeys(map(str, version.resolve(symbols))))
     benchmark_ids = version.resolve(benchmark) if benchmark is not None else []
@@ -719,23 +719,60 @@ def daily_features(
         population,
         specs,
         next_session=cal.next_session,
+        output_positions=None if output_days is None else cal.positions(output_days),
     )
     if sampling != "daily":
         features = features[features["signal_session"].isin(set(sampled))]
         features = features.reset_index(drop=True)
+    parameters = {
+        "asset_ids": asset_ids,
+        "start": str(sampled[0]),
+        "end": str(sampled[-1]),
+        "benchmark_ids": benchmark_ids,
+        **_time_parameters(time_policy),
+        "event_specs": events["specs"],
+        "sampling": sampling,
+        "next_session": None if cal.next_session is None else str(cal.next_session),
+    }
+    return features, events, parameters
+
+
+def daily_features(
+    version: Any,
+    symbols: str | Sequence[str] | None = None,
+    *,
+    time_policy: str,
+    start: str | date | None = None,
+    end: str | date | None = None,
+    benchmark: str | None = None,
+    specs: Sequence[EventSpec] | None = None,
+    sampling: str = "daily",
+    next_session: str | date | None = None,
+) -> pd.DataFrame:
+    """Return daily price/volume/event-count PIT features as a ``pd.DataFrame`` (no split boundaries needed).
+
+    ``{name}_events_rank_21d`` ranks among the universe's securities that are neither
+    flagged benchmarks nor ``benchmark``, whatever the selection. ``specs`` replaces the
+    default one-per-source event specifications. A security selected twice gives one
+    set of rows. Features are computed on the daily grid, then ``sampling`` keeps the
+    last session of each completed week or month. ``next_session`` gives the last frozen
+    session a live decision instant and event window.
+    """
+    features, events, parameters = _read_feature_rows(
+        version,
+        symbols,
+        time_policy=time_policy,
+        start=start,
+        end=end,
+        benchmark=benchmark,
+        specs=specs,
+        sampling=sampling,
+        next_session=next_session,
+    )
     features.attrs["provenance"] = run_record(
         dataset_id=str(version.id),
         manifest_sha256=version.manifest_sha256,
-        parameters={
-            "asset_ids": asset_ids,
-            "start": str(sampled[0]),
-            "end": str(sampled[-1]),
-            "benchmark_ids": benchmark_ids,
-            **_time_parameters(time_policy),
-            "event_specs": events["specs"],
-            "sampling": sampling,
-            "next_session": None if cal.next_session is None else str(cal.next_session),
-        },
+        parameters=parameters,
         counts={"candidates": len(features)},
         **_feature_provenance(features, events),
         limitations=LIMITATIONS + list(version.manifest.get("limitations", [])),
@@ -990,7 +1027,7 @@ def panel(
     )
     if candidates.empty:
         raise ValueError("No candidate rows: no selected security is a member then")
-    daily = daily_features(
+    daily, event_summary, _ = _read_feature_rows(
         version,
         list(dict.fromkeys(candidates["asset_id"])),
         start=candidates["signal_session"].min(),
@@ -998,6 +1035,11 @@ def panel(
         time_policy=time_policy,
         benchmark=benchmark,
         next_session=next_session,
+        output_days=(
+            None
+            if sampling == "daily"
+            else sorted(candidates["signal_session"].unique())
+        ),
     )
     rows = candidates.merge(
         daily.drop(columns=["previous_decision_at", "decision_at"]),
@@ -1005,6 +1047,12 @@ def panel(
         how="left",
         validate="one_to_one",
     )
+    source_coverage = (
+        _coverage_summary(daily, event_summary["coverage_columns"])
+        if sampling == "daily"
+        else event_summary["source_coverage"]
+    )
+    del daily
     parts: list[pd.DataFrame] = [rows]
     samples = rows[KEYS + ["decision_at"]]
     sec_cov_cols = ["sec_coverage"] if "sec_coverage" in rows.columns else []
@@ -1338,7 +1386,6 @@ def panel(
     }
 
     combined = pd.concat(parts, axis=1)
-    daily_provenance = daily.attrs.get("provenance", {})
     label_parameters = labels.attrs["parameters"]
     provenance = run_record(
         dataset_id=str(version.id),
@@ -1398,10 +1445,10 @@ def panel(
         masks=masks,
         label_overlap=labels.attrs["label_overlap"],
         extra=extra_provenance,
+        source_coverage=source_coverage,
         **{
-            name: daily_provenance.get(name, {})
+            name: event_summary[name]
             for name in (
-                "source_coverage",
                 "skipped_sources",
                 "undatable_events",
                 "rank_population",

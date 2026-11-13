@@ -1129,6 +1129,8 @@ def event_features(
     news_versions: pd.DataFrame | None = None,
     population: Sequence[int] = (),
     specs: Sequence[EventSpec] | None = None,
+    output_windows: np.ndarray | None = None,
+    signal_days: Sequence[date] = (),
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Event feature columns, asset-major, for the first ``selected`` assets and the
     windows from ``first_signal`` on, plus the reduction summary.
@@ -1136,6 +1138,8 @@ def event_features(
     ``decisions`` holds one more instant than there are windows (NAT when the last
     session has no known successor). Counts and coverage are computed for every asset
     so that ``{name}_events_rank_21d`` ranks the ``population`` positions of ``assets``.
+    ``output_windows`` limits emitted rows while ``signal_days`` names the contiguous
+    span starting at ``first_signal`` for the panel's daily coverage summary.
     """
     specs = default_specs() if specs is None else tuple(specs)
     windows = len(decisions) - 1
@@ -1161,22 +1165,48 @@ def event_features(
     )
     labels, bases = np.array(vocabulary, dtype=object), np.array(BASES, dtype=object)
     population = np.asarray(population, dtype=np.int64)
+    rank_windows = (
+        slice(first_signal, windows) if output_windows is None else output_windows
+    )
+    rank_count = (
+        windows - first_signal if output_windows is None else len(output_windows)
+    )
+    selected_population = population < selected
 
     def full(matrix: np.ndarray, fill: Any) -> np.ndarray:
-        return np.pad(matrix, ((0, 0), (0, windows - decided)), constant_values=fill)
+        if decided < windows:
+            return np.pad(
+                matrix, ((0, 0), (0, windows - decided)), constant_values=fill
+            )
+        return matrix
 
     def rows(matrix: np.ndarray) -> np.ndarray:
+        if output_windows is not None:
+            return matrix[:selected, output_windows].ravel()
         return matrix[:selected, first_signal:].ravel()
 
+    def category(codes: np.ndarray, names: np.ndarray) -> pd.Categorical:
+        values = names[rows(codes)]
+        if output_windows is None:
+            return pd.Categorical(values)
+        active = np.bincount(
+            codes[:selected, first_signal:].ravel(), minlength=len(names)
+        )
+        return pd.Categorical(values, categories=sorted(names[active > 0]))
+
     columns: dict[str, Any] = {}
-    observed_basis = reconstructed_basis = 0
+    coverage_columns: dict[str, str] = {}
+    source_coverage: dict[str, Any] = {}
+    # Store the two coverage flags in a byte so the daily categorical vocabulary
+    # is retained without materializing a string for every discarded signal.
+    regime = np.zeros((selected, windows), dtype=np.uint8)
     for item in coverage.values():
-        basis = rows(full(item.basis, 0))
-        observed_basis = observed_basis | (basis == 1)
-        reconstructed_basis = reconstructed_basis | (basis == 2)
+        regime[:, :decided] |= (item.basis[:selected] == 1).astype(np.uint8)
+        regime[:, :decided] |= (item.basis[:selected] == 2).astype(np.uint8) << 1
     for spec in specs:
         item, events = coverage[spec.source], matrices[spec.name]
         basis = full(item.basis, 0)
+        label = full(item.label, 0)
         counts = full(events.counts, 0)
         clock_missing = full(events.clock_missing, False)
         complete = (basis != 0) & ~clock_missing
@@ -1185,8 +1215,17 @@ def event_features(
             rows(counts), ~rows(complete)
         )
         columns[f"{name}_observed_events_1d"] = rows(counts)
-        columns[f"{name}_coverage"] = pd.Categorical(labels[rows(full(item.label, 0))])
-        columns[f"{name}_coverage_basis"] = pd.Categorical(bases[rows(basis)])
+        columns[f"{name}_coverage"] = category(label, labels)
+        columns[f"{name}_coverage_basis"] = category(basis, bases)
+        if spec.source not in coverage_columns:
+            coverage_columns[spec.source] = name
+            if output_windows is not None:
+                source_coverage[spec.source] = _daily_source_coverage(
+                    label[:selected, first_signal:],
+                    basis[:selected, first_signal:],
+                    labels,
+                    signal_days,
+                )
         columns[f"{name}_clock_missing"] = rows(clock_missing)
         columns[f"{name}_public_clock_missing"] = rows(
             full(events.public_missing, False)
@@ -1196,35 +1235,27 @@ def event_features(
             total = _rolling(daily, size)
             columns[f"{name}_events_{size}d"] = rows(total)
             if size == RANK_WINDOW:
-                rank = np.full(total.shape, np.nan)
+                ranks = np.full((selected, rank_count), np.nan)
                 if population.size:
-                    rank[population] = (
-                        pd.DataFrame(total[population].T)
-                        .rank(axis=1, pct=True)
-                        .to_numpy()
-                        .T
+                    rank_input = (
+                        total[population, rank_windows]
+                        if output_windows is None
+                        else total[np.ix_(population, output_windows)]
                     )
-                columns[f"{name}_events_rank_{size}d"] = rows(rank)
+                    ranked = (
+                        pd.DataFrame(rank_input.T).rank(axis=1, pct=True).to_numpy().T
+                    )
+                    ranks[population[selected_population]] = ranked[selected_population]
+                columns[f"{name}_events_rank_{size}d"] = ranks.ravel()
         if name == spec.source:
             columns[f"{name}_new_event_count"] = columns[f"{name}_events_1d"].copy()
             columns[f"{name}_observed_new_event_count"] = rows(counts).copy()
-    columns["info_regime"] = pd.Categorical(
-        np.where(
-            observed_basis & reconstructed_basis,
-            "mixed",
-            np.where(
-                observed_basis,
-                "observed",
-                np.where(reconstructed_basis, "reconstructed", ""),
-            ),
-        )
+    columns["info_regime"] = category(
+        regime, np.array(["", "observed", "reconstructed", "mixed"], dtype=object)
     )
-    # Coverage belongs to a source: its first spec's columns describe it.
-    coverage_columns: dict[str, str] = {}
-    for spec in specs:
-        coverage_columns.setdefault(spec.source, spec.name)
     summary = {
         "coverage_columns": coverage_columns,
+        "source_coverage": source_coverage,
         "specs": [spec.record() for spec in specs],
         "skipped_sources": skipped,
         "undatable_events": {
@@ -1240,3 +1271,29 @@ def event_features(
         },
     }
     return columns, summary
+
+
+def _daily_source_coverage(
+    labels: np.ndarray, basis: np.ndarray, names: np.ndarray, days: Sequence[date]
+) -> dict[str, Any]:
+    """Panel provenance covers all selected assets and days before sampling."""
+
+    def counts(codes: np.ndarray, vocabulary: Sequence[str]) -> dict[str, int]:
+        tally = np.bincount(codes.ravel(), minlength=len(vocabulary))
+        values = {
+            str(name): int(count)
+            for name, count in zip(vocabulary, tally)
+            if name and count
+        }
+        return dict(sorted(values.items(), key=lambda item: (-item[1], item[0])))
+
+    covered = basis != 0
+    covered_days = np.flatnonzero(covered.any(axis=0))
+    return {
+        "states": counts(labels, names),
+        "basis": counts(basis, BASES),
+        "first_covered_session": str(days[covered_days[0]])
+        if covered_days.size
+        else None,
+        "assets_with_coverage": int(covered.any(axis=1).sum()),
+    }
