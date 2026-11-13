@@ -7,6 +7,12 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 Private operating follow-ups are tracked in `private/HANDOFF.md`.
 
+Branch `codex/fiscal-calendar-index` bounds fiscal-year scans by period start and skips fiscal
+calendar construction for instant-only statements. Two synthetic weekly runs with 24 securities
+and 2,700 sessions averaged 7.10 seconds, down from 7.57 seconds. Statement outputs and cache
+bytes matched under both time policies. Run branch CI and measure the complete freeze before
+updating the SDK pin.
+
 Branch `codex/state-row-memory` stores derived statement states in compact records until the
 DataFrame is built. A synthetic 650,000-state conversion peaked at 0.51 GB, down from 0.71 GB.
 Both time policies produced identical state, joined and quarter-ledger frames, and wrote identical
