@@ -23,6 +23,7 @@ from .fundamentals_derived import (
     derived_fundamentals,
     fundamental_states,
 )
+from .price_reader import projected_prices
 
 VALUATION_NAMES: tuple[str, ...] = (
     "market_cap_issuer",
@@ -959,7 +960,12 @@ def valuation(
         all_df = a_obj if isinstance(a_obj, pd.DataFrame) else pd.DataFrame(a_obj or [])
     else:
         raw_df = (
-            version_or_material.prices(all_needed_assets, adjusted=False)
+            projected_prices(
+                version_or_material,
+                all_needed_assets,
+                adjusted=False,
+                fields=("close",),
+            )
             if all_needed_assets
             else pd.DataFrame()
         )
@@ -970,9 +976,12 @@ def valuation(
             and "daily_returns" not in families
             and all_needed_assets
         ):
-            all_df = version_or_material.prices(all_needed_assets, adjusted=True)
+            all_df = projected_prices(
+                version_or_material, all_needed_assets, adjusted=True, fields=("close",)
+            )
 
     price_book = _PriceBook(raw_df, all_df, cal_days)
+    del raw_df, all_df
     split_adj = _build_split_adjuster(
         version_or_material, all_needed_assets, price_book, split_events
     )

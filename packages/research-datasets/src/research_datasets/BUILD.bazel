@@ -20,6 +20,7 @@ py_library(
         "industry.py",
         "labels.py",
         "panels.py",
+        "price_reader.py",
         "provenance.py",
         "release_features.py",
         "sec_events.py",

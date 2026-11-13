@@ -7,6 +7,11 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 Private operating follow-ups are tracked in `private/HANDOFF.md`.
 
+Branch `codex/panel-price-projection` reads only price fields consumed by the panel and valuation.
+A 64-security offline check of both price bases reduced cached price frames from 39.6 MiB to 6.9 MiB
+and returned identical requested fields. Run branch CI and measure the complete freeze before
+updating the SDK pin.
+
 Branch `codex/fiscal-calendar-index` bounds fiscal-year scans by period start and skips fiscal
 calendar construction for instant-only statements. Two synthetic weekly runs with 24 securities
 and 2,700 sessions averaged 7.10 seconds, down from 7.57 seconds. Statement outputs and cache
