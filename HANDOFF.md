@@ -7,6 +7,11 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 Private operating follow-ups are tracked in `private/HANDOFF.md`.
 
+Branch `codex/release-revenue-yoy` computes release revenue growth from a confirmed quarter end and a same-currency
+prior quarter visible at decision time. It keeps the release EPS surprise column missing while comparable per-share
+bases are unavailable. Run branch CI before adopting the new reader pin. Verify on a frozen dataset containing release
+facts and period evidence after publication.
+
 The SDK coverage follow-up reads the archive start from the frozen manifest's part index so it stays
 the same when candidate securities change between year slices. Synthetic fixtures verify both time
 policies and the calendar fallback when the first settlement is absent from the trading calendar.

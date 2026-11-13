@@ -260,6 +260,7 @@ unittest_test(
     name = "test_release_features",
     size = "small",
     srcs = [
+        "test_fundamentals_derived.py",
         "test_release_features.py",
         "test_sdk.py",
     ],

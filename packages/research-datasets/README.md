@@ -218,5 +218,11 @@ panel = ds.panel(
   features (`RELEASE_COLUMNS`) from `validation_status == "valid"` facts of one explicit `extractor_version`
   (defaulting to `manifest["extraction"]["default_extractor_version"]`). When no `extractor_version` is active or the
   release families are absent, zero columns are emitted.
+- `release_revenue_yoy` uses GAAP revenue and a validated reported quarter end. Under `public_reconstructed`, the
+  quarter end can also come from a frozen periodic report matched to the same release accession and public by the
+  decision. The comparison uses the first-known, same-currency revenue of the unique quarter ending within seven
+  days of the prior-year anniversary.
+  `observed_content` requires the validated quarter end in the extraction fact. `release_eps_sue_rw` is reserved
+  and stays missing until the reader can verify comparable per-share bases.
 - `panel(..., include_release=False)` keeps release extraction features off by default until a production extractor
   version is published in the manifest, and accepts `True` or an explicit `extractor_version` string.
