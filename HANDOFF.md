@@ -7,6 +7,11 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 Private operating follow-ups are tracked in `private/HANDOFF.md`.
 
+The SDK coverage follow-up reads the archive start from the frozen manifest's part index so it stays
+the same when candidate securities change between year slices. Synthetic fixtures verify both time
+policies and the calendar fallback when the first settlement is absent from the trading calendar.
+Run branch CI before updating the SDK pin. Verify year-sliced parity on a complete freeze after publication.
+
 Branch `codex/verified-return-factors` marks market caps `split_unverified` when the share-count interval
 crosses an unresolved stock dividend. The affected release buyback ratio is missing when it receives that
 market-cap status. Existing frozen files can still be read. All 179 SDK tests passed locally, including
