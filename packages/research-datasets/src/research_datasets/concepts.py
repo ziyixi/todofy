@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
-DERIVATION_VERSION = "fundamentals-derived-v1"
+DERIVATION_VERSION = "fundamentals-derived-v2"
 
 PERIODIC_ANNUAL_FORMS: frozenset[str] = frozenset({"10-K", "10-KT", "20-F", "40-F"})
 PERIODIC_QUARTER_FORMS: frozenset[str] = frozenset({"10-Q", "10-QT"})

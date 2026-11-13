@@ -487,6 +487,7 @@ class _FiscalYearSlots:
     e2: date | None
     e3: date | None
     e4: date | None
+    twelve_week_interims: bool = False
 
 
 class IssuerStateMachine:
@@ -772,6 +773,7 @@ class IssuerStateMachine:
         fy_periods: set[tuple[date, date]] = set()
         ytd_starts: set[date] = set()
         q3m_periods: list[tuple[date, date]] = []
+        interim_lengths: dict[date, set[int]] = {}
 
         for v in self.current.values():
             if v.period_start is None:
@@ -779,6 +781,12 @@ class IssuerStateMachine:
             pair = (v.period_start, v.period_end)
             duration_periods.add(pair)
             days = _inclusive_days(v.period_start, v.period_end)
+            if (
+                days in {84, 168, 252}
+                and v.form_base == "10-Q"
+                and v.decimal_value is not None
+            ):
+                interim_lengths.setdefault(v.period_start, set()).add(days)
             if self._is_annual_period_fact(v):
                 fy_periods.add(pair)
             elif 168 <= days <= 196 or 259 <= days <= 287:
@@ -869,7 +877,13 @@ class IssuerStateMachine:
                 ):
                     e4 = qe
 
-            slots_list.append(_FiscalYearSlots(s, e1, e2, e3, e4))
+            # Require all three same-start interims and preserve conflicting fiscal slots.
+            twelve_week_interims = (
+                (e3 is None or _inclusive_days(s, e3) == 252)
+                and {84, 168, 252}.issubset(interim_lengths.get(s, ()))
+                and (e4 is None or _inclusive_days(s, e4) in {364, 371})
+            )
+            slots_list.append(_FiscalYearSlots(s, e1, e2, e3, e4, twelve_week_interims))
 
         return slots_list, fy_periods
 
@@ -940,6 +954,7 @@ class IssuerStateMachine:
             prev_ytd: PeriodValue,
             basis: str,
             approx: bool = False,
+            long_q4: bool = False,
         ) -> PeriodValue | None:
             assert (
                 cur_ytd.period_start is not None and prev_ytd.period_start is not None
@@ -948,7 +963,8 @@ class IssuerStateMachine:
                 return None
             d_start = prev_ytd.period_end + timedelta(days=1)
             d_end = cur_ytd.period_end
-            if not (77 <= _inclusive_days(d_start, d_end) <= 105):
+            days = _inclusive_days(d_start, d_end)
+            if not (77 <= days <= 105 or (long_q4 and days in {112, 119})):
                 return None
             if not cur_ytd.usable:
                 return PeriodValue(
@@ -1042,8 +1058,6 @@ class IssuerStateMachine:
                 ytd6 = pick_ytd(s, 168, 196)
                 if ytd9 is not None and ytd6 is not None:
                     q3 = subtract_ytd(ytd9, ytd6, "ytd_difference")
-            if q3 is not None:
-                result[(s, 3)] = q3
 
             e3_ref = q3.period_end if q3 is not None else slots.e3
             q4 = pick_direct_3m(
@@ -1116,6 +1130,31 @@ class IssuerStateMachine:
                                 q3.reference_date,
                             ),
                         )
+            # Preserve the existing concept-specific choices, including Q4's original Q3
+            # reference. Use the inferred weekly calendar only for missing usable quarters.
+            if spec.additive and slots.twelve_week_interims:
+                ytd36 = period_map.get((s, s + timedelta(days=251)))
+                if ytd36 is not None:
+                    if q3 is None or not q3.usable:
+                        ytd24 = period_map.get((s, s + timedelta(days=167)))
+                        if ytd24 is not None:
+                            weekly_q3 = subtract_ytd(ytd36, ytd24, "ytd_difference")
+                            if weekly_q3 is not None and weekly_q3.usable:
+                                q3 = weekly_q3
+                    if q4 is None or not q4.usable:
+                        fy_pv = pick_ytd(s, 350, 380, require_fy=True)
+                        if (
+                            fy_pv is not None
+                            and fy_pv.period_start == s
+                            and _inclusive_days(s, fy_pv.period_end) in {364, 371}
+                        ):
+                            weekly_q4 = subtract_ytd(
+                                fy_pv, ytd36, "fy_minus_ytd", long_q4=True
+                            )
+                            if weekly_q4 is not None and weekly_q4.usable:
+                                q4 = weekly_q4
+            if q3 is not None:
+                result[(s, 3)] = q3
             if q4 is not None:
                 result[(s, 4)] = q4
 
