@@ -7,6 +7,11 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 Private operating follow-ups are tracked in `private/HANDOFF.md`.
 
+Branch `codex/state-row-memory` stores derived statement states in compact records until the
+DataFrame is built. A synthetic 650,000-state conversion peaked at 0.51 GB, down from 0.71 GB.
+Both time policies produced identical state, joined and quarter-ledger frames, and wrote identical
+cache bytes. Run branch CI and measure the complete panel before updating the SDK pin.
+
 Branch `codex/panel-valuation-cost` joins statement ages and statuses in column arrays and indexes
 the loaded frozen symbols for cover-page share-class resolution. The weekly and daily synthetic
 panels match the previous source with both time policies, detailed provenance and group labels.

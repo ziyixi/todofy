@@ -217,8 +217,8 @@ class DerivedQuartersTest(unittest.TestCase):
         ) as evaluate:
             machine.ingest(versions[3:])
 
-        cash_states = [row for row in machine.rows if row["view"] == "cash_i"]
-        self.assertEqual([row["value"] for row in cash_states], [75, 100, 200, 75])
+        cash_states = [row for row in machine.rows if row.view == "cash_i"]
+        self.assertEqual([row.value for row in cash_states], [75, 100, 200, 75])
         self.assertEqual(
             evaluate.call_args_list,
             [
