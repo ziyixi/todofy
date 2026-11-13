@@ -1256,6 +1256,64 @@ class TrailingAndFiscalQuartersTest(unittest.TestCase):
         self.assertEqual(row["eps_diluted_ttm_basis"], "quarter_sum")
         self.assertEqual(row["eps_diluted_ttm_status"], "approximate")
 
+    def test_ttm_ytd_bridge_with_equidistant_prior_ends(self) -> None:
+        rows = [
+            make_fact(
+                "prior-fy",
+                "Revenues",
+                "1000",
+                "2024-01-01",
+                "2024-12-31",
+                form="10-K",
+                public_at="2025-02-01T12:00:00Z",
+            ),
+            make_fact(
+                "prior-later",
+                "Revenues",
+                "100",
+                "2024-01-01",
+                "2024-07-01",
+                public_at="2024-08-01T12:00:00Z",
+            ),
+            make_fact(
+                "prior-earlier",
+                "Revenues",
+                "80",
+                "2024-01-01",
+                "2024-06-29",
+                public_at="2024-08-01T12:00:00Z",
+            ),
+            make_fact(
+                "current",
+                "Revenues",
+                "300",
+                "2025-01-01",
+                "2025-06-30",
+                public_at="2025-08-01T12:00:00Z",
+            ),
+        ]
+        states = fundamental_states(
+            make_material(rows),
+            time_policy="public_reconstructed",
+            views=("revenue_ttm",),
+        )
+        latest = states.iloc[-1]
+        self.assertEqual(latest["basis"], "ytd_bridge")
+        self.assertEqual(latest["period_start"], date(2024, 6, 30))
+        self.assertEqual(latest["value"], 1220.0)
+
+    def test_tied_base_facts_order_accessions_by_fact_id(self) -> None:
+        rows = [
+            make_fact("z-fact", "Assets", "100", None, "2025-03-31", accession="acc-a"),
+            make_fact("a-fact", "Assets", "100", None, "2025-03-31", accession="acc-z"),
+        ]
+        states = fundamental_states(
+            make_material(rows),
+            time_policy="public_reconstructed",
+            views=("total_assets_i",),
+        )
+        self.assertEqual(states["accessions"].tolist(), ["acc-z,acc-a"])
+
     def test_twelve_month_column_in_10q_is_not_fiscal_year(self) -> None:
         # A 12-month column reported inside a 10-Q (minor 7) must never become `fy`
         # or legacy `annual`!

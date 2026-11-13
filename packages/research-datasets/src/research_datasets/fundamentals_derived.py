@@ -577,7 +577,9 @@ class IssuerStateMachine:
             candidates = [v for v in candidates if v.currency == chosen_ccy]
 
         avail_ns = max(v.available_ns for v in candidates)
-        first = min(candidates, key=lambda v: v.fact_id)
+        # Keep the representative fact's accession first in the provenance.
+        candidates.sort(key=lambda v: v.fact_id)
+        first = candidates[0]
         accessions = _join_accessions(*(v.accession for v in candidates))
         if any(v.decimal_value is None for v in candidates):
             return PeriodValue(
@@ -1557,11 +1559,13 @@ class IssuerStateMachine:
             for pv in concept_periods.get(name, {}).values()
         )
 
-        # Candidate period keys per composite.
-        all_duration_keys = {
-            (ps, pe) for (_, ps, pe) in self.by_period if ps is not None
-        }
-        all_instant_keys = {(None, pe) for (_, ps, pe) in self.by_period if ps is None}
+        # Use (start, end) order for ties in selectors that consume composite maps.
+        all_duration_keys = sorted(
+            {(ps, pe) for (_, ps, pe) in self._base_values if ps is not None}
+        )
+        all_instant_keys = sorted(
+            {(None, pe) for (_, ps, pe) in self._base_values if ps is None}
+        )
         for comp_name, comp_spec in COMPOSITES.items():
             keys = (
                 all_instant_keys if comp_spec.kind == "instant" else all_duration_keys
@@ -1627,7 +1631,7 @@ class IssuerStateMachine:
                     )
                     qa_map = quarters_by_concept.get(leg_a, {})
                     qb_map = quarters_by_concept.get(leg_b, {})
-                    for q_key in set(qa_map).intersection(qb_map):
+                    for q_key in sorted(qa_map.keys() & qb_map.keys()):
                         if q_key in comp_q:
                             continue
                         pa_v, pb_v = qa_map[q_key], qb_map[q_key]

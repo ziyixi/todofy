@@ -7,12 +7,11 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 Private operating follow-ups are tracked in `private/HANDOFF.md`.
 
-Branch `codex/statement-period-reuse` reuses evaluated statement periods within each issuer's replay.
-An amendment or retraction invalidates the affected periods before the next state is emitted.
-Trailing twelve-month figures find the last eligible quarter within the existing date tolerance using sorted period ends.
-Synthetic comparisons match the previous timelines, sample joins and quarter ledgers under both
-time policies. Before publishing, run branch CI and measure cold and cached panel builds. After
-publication, compare year slices and continuous output on the same complete freeze.
+Branch `codex/stable-statement-periods` gives derived financial periods and tied filing accessions a
+stable order and updates the derived cache version. Equally close prior periods with the same start
+use the earlier end. The issuer replay reuses evaluated periods until an amendment or retraction changes
+the underlying facts. The trailing four-quarter path uses the same date tolerance and reads sorted ends.
+Run branch CI, compare independent cold builds, and verify year slices on the same frozen dataset.
 
 The SDK coverage follow-up reads the archive start from the frozen manifest's part index so it stays
 the same when candidate securities change between year slices. Synthetic fixtures verify both time
