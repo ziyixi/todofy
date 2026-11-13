@@ -518,6 +518,9 @@ class IssuerStateMachine:
             (v, *parse_view_name(v)) for v in self.target_views
         ]
         self.record_quarters: tuple[str, ...] = tuple(dict.fromkeys(record_quarters))
+        self._needs_fiscal_calendar = bool(self.record_quarters) or any(
+            suffix not in {"i", "i_yoy"} for _, _, suffix in self._parsed_views
+        )
         self.current: dict[str, FactVersion] = {}
         self.by_period: dict[tuple[str, date | None, date], set[str]] = {}
         self._base_values: dict[tuple[str, date | None, date], PeriodValue] = {}
@@ -774,7 +777,7 @@ class IssuerStateMachine:
         duration_periods: set[tuple[date, date]] = set()
         fy_periods: set[tuple[date, date]] = set()
         ytd_starts: set[date] = set()
-        q3m_periods: list[tuple[date, date]] = []
+        quarter_periods: set[tuple[date, date]] = set()
         interim_lengths: dict[date, set[int]] = {}
 
         for v in self.current.values():
@@ -799,7 +802,9 @@ class IssuerStateMachine:
                 ):
                     ytd_starts.add(v.period_start)
             elif 77 <= days <= 105:
-                q3m_periods.append(pair)
+                quarter_periods.add(pair)
+
+        q3m_periods = sorted(quarter_periods)
 
         # Candidate FY starts: (start, priority) where 0=FY, 1=YTD 6M/9M, 2=prior FY end + 1d
         raw_starts: list[tuple[date, int]] = []
@@ -824,7 +829,7 @@ class IssuerStateMachine:
         # Add standalone 3M starts only if not covered by an existing fiscal year window.
         # When an earlier comparative 3M period precedes an established FY start, infer
         # the prior fiscal year start by stepping back whole years first.
-        for qs, qe in sorted(set(q3m_periods)):
+        for qs, qe in q3m_periods:
             if any(-3 <= (qs - s).days <= 349 for s in fy_starts):
                 continue
             inferred: date | None = None
@@ -840,13 +845,16 @@ class IssuerStateMachine:
             fy_starts.append(inferred if inferred is not None else qs)
             fy_starts.sort()
 
+        ordered_periods = sorted(duration_periods)
+        start_days = [start.toordinal() for start, _ in ordered_periods]
         slots_list: list[_FiscalYearSlots] = []
         for idx, s in enumerate(fy_starts):
             next_s = fy_starts[idx + 1] if idx + 1 < len(fy_starts) else None
             e1 = e2 = e3 = e4 = None
-            for ps, pe in sorted(duration_periods):
-                if abs((ps - s).days) > 3:
-                    continue
+            start_day = s.toordinal()
+            first = bisect_left(start_days, start_day - 3)
+            last = bisect_right(start_days, start_day + 3)
+            for ps, pe in ordered_periods[first:last]:
                 days = _inclusive_days(ps, pe)
                 if 77 <= days <= 105:
                     e1 = pe if e1 is None or pe > e1 else e1
@@ -857,7 +865,11 @@ class IssuerStateMachine:
                 elif 350 <= days <= 380 and (ps, pe) in fy_periods:
                     e4 = pe if e4 is None or pe > e4 else e4
 
-            for qs, qe in sorted(set(q3m_periods)):
+            for qs, qe in q3m_periods:
+                if None not in (e1, e2, e3, e4) or (
+                    next_s is not None and qs >= next_s
+                ):
+                    break
                 if next_s is not None and qe >= next_s:
                     continue
                 offset = (qs - s).days
@@ -1610,7 +1622,11 @@ class IssuerStateMachine:
             if comp_map:
                 concept_periods[comp_name] = comp_map
 
-        slots_list, fy_periods = self._build_fiscal_calendar()
+        slots_list, fy_periods = (
+            self._build_fiscal_calendar()
+            if self._needs_fiscal_calendar
+            else ([], set())
+        )
 
         needed_ttm = {
             c_name
