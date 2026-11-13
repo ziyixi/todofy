@@ -51,6 +51,7 @@ from .fundamentals import (
     prepare_fundamental_features,
     prepare_fundamental_ratios,
 )
+from .price_reader import projected_prices as _project_prices
 from .provenance import run_record
 
 __all__ = [
@@ -123,13 +124,16 @@ def _live_limitations(parameters: Mapping[str, Any], carried: int) -> list[str]:
     return []
 
 
-def _price_frame(frame: pd.DataFrame) -> pd.DataFrame:
-    required = {"asset_id", "date", "open", "close", "volume"}
+def _price_frame(
+    frame: pd.DataFrame, fields: Sequence[str] = ("open", "close", "volume")
+) -> pd.DataFrame:
+    columns = ["asset_id", "date", *fields]
+    required = set(columns)
     if not required.issubset(frame.columns):
         raise ValueError(
             f"Price material lacks columns: {sorted(required - set(frame.columns))}"
         )
-    result = frame.copy()
+    result = frame[columns].copy()
     result["asset_id"] = result["asset_id"].astype(str)
     result["date"] = (
         result["date"].dt.date
@@ -138,7 +142,7 @@ def _price_frame(frame: pd.DataFrame) -> pd.DataFrame:
     )
     if result.duplicated(["asset_id", "date"]).any():
         raise ValueError("Duplicate security/session prices")
-    for column in ("open", "close", "volume"):
+    for column in fields:
         result[column] = pd.to_numeric(result[column], errors="coerce")
     return result
 
@@ -391,7 +395,11 @@ def _return_inputs(
     present = _candidates.families(version)
     ids = list(dict.fromkeys(map(str, asset_ids)))
     if "daily_returns" not in present:
-        return {"all": version.prices(ids, adjusted=True)}
+        return {
+            "all": _project_prices(
+                version, ids, adjusted=True, fields=("open", "close")
+            )
+        }
     delistings = (
         version.family("delistings", ids, columns=list(_labels.DELISTING_COLUMNS))
         if "delistings" in present
@@ -422,7 +430,9 @@ def _series(
 ) -> _labels.ReturnSeries:
     daily = inputs.get("daily_returns")
     if daily is None:
-        return _labels.vendor_series(_price_frame(inputs["all"]), days, assets)
+        return _labels.vendor_series(
+            _price_frame(inputs["all"], ("open", "close")), days, assets
+        )
     delistings = inputs.get("delistings")
     heirs = list(_labels.successors(delistings).values())
     assets = list(dict.fromkeys([*assets, *heirs]))
@@ -702,8 +712,14 @@ def _read_feature_rows(
     cal = _candidates.calendar(version, calendar, next_session=next_session)
     positions = _candidates.signal_positions(cal, start, end, sampling)
     sampled = [calendar[position] for position in positions]
-    raw = _price_frame(version.prices(asset_ids, adjusted=False))
-    adjusted = _price_frame(version.prices(asset_ids, adjusted=True))
+    raw = _price_frame(
+        _project_prices(version, asset_ids, adjusted=False, fields=("close", "volume")),
+        ("close", "volume"),
+    )
+    adjusted = _price_frame(
+        _project_prices(version, asset_ids, adjusted=True, fields=("close",)),
+        ("close",),
+    )
     population = _rank_population(version.universe, benchmark_ids)
     features, events = _feature_rows(
         calendar,
@@ -1106,7 +1122,10 @@ def panel(
             if "daily_returns" in families
             else None
         )
-        adj_df = _price_frame(version.prices(price_ids, adjusted=True))
+        adj_df = _price_frame(
+            _project_prices(version, price_ids, adjusted=True, fields=("close",)),
+            ("close",),
+        )
         ev_obs_cal = (
             _observations(version)
             if "earnings_observations" in families and "event_observations" in families
@@ -1226,7 +1245,12 @@ def panel(
                 if unique_ciks
                 else pd.DataFrame()
             )
-            raw_prices = _price_frame(version.prices(selected_assets, adjusted=False))
+            raw_prices = _price_frame(
+                _project_prices(
+                    version, selected_assets, adjusted=False, fields=("close", "volume")
+                ),
+                ("close",),
+            )
             sue_df = _sec_events.sue_features(
                 q_ledger,
                 sec_samples,
