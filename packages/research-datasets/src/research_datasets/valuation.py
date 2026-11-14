@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
@@ -19,11 +19,11 @@ from .concepts import FUNDAMENTAL_STATUSES, STALE_AFTER_DAYS
 from .constants import KEYS
 from .fundamentals_derived import (
     DERIVATION_VERSION,
-    asset_at,
     cik_at,
     derived_fundamentals,
     fundamental_states,
 )
+from .price_reader import projected_prices
 
 VALUATION_NAMES: tuple[str, ...] = (
     "market_cap_issuer",
@@ -448,9 +448,6 @@ def _build_split_adjuster(
                         or rec.get("kind")
                         or ""
                     ).lower()
-                    r = _safe_positive_decimal_float(rec.get(ratio_col))
-                    if r is None or r == 1.0:
-                        continue
                     if kind and kind not in {
                         "split",
                         "forward_split",
@@ -458,13 +455,26 @@ def _build_split_adjuster(
                         "stock_dividend",
                     }:
                         continue
+                    r = _safe_positive_decimal_float(rec.get(ratio_col))
+                    st = str(rec.get("status") or "")
+                    unverified = st in {"disputed", "unverified"}
+                    unknown_ratio = False
+                    if kind == "stock_dividend":
+                        rate = _safe_positive_decimal_float(rec.get("rate"))
+                        is_legacy = str(rec.get("normalizer_version")) == "actions-v1"
+                        unknown_ratio = r is None or (
+                            is_legacy and (rate is None or rate >= 1.0)
+                        )
+                    if unknown_ratio:
+                        # A v1 freeze lacks the terms needed to verify a multiplier.
+                        r = 1.0
+                        unverified = True
+                    elif r is None or r == 1.0:
+                        continue
                     aid = str(rec.get("asset_id") or "")
                     d = _parse_date(rec.get(date_col))
-                    st = str(rec.get("status") or "")
                     if aid and d is not None:
-                        ev_map.setdefault(aid, []).append(
-                            (d, r, st in {"disputed", "unverified"})
-                        )
+                        ev_map.setdefault(aid, []).append((d, r, unverified))
         return _SplitAdjuster(
             mode="structured",
             events_by_asset=ev_map,
@@ -604,41 +614,76 @@ def _load_share_classes(
     return by_cik
 
 
-def _resolve_normalized_symbol_at(
-    version_or_material: Any,
-    raw_symbol: str,
-    session: date,
+def _cover_symbol_resolver(
     uni_records: list[Mapping[str, Any]],
-    sym_hist_records: list[Mapping[str, Any]],
-) -> str | None:
-    if not raw_symbol:
-        return None
-    direct = asset_at(version_or_material, raw_symbol, session)
-    if direct is not None:
-        return direct
-    target = _norm_symbol(raw_symbol)
-    if not target:
-        return None
-    matches: list[str] = []
-    for row in sym_hist_records:
-        if _norm_symbol(row.get("symbol")) != target:
-            continue
-        vf = _parse_date(row.get("valid_from"))
-        vt = _parse_date(row.get("valid_to"))
-        if (vf is None or vf <= session) and (vt is None or vt >= session):
-            aid = str(row.get("asset_id") or "")
-            if aid:
-                matches.append(aid)
-    unique = list(dict.fromkeys(matches))
-    if len(unique) == 1:
-        return unique[0]
-    uni_matches = [
-        str(r.get("asset_id") or "")
-        for r in uni_records
-        if _norm_symbol(r.get("symbol")) == target and r.get("asset_id")
-    ]
-    uni_unique = list(dict.fromkeys(uni_matches))
-    return uni_unique[0] if len(uni_unique) == 1 else None
+    history: list[Mapping[str, Any]],
+) -> Callable[[str, date], str | None]:
+    """Index exact and punctuation-normalized cover symbols once for a valuation."""
+    exact_history: dict[str, list[tuple[str, str, str, str]]] = {}
+    alias_history: dict[str, list[tuple[date | None, date | None, str]]] = {}
+    has_status = any("status" in row for row in history)
+    for row in history:
+        symbol = row.get("symbol")
+        start, end = row.get("valid_from"), row.get("valid_to")
+        status = str(row.get("status")) if has_status else "verified"
+        if status in {"verified", "provisional"}:
+            exact_history.setdefault(str(symbol).upper(), []).append(
+                (
+                    "" if pd.isna(start) else str(start),
+                    "9999-12-31" if pd.isna(end) or end == "" else str(end),
+                    str(row["asset_id"]),
+                    status,
+                )
+            )
+        alias = _norm_symbol(symbol)
+        aid = row.get("asset_id")
+        if alias and aid:
+            alias_history.setdefault(alias, []).append(
+                (_parse_date(start), _parse_date(end), str(aid))
+            )
+
+    exact_universe: dict[str, set[str]] = {}
+    alias_universe: dict[str, set[str]] = {}
+    for row in uni_records:
+        symbol = row.get("symbol", "")
+        aid = row.get("asset_id")
+        if not history:
+            exact_universe.setdefault(str(symbol).upper(), set()).add(str(aid))
+        alias = _norm_symbol(symbol)
+        if alias and aid:
+            alias_universe.setdefault(alias, set()).add(str(aid))
+
+    def resolve(raw_symbol: str, session: date) -> str | None:
+        if not raw_symbol:
+            return None
+        target = raw_symbol.strip().upper()
+        if target:
+            if history:
+                day = session.isoformat()
+                verified: set[str] = set()
+                provisional: set[str] = set()
+                for start, end, aid, status in exact_history.get(target, ()):
+                    if start <= day <= end:
+                        (verified if status == "verified" else provisional).add(aid)
+                exact = verified or provisional
+            else:
+                exact = exact_universe.get(target)
+            if exact and len(exact) == 1:
+                return next(iter(exact))
+        # The punctuation fallback uses the full dated history, including rows
+        # without a verified/provisional status, before trying current symbols.
+        alias = _norm_symbol(raw_symbol)
+        matches = {
+            aid
+            for start, end, aid in alias_history.get(alias, ())
+            if (start is None or start <= session) and (end is None or session <= end)
+        }
+        if len(matches) == 1:
+            return next(iter(matches))
+        fallback = alias_universe.get(alias)
+        return next(iter(fallback)) if fallback and len(fallback) == 1 else None
+
+    return resolve
 
 
 def _select_cover_accession(
@@ -915,7 +960,12 @@ def valuation(
         all_df = a_obj if isinstance(a_obj, pd.DataFrame) else pd.DataFrame(a_obj or [])
     else:
         raw_df = (
-            version_or_material.prices(all_needed_assets, adjusted=False)
+            projected_prices(
+                version_or_material,
+                all_needed_assets,
+                adjusted=False,
+                fields=("close",),
+            )
             if all_needed_assets
             else pd.DataFrame()
         )
@@ -926,9 +976,12 @@ def valuation(
             and "daily_returns" not in families
             and all_needed_assets
         ):
-            all_df = version_or_material.prices(all_needed_assets, adjusted=True)
+            all_df = projected_prices(
+                version_or_material, all_needed_assets, adjusted=True, fields=("close",)
+            )
 
     price_book = _PriceBook(raw_df, all_df, cal_days)
+    del raw_df, all_df
     split_adj = _build_split_adjuster(
         version_or_material, all_needed_assets, price_book, split_events
     )
@@ -939,6 +992,7 @@ def valuation(
     cover_by_cik = _load_share_classes(
         version_or_material, mapped_assets_for_family, set(mapped_ciks), time_policy
     )
+    resolve_cover_symbol = _cover_symbol_resolver(uni_records, sh_records)
 
     # Load historical share states & debt reporting history from fundamental_states
     hist_states = (
@@ -1121,13 +1175,7 @@ def valuation(
             # Map each class row to an asset_id if listed
             mapped_classes: list[tuple[_CoverClassRow, str | None]] = []
             for cr in cover_rows:
-                c_aid = _resolve_normalized_symbol_at(
-                    version_or_material,
-                    cr.trading_symbol,
-                    sig,
-                    uni_records,
-                    sh_records,
-                )
+                c_aid = resolve_cover_symbol(cr.trading_symbol, sig)
                 # Single-security issuer with non-dimensional cover row maps to its sole security
                 if c_aid is None and not cr.class_member and len(active_sibs) == 1:
                     c_aid = active_sibs[0]
@@ -1601,14 +1649,7 @@ def valuation(
                     tot_p = 0.0
                     for pcr in prior_cover:
                         p_aid = (
-                            _resolve_normalized_symbol_at(
-                                version_or_material,
-                                pcr.trading_symbol,
-                                sig,
-                                uni_records,
-                                sh_records,
-                            )
-                            or prim_aid
+                            resolve_cover_symbol(pcr.trading_symbol, sig) or prim_aid
                         )
                         f_p, unv_p, _ = split_adj.factor(p_aid, pcr.ref_date, sig)
                         prior_unver = prior_unver or unv_p

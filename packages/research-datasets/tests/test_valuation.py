@@ -16,6 +16,7 @@ from research_datasets import (
     normalize_facts,
     valuation,
 )
+from research_datasets.valuation import _cover_symbol_resolver
 
 ASSET_A = "00000000-0000-4000-8000-000000000001"
 ASSET_B = "00000000-0000-4000-8000-000000000002"
@@ -126,6 +127,49 @@ def _sample_rows(pairs: list[tuple[str, str, str]]) -> pd.DataFrame:
 
 
 class ValuationTest(unittest.TestCase):
+    def test_cover_symbol_resolution_preserves_history_and_alias_precedence(
+        self,
+    ) -> None:
+        session = date(2025, 5, 1)
+        universe = [
+            {"asset_id": ASSET_A, "symbol": "ABC.A"},
+            {"asset_id": ASSET_B, "symbol": "ABC-B"},
+            {"asset_id": ASSET_SINGLE, "symbol": "ABCA"},
+        ]
+        history = [
+            {
+                "asset_id": ASSET_A,
+                "symbol": "ABC.A",
+                "valid_from": "2025-05-01",
+                "valid_to": "2025-05-01",
+                "status": "verified",
+            },
+            {
+                "asset_id": ASSET_B,
+                "symbol": "ABC.A",
+                "valid_from": "",
+                "valid_to": "",
+                "status": "provisional",
+            },
+            {
+                "asset_id": ASSET_B,
+                "symbol": "ABC.B",
+                "valid_from": "",
+                "valid_to": "",
+                "status": "unknown",
+            },
+        ]
+        resolve = _cover_symbol_resolver(universe, history)
+
+        self.assertEqual(resolve(" abc.a ", session), ASSET_A)
+        self.assertEqual(resolve("abc.a", session + timedelta(days=1)), ASSET_B)
+        self.assertEqual(resolve("abc-b", session), ASSET_B)
+        self.assertIsNone(resolve("ABCA", session))
+        self.assertEqual(resolve("ABCA", session + timedelta(days=1)), ASSET_B)
+        self.assertEqual(
+            _cover_symbol_resolver(universe, [])("ABCA", session), ASSET_SINGLE
+        )
+
     def test_dual_class_market_cap_is_issuer_level(self) -> None:
         """Both share classes receive identical issuer market cap and class-specific security cap."""
         cal = _business_days("2025-04-01", "2025-05-30")
@@ -548,6 +592,82 @@ class ValuationTest(unittest.TestCase):
         self.assertEqual(res.loc[1, "market_cap_issuer_status"], "ok")
         self.assertAlmostEqual(res.loc[0, "valuation_split_factor"], 1.0)
         self.assertAlmostEqual(res.loc[1, "valuation_split_factor"], 2.0)
+
+    def test_stock_dividend_ratio_status_across_effect_date(self) -> None:
+        material = {
+            "manifest": {"calendar": _business_days("2025-05-01", "2025-05-16")},
+            "universe": pd.DataFrame(
+                [
+                    {
+                        "asset_id": ASSET_SINGLE,
+                        "symbol": "SOLO",
+                        "cik": CIK_SINGLE,
+                        "issuer_mapping_status": "verified",
+                    }
+                ]
+            ),
+            "fundamentals": pd.DataFrame(
+                [
+                    _fact(
+                        "shares",
+                        "EntityCommonStockSharesOutstanding",
+                        "1000000",
+                        None,
+                        "2025-05-01",
+                        taxonomy="dei",
+                        unit="shares",
+                        currency="",
+                        period_kind="instant",
+                    )
+                ]
+            ),
+            "raw": pd.DataFrame(
+                [
+                    {"asset_id": ASSET_SINGLE, "date": day, "close": 100.0}
+                    for day in ("2025-05-09", "2025-05-12")
+                ]
+            ),
+        }
+        samples = _sample_rows(
+            [
+                (ASSET_SINGLE, "2025-05-09", "2025-05-12T10:00:00Z"),
+                (ASSET_SINGLE, "2025-05-12", "2025-05-13T10:00:00Z"),
+            ]
+        )
+        cases = (
+            ("actions-v2", 1.0, None, 1.0, "split_unverified"),
+            ("actions-v1", 1.05, 2.05, 1.0, "split_unverified"),
+            ("actions-v1", 0.05, 1.05, 1.05, "ok"),
+            ("actions-v2", 1.05, 1.05, 1.05, "ok"),
+            (None, None, 1.05, 1.05, "ok"),
+        )
+        for version, rate, ratio, factor, status in cases:
+            with self.subTest(version=version, rate=rate, ratio=ratio):
+                material["corporate_actions"] = pd.DataFrame(
+                    [
+                        {
+                            "asset_id": ASSET_SINGLE,
+                            "role": "subject",
+                            "type": "stock_dividend",
+                            "effect_date": "2025-05-12",
+                            "normalizer_version": version,
+                            "rate": rate,
+                            "split_ratio": ratio,
+                        }
+                    ]
+                )
+                res = valuation(
+                    material,
+                    samples,
+                    time_policy="public_reconstructed",
+                    provenance=True,
+                )
+                for name in ("market_cap_issuer", "market_cap_security"):
+                    self.assertEqual(res[f"{name}_status"].tolist(), ["ok", status])
+                    np.testing.assert_allclose(
+                        res[f"{name}_value"], [1e8, 1e8 * factor]
+                    )
+                np.testing.assert_allclose(res["valuation_split_factor"], [1.0, factor])
 
     def test_statement_eps_reference_date_is_filing_date(self) -> None:
         """ASC 260 statement EPS/shares use filing date as split reference, whereas cover shares use period_end."""

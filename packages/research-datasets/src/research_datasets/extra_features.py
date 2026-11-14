@@ -1235,9 +1235,34 @@ def _extended_session_ordinals(
     return np.array([*pre, *mid, *post], dtype="int64")
 
 
-def _first_short_interest_available_ns(version: Any, si_df: pd.DataFrame) -> int:
+def _first_short_interest_available_ns(
+    version: Any, calendar_days: Sequence[Any]
+) -> int:
     """Compute UTC nanosecond ``available_at`` of the first archive settlement file."""
     manifest = _manifest_of(version)
+    # Each settlement's first observations use the publication clock, which rises
+    # with settlement date. Corrections can only move their clock later.
+    prefix = f"datasets/{manifest.get('dataset_id')}/short_interest/"
+    parts = [
+        key
+        for item in manifest.get("files") or ()
+        if isinstance(item, Mapping)
+        and isinstance(key := item.get("key"), str)
+        and key.startswith(prefix)
+        and key.endswith(".parquet")
+    ]
+    first_available = {
+        key: entry.get("first_available_at")
+        for entry in manifest.get("part_index") or ()
+        if isinstance(entry, Mapping)
+        and entry.get("family") == "short_interest"
+        and isinstance(key := entry.get("key"), str)
+    }
+    if parts:
+        ns_vals = clocks.instants([first_available.get(key) for key in parts])
+        if (ns_vals != NAT).all():
+            return int(ns_vals.min())
+
     ref_si = (
         manifest.get("reference", {}).get("short_interest", {})
         if isinstance(manifest.get("reference"), Mapping)
@@ -1250,31 +1275,16 @@ def _first_short_interest_available_ns(version: Any, si_df: pd.DataFrame) -> int
     )
     first_settlement = _parse_iso_day(first_settlement_str) or date(2017, 12, 29)
 
-    if (
-        not si_df.empty
-        and "settlement_date" in si_df.columns
-        and "available_at" in si_df.columns
-    ):
-        matches = si_df[
-            si_df["settlement_date"].astype(str).str.slice(0, 10)
-            == first_settlement.isoformat()
-        ]
-        if not matches.empty:
-            ns_vals = clocks.instants(matches["available_at"])
-            valid = ns_vals[ns_vals != NAT]
-            if len(valid) > 0:
-                return int(valid.min())
-
     # Rule: midnight America/New_York after the 8th NYSE session following settlement.
-    cal_raw = getattr(version, "calendar", None) or []
-    ords = _extended_session_ordinals(
-        cal_raw, first_settlement, first_settlement + timedelta(days=30)
-    )
-    c0 = int(np.searchsorted(ords, first_settlement.toordinal(), side="left"))
-    c8_ord = int(ords[min(c0 + 8, len(ords) - 1)])
-    day_after_c8 = date.fromordinal(c8_ord + 1)
-    midnight_ny = pd.Timestamp(day_after_c8).tz_localize(NEW_YORK)
-    return int(midnight_ny.tz_convert("UTC").value)
+    last_day = first_settlement + timedelta(days=30)
+    ords = _extended_session_ordinals(calendar_days, first_settlement, last_day)
+    following = int(np.searchsorted(ords, first_settlement.toordinal(), side="right"))
+    c8 = following + 7
+    if c8 < len(ords) and ords[c8] <= last_day.toordinal():
+        day_after_c8 = date.fromordinal(int(ords[c8]) + 1)
+    else:
+        day_after_c8 = first_settlement + timedelta(days=13)
+    return int(clocks.at(day_after_c8, 0).value)
 
 
 def _is_split_flagged(value: Any) -> bool:
@@ -1336,12 +1346,11 @@ def short_interest_features(
         ),
     )
 
-    archive_start_ns = _first_short_interest_available_ns(version, si_df)
-
     # Prepare session ordinal axis for session-age counting.
     cal_raw = getattr(version, "calendar", None)
     if cal_raw is None and isinstance(version, Mapping):
         cal_raw = version.get("calendar", [])
+    archive_start_ns = _first_short_interest_available_ns(version, cal_raw or [])
     min_day = min(sig_days) if sig_days else date(2017, 12, 29)
     max_day = max(sig_days) if sig_days else date(2026, 12, 31)
 

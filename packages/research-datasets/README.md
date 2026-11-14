@@ -161,6 +161,10 @@ panel = ds.panel(
   multi-class issuers via `share_classes` when available), enterprise value, and book/earnings/FCF/sales/EBITDA yields;
   SIC division, major group, and Fama-French 12 classification (`sic_pit=False` flags non-PIT SIC metadata; supported in
   `neutralize=["ff12"]`).
+- Valuation intervals crossing a stock dividend with an unknown share ratio use a factor of 1 for that action and
+  flag market value as `split_unverified`. In `actions-v1` freezes, positive fractional rates below 1 keep their
+  stored ratios, and rates of 1 or more or missing rates are unverified. An unverified issuer market value leaves
+  `buyback_authorized_365d_to_mcap` missing when the market-cap status is supplied.
 - Corporate actions and total-return families (`ds.corporate_actions`, `ds.total_returns`, `ds.return_reconciliation`)
   plus issuer metadata (`ds.issuer_profiles`, `ds.share_classes`, `ds.share_class_checks`).
 - Typed SEC filing events and earnings features (`ds.sec_event_specs`, `typed_event_features`,

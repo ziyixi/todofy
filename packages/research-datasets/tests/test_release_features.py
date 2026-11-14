@@ -486,6 +486,15 @@ class ReleaseFeaturesTest(unittest.TestCase):
         self.assertAlmostEqual(pub_out.loc[0, "buyback_authorized_365d_to_mcap"], 0.05)
         self.assertAlmostEqual(pub_out.loc[0, "dividend_change_pct"], 0.10)
 
+        unverified = release_features(
+            version,
+            cands,
+            time_policy="public_reconstructed",
+            fundamentals=fund.assign(market_cap_issuer_status="split_unverified"),
+        )
+        self.assertTrue(unverified["buyback_authorized_365d_to_mcap"].isna().all())
+        self.assertEqual(unverified.loc[0, "release_extraction_status"], "valid_facts")
+
         # At idx 5 (entry session[6]), release 2 is done with 0 facts -> status "no_facts",
         # while latest guidance within 120 sessions still reflects release 1!
         self.assertEqual(pub_out.loc[2, "release_extraction_status"], "no_facts")

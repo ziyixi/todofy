@@ -51,6 +51,7 @@ from .fundamentals import (
     prepare_fundamental_features,
     prepare_fundamental_ratios,
 )
+from .price_reader import projected_prices as _project_prices
 from .provenance import run_record
 
 __all__ = [
@@ -123,13 +124,16 @@ def _live_limitations(parameters: Mapping[str, Any], carried: int) -> list[str]:
     return []
 
 
-def _price_frame(frame: pd.DataFrame) -> pd.DataFrame:
-    required = {"asset_id", "date", "open", "close", "volume"}
+def _price_frame(
+    frame: pd.DataFrame, fields: Sequence[str] = ("open", "close", "volume")
+) -> pd.DataFrame:
+    columns = ["asset_id", "date", *fields]
+    required = set(columns)
     if not required.issubset(frame.columns):
         raise ValueError(
             f"Price material lacks columns: {sorted(required - set(frame.columns))}"
         )
-    result = frame.copy()
+    result = frame[columns].copy()
     result["asset_id"] = result["asset_id"].astype(str)
     result["date"] = (
         result["date"].dt.date
@@ -138,7 +142,7 @@ def _price_frame(frame: pd.DataFrame) -> pd.DataFrame:
     )
     if result.duplicated(["asset_id", "date"]).any():
         raise ValueError("Duplicate security/session prices")
-    for column in ("open", "close", "volume"):
+    for column in fields:
         result[column] = pd.to_numeric(result[column], errors="coerce")
     return result
 
@@ -249,6 +253,7 @@ def _feature_rows(
     population: frozenset[str] = frozenset(),
     specs: Sequence[EventSpec] | None = None,
     next_session: date | None = None,
+    output_positions: np.ndarray | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Daily features for contiguous signal sessions and the event reduction summary.
 
@@ -259,6 +264,7 @@ def _feature_rows(
     sessions = clocks.Calendar(calendar, next_session=next_session)
     first, last = sessions.index(signals[0]), sessions.index(signals[-1])
     start = max(0, first - WARMUP_SESSIONS)
+    output = slice(first, last + 1) if output_positions is None else output_positions
     assets = [*asset_ids, *sorted(population.difference(asset_ids))]
     position = {asset: index for index, asset in enumerate(assets)}
     events, summary = event_features(
@@ -273,6 +279,8 @@ def _feature_rows(
         news_versions=news_versions,
         population=[position[asset] for asset in sorted(population)],
         specs=specs,
+        output_windows=None if output_positions is None else output_positions - start,
+        signal_days=calendar[first : last + 1],
     )
     closes = _wide(adjusted, calendar, asset_ids, "close")
     closes = closes.where(np.isfinite(closes) & (closes > 0))
@@ -287,20 +295,24 @@ def _feature_rows(
     )
 
     def rows(frame: pd.DataFrame) -> np.ndarray:
-        return frame.iloc[first : last + 1].to_numpy().T.ravel()
+        return frame.iloc[output].to_numpy().T.ravel()
 
-    count, length = len(asset_ids), last - first + 1
+    output_days = np.asarray(calendar, dtype=object)[output]
+    count, length = len(asset_ids), len(output_days)
     decisions = sessions.decisions
     frame = pd.DataFrame(
         {
             "asset_id": np.repeat(np.array(asset_ids, dtype=object), length),
-            "signal_session": np.tile(
-                np.array(calendar[first : last + 1], dtype=object), count
+            "signal_session": np.tile(output_days, count),
+            "previous_decision_at": clocks.utc(np.tile(decisions[output], count)),
+            "decision_at": clocks.utc(
+                np.tile(
+                    decisions[first + 1 : last + 2]
+                    if output_positions is None
+                    else decisions[output_positions + 1],
+                    count,
+                )
             ),
-            "previous_decision_at": clocks.utc(
-                np.tile(decisions[first : last + 1], count)
-            ),
-            "decision_at": clocks.utc(np.tile(decisions[first + 1 : last + 2], count)),
             "momentum20": rows(momentum),
             "volatility20": rows(volatility),
             "price_history_missing": ~rows(consecutive).astype(bool),
@@ -383,7 +395,11 @@ def _return_inputs(
     present = _candidates.families(version)
     ids = list(dict.fromkeys(map(str, asset_ids)))
     if "daily_returns" not in present:
-        return {"all": version.prices(ids, adjusted=True)}
+        return {
+            "all": _project_prices(
+                version, ids, adjusted=True, fields=("open", "close")
+            )
+        }
     delistings = (
         version.family("delistings", ids, columns=list(_labels.DELISTING_COLUMNS))
         if "delistings" in present
@@ -414,7 +430,9 @@ def _series(
 ) -> _labels.ReturnSeries:
     daily = inputs.get("daily_returns")
     if daily is None:
-        return _labels.vendor_series(_price_frame(inputs["all"]), days, assets)
+        return _labels.vendor_series(
+            _price_frame(inputs["all"], ("open", "close")), days, assets
+        )
     delistings = inputs.get("delistings")
     heirs = list(_labels.successors(delistings).values())
     assets = list(dict.fromkeys([*assets, *heirs]))
@@ -674,6 +692,67 @@ def prepare(
 # ---------------------------------------------------------------------------
 
 
+def _read_feature_rows(
+    version: Any,
+    symbols: str | Sequence[str] | None,
+    *,
+    time_policy: str,
+    start: str | date | None,
+    end: str | date | None,
+    benchmark: str | None,
+    specs: Sequence[EventSpec] | None = None,
+    sampling: str = "daily",
+    next_session: str | date | None,
+    output_days: Sequence[date] | None = None,
+) -> tuple[pd.DataFrame, dict[str, Any], dict[str, Any]]:
+    _policy(time_policy)
+    asset_ids = list(dict.fromkeys(map(str, version.resolve(symbols))))
+    benchmark_ids = version.resolve(benchmark) if benchmark is not None else []
+    calendar = list(map(_day, version.calendar))
+    cal = _candidates.calendar(version, calendar, next_session=next_session)
+    positions = _candidates.signal_positions(cal, start, end, sampling)
+    sampled = [calendar[position] for position in positions]
+    raw = _price_frame(
+        _project_prices(version, asset_ids, adjusted=False, fields=("close", "volume")),
+        ("close", "volume"),
+    )
+    adjusted = _price_frame(
+        _project_prices(version, asset_ids, adjusted=True, fields=("close",)),
+        ("close",),
+    )
+    population = _rank_population(version.universe, benchmark_ids)
+    features, events = _feature_rows(
+        calendar,
+        [sampled[0], sampled[-1]],
+        asset_ids,
+        raw,
+        adjusted,
+        _observations(version, specs),
+        version.source_checks(sorted(population.union(asset_ids))),
+        time_policy,
+        version.manifest.get("source_timezones", {}),
+        _news_versions(version),
+        population,
+        specs,
+        next_session=cal.next_session,
+        output_positions=None if output_days is None else cal.positions(output_days),
+    )
+    if sampling != "daily":
+        features = features[features["signal_session"].isin(set(sampled))]
+        features = features.reset_index(drop=True)
+    parameters = {
+        "asset_ids": asset_ids,
+        "start": str(sampled[0]),
+        "end": str(sampled[-1]),
+        "benchmark_ids": benchmark_ids,
+        **_time_parameters(time_policy),
+        "event_specs": events["specs"],
+        "sampling": sampling,
+        "next_session": None if cal.next_session is None else str(cal.next_session),
+    }
+    return features, events, parameters
+
+
 def daily_features(
     version: Any,
     symbols: str | Sequence[str] | None = None,
@@ -695,47 +774,21 @@ def daily_features(
     last session of each completed week or month. ``next_session`` gives the last frozen
     session a live decision instant and event window.
     """
-    _policy(time_policy)
-    asset_ids = list(dict.fromkeys(map(str, version.resolve(symbols))))
-    benchmark_ids = version.resolve(benchmark) if benchmark is not None else []
-    calendar = list(map(_day, version.calendar))
-    cal = _candidates.calendar(version, calendar, next_session=next_session)
-    positions = _candidates.signal_positions(cal, start, end, sampling)
-    sampled = [calendar[position] for position in positions]
-    raw = _price_frame(version.prices(asset_ids, adjusted=False))
-    adjusted = _price_frame(version.prices(asset_ids, adjusted=True))
-    population = _rank_population(version.universe, benchmark_ids)
-    features, events = _feature_rows(
-        calendar,
-        [sampled[0], sampled[-1]],
-        asset_ids,
-        raw,
-        adjusted,
-        _observations(version, specs),
-        version.source_checks(sorted(population.union(asset_ids))),
-        time_policy,
-        version.manifest.get("source_timezones", {}),
-        _news_versions(version),
-        population,
-        specs,
-        next_session=cal.next_session,
+    features, events, parameters = _read_feature_rows(
+        version,
+        symbols,
+        time_policy=time_policy,
+        start=start,
+        end=end,
+        benchmark=benchmark,
+        specs=specs,
+        sampling=sampling,
+        next_session=next_session,
     )
-    if sampling != "daily":
-        features = features[features["signal_session"].isin(set(sampled))]
-        features = features.reset_index(drop=True)
     features.attrs["provenance"] = run_record(
         dataset_id=str(version.id),
         manifest_sha256=version.manifest_sha256,
-        parameters={
-            "asset_ids": asset_ids,
-            "start": str(sampled[0]),
-            "end": str(sampled[-1]),
-            "benchmark_ids": benchmark_ids,
-            **_time_parameters(time_policy),
-            "event_specs": events["specs"],
-            "sampling": sampling,
-            "next_session": None if cal.next_session is None else str(cal.next_session),
-        },
+        parameters=parameters,
         counts={"candidates": len(features)},
         **_feature_provenance(features, events),
         limitations=LIMITATIONS + list(version.manifest.get("limitations", [])),
@@ -990,7 +1043,7 @@ def panel(
     )
     if candidates.empty:
         raise ValueError("No candidate rows: no selected security is a member then")
-    daily = daily_features(
+    daily, event_summary, _ = _read_feature_rows(
         version,
         list(dict.fromkeys(candidates["asset_id"])),
         start=candidates["signal_session"].min(),
@@ -998,6 +1051,11 @@ def panel(
         time_policy=time_policy,
         benchmark=benchmark,
         next_session=next_session,
+        output_days=(
+            None
+            if sampling == "daily"
+            else sorted(candidates["signal_session"].unique())
+        ),
     )
     rows = candidates.merge(
         daily.drop(columns=["previous_decision_at", "decision_at"]),
@@ -1005,6 +1063,12 @@ def panel(
         how="left",
         validate="one_to_one",
     )
+    source_coverage = (
+        _coverage_summary(daily, event_summary["coverage_columns"])
+        if sampling == "daily"
+        else event_summary["source_coverage"]
+    )
+    del daily
     parts: list[pd.DataFrame] = [rows]
     samples = rows[KEYS + ["decision_at"]]
     sec_cov_cols = ["sec_coverage"] if "sec_coverage" in rows.columns else []
@@ -1015,7 +1079,14 @@ def panel(
     )
     selected_assets = list(dict.fromkeys(candidates["asset_id"].astype(str)))
     derived_limitations: list[str] = []
-    label_rows_input = rows
+    label_columns = [*KEYS, "decision_at", *neutralize]
+    if "size" in neutralize:
+        label_columns.extend(
+            ("market_cap", "dollar_volume_21d_log", "raw_dollar_volume")
+        )
+    label_rows_input = rows[
+        [c for c in dict.fromkeys(label_columns) if c in rows]
+    ].copy()
 
     if (
         include_sec_events
@@ -1036,6 +1107,7 @@ def panel(
                 vocabulary=version.manifest.get("sec_event_kinds"),
             )
             parts.append(typed.drop(columns=KEYS))
+            del typed
 
     ann_df: pd.DataFrame | None = None
     primary_periods: Any = None
@@ -1050,7 +1122,10 @@ def panel(
             if "daily_returns" in families
             else None
         )
-        adj_df = _price_frame(version.prices(price_ids, adjusted=True))
+        adj_df = _price_frame(
+            _project_prices(version, price_ids, adjusted=True, fields=("close",)),
+            ("close",),
+        )
         ev_obs_cal = (
             _observations(version)
             if "earnings_observations" in families and "event_observations" in families
@@ -1075,6 +1150,7 @@ def panel(
         )
         primary_periods = earn_df.attrs.get("primary_period_end")
         parts.append(earn_df.drop(columns=KEYS))
+        del earn_df, dr_df, adj_df, ev_obs_cal, earn_obs_cal
 
     extra_fund_cols: dict[str, Any] = {}
     if fundamentals == "derived" and (include_fundamentals or include_ratios):
@@ -1100,8 +1176,8 @@ def panel(
         ]
         ind: pd.DataFrame | None = None
         val: pd.DataFrame | None = None
+        derived_part = len(parts)
         if include_fundamentals:
-            parts.append(derived.drop(columns=KEYS))
             ind = _industry.industry(version, samples, time_policy=fund_policy)
             parts.append(ind.drop(columns=KEYS))
             if (
@@ -1112,6 +1188,7 @@ def panel(
         if include_ratios:
             factors = _fundamentals_derived.fundamental_factors(derived)
             parts.append(factors.drop(columns=KEYS))
+            del factors
             val = _valuation.valuation(
                 version,
                 samples,
@@ -1133,16 +1210,22 @@ def panel(
                 and _valuation.VALUATION_LIMITATION not in derived_limitations
             ):
                 derived_limitations.append(_valuation.VALUATION_LIMITATION)
-        if val is not None or ind is not None:
-            label_rows_input = rows.copy()
-            if val is not None and "market_cap_issuer_value" in val.columns:
-                label_rows_input["market_cap_issuer_value"] = val[
-                    "market_cap_issuer_value"
-                ].to_numpy()
-            if ind is not None:
-                for col in ("ff12", "sic_division", "sic_major_group", "sic"):
-                    if col in ind.columns:
-                        label_rows_input[col] = ind[col].to_numpy()
+        if include_fundamentals:
+            # The sampled statement block can be copied after valuation has used it.
+            parts.insert(derived_part, derived.drop(columns=KEYS))
+        if (
+            val is not None
+            and "market_cap_issuer_value" in val.columns
+            and ("size" in neutralize or "market_cap_issuer_value" in neutralize)
+        ):
+            label_rows_input["market_cap_issuer_value"] = val[
+                "market_cap_issuer_value"
+            ].to_numpy()
+        if ind is not None:
+            for col in ("ff12", "sic_division", "sic_major_group", "sic"):
+                if col in neutralize and col in ind.columns:
+                    label_rows_input[col] = ind[col].to_numpy()
+        del derived, ind, val
         if include_earnings and include_fundamentals and "fundamentals" in families:
             ciks_series = _fundamentals_derived.cik_at(
                 version,
@@ -1162,7 +1245,12 @@ def panel(
                 if unique_ciks
                 else pd.DataFrame()
             )
-            raw_prices = _price_frame(version.prices(selected_assets, adjusted=False))
+            raw_prices = _price_frame(
+                _project_prices(
+                    version, selected_assets, adjusted=False, fields=("close", "volume")
+                ),
+                ("close",),
+            )
             sue_df = _sec_events.sue_features(
                 q_ledger,
                 sec_samples,
@@ -1171,6 +1259,7 @@ def panel(
                 primary_period_end=primary_periods,
             )
             parts.append(sue_df.drop(columns=KEYS))
+            del sue_df, raw_prices, q_ledger
     elif fundamentals == "legacy" and (include_fundamentals or include_ratios):
         # One read of the facts and one prepared engine serve features and ratios.
         metrics = {
@@ -1207,6 +1296,7 @@ def panel(
                     extra_fund_cols["shares_outstanding_status"] = fund[
                         "instant_shares_outstanding_status"
                     ]
+            del fund
 
         if include_ratios:
             ratios = _fundamentals.ratios_by_period(
@@ -1231,6 +1321,7 @@ def panel(
                     + [column for column in ratios.columns if column.startswith(stale)]
                 )
             )
+            del ratios
 
     extra_family_names = (
         "reference_series",
@@ -1316,6 +1407,7 @@ def panel(
         neutralize=neutralize,
         time_policy=fund_policy,
     )
+    del label_rows_input
     # Candidate columns (keys, clocks, membership) win over the label's copies. The
     # labels' calendar has no live session, so non-members are counted from the
     # candidates' membership (it includes the live row's) plus the rows dropped.
@@ -1328,6 +1420,7 @@ def panel(
             horizons=horizon_list,
         )
         parts.append(lflags.drop(columns=KEYS))
+        del lflags
     member = np.asarray(rows["in_universe"].fillna(rule is None), dtype=bool)
     outside = (
         int((~member).sum()) + candidates.attrs["counts"]["not_in_universe_dropped"]
@@ -1336,10 +1429,13 @@ def panel(
         horizon: {**counts, "not_in_universe": outside}
         for horizon, counts in labels.attrs["masks"].items()
     }
+    label_parameters = labels.attrs["parameters"]
+    label_overlap = labels.attrs["label_overlap"]
+    label_limitations = labels.attrs["limitations"]
+    del labels
 
     combined = pd.concat(parts, axis=1)
-    daily_provenance = daily.attrs.get("provenance", {})
-    label_parameters = labels.attrs["parameters"]
+    del parts
     provenance = run_record(
         dataset_id=str(version.id),
         manifest_sha256=version.manifest_sha256,
@@ -1396,12 +1492,12 @@ def panel(
         rows=len(combined),
         columns=len(combined.columns),
         masks=masks,
-        label_overlap=labels.attrs["label_overlap"],
+        label_overlap=label_overlap,
         extra=extra_provenance,
+        source_coverage=source_coverage,
         **{
-            name: daily_provenance.get(name, {})
+            name: event_summary[name]
             for name in (
-                "source_coverage",
                 "skipped_sources",
                 "undatable_events",
                 "rank_population",
@@ -1411,7 +1507,7 @@ def panel(
             dict.fromkeys(
                 [
                     *LIMITATIONS,
-                    *labels.attrs["limitations"],
+                    *label_limitations,
                     *derived_limitations,
                     *_live_limitations(
                         candidates.attrs["parameters"],

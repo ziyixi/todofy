@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from datetime import date, timedelta
 from typing import Any
+from unittest.mock import call, patch
 
 import numpy as np
 import pandas as pd
@@ -24,6 +25,7 @@ from research_datasets import (
     fundamental_states,
     prepare_fundamental_features,
 )
+from research_datasets.fundamentals_derived import IssuerStateMachine, normalize_facts
 from tests import test_sdk as bundle
 
 ASSET_A = "00000000-0000-4000-8000-000000000001"
@@ -153,6 +155,78 @@ class ConceptCatalogueTest(unittest.TestCase):
 
 
 class DerivedQuartersTest(unittest.TestCase):
+    def test_direct_quarter_start_range_keeps_boundary_and_period_order(self) -> None:
+        facts = [
+            make_fact("q1", "Revenues", "50", "2025-01-01", "2025-03-31"),
+            make_fact("q2", "Revenues", "100", "2025-04-01", "2025-06-19"),
+            make_fact("q3", "Revenues", "125", "2025-06-20", "2025-09-08"),
+            make_fact("q4", "Revenues", "150", "2025-09-04", "2025-12-05"),
+            make_fact("slot-q4", "Revenues", "175", "2025-09-14", "2025-12-04"),
+            make_fact("early-q4", "Revenues", "200", "2025-09-03", "2025-12-07"),
+        ]
+        ledger = fiscal_quarters(
+            make_material(facts),
+            time_policy="public_reconstructed",
+            concepts=("revenue",),
+        )
+
+        fourth = ledger[ledger["fiscal_quarter"] == 4].iloc[0]
+        self.assertEqual(fourth["period_start"], date(2025, 9, 4))
+        self.assertEqual(fourth["value_first"], 150.0)
+
+    def test_repeated_ingest_recomputes_only_changed_base_periods(self) -> None:
+        cash_tag = "CashAndCashEquivalentsAtCarryingValue"
+        rows = [
+            make_fact(
+                "previous-cash",
+                cash_tag,
+                "75",
+                None,
+                "2025-03-31",
+                public_at="2025-04-30T12:00:00Z",
+            ),
+            make_fact("cash", cash_tag, "100", None, "2025-03-31"),
+            make_fact("assets", "Assets", "300", None, "2025-03-31"),
+            make_fact(
+                "cash",
+                cash_tag,
+                "200",
+                None,
+                "2025-06-30",
+                public_at="2025-08-01T12:00:00Z",
+                observation_sequence=2,
+            ),
+            make_fact(
+                "cash",
+                cash_tag,
+                "200",
+                None,
+                "2025-06-30",
+                public_at="2025-08-02T12:00:00Z",
+                observation_sequence=3,
+                is_retracted=True,
+            ),
+        ]
+        versions, _ = normalize_facts(
+            pd.DataFrame(rows), time_policy="observed_content"
+        )
+        machine = IssuerStateMachine(CIK, target_views=("cash_i", "total_assets_i"))
+        machine.ingest(versions[:3])
+        with patch.object(
+            machine, "_evaluate_base", wraps=machine._evaluate_base
+        ) as evaluate:
+            machine.ingest(versions[3:])
+
+        cash_states = [row for row in machine.rows if row.view == "cash_i"]
+        self.assertEqual([row.value for row in cash_states], [75, 100, 200, 75])
+        self.assertEqual(
+            evaluate.call_args_list,
+            [
+                call("cash", None, date(2025, 3, 31)),
+                call("cash", None, date(2025, 6, 30)),
+            ],
+        )
+
     def test_cash_flow_quarters_are_derived_not_stuck_at_q1(self) -> None:
         ocf_tag = "NetCashProvidedByUsedInOperatingActivities"
         capex_tag = "PaymentsToAcquirePropertyPlantAndEquipment"
@@ -1200,6 +1274,64 @@ class TrailingAndFiscalQuartersTest(unittest.TestCase):
         self.assertAlmostEqual(row["eps_diluted_ttm_value"], 5.00)
         self.assertEqual(row["eps_diluted_ttm_basis"], "quarter_sum")
         self.assertEqual(row["eps_diluted_ttm_status"], "approximate")
+
+    def test_ttm_ytd_bridge_with_equidistant_prior_ends(self) -> None:
+        rows = [
+            make_fact(
+                "prior-fy",
+                "Revenues",
+                "1000",
+                "2024-01-01",
+                "2024-12-31",
+                form="10-K",
+                public_at="2025-02-01T12:00:00Z",
+            ),
+            make_fact(
+                "prior-later",
+                "Revenues",
+                "100",
+                "2024-01-01",
+                "2024-07-01",
+                public_at="2024-08-01T12:00:00Z",
+            ),
+            make_fact(
+                "prior-earlier",
+                "Revenues",
+                "80",
+                "2024-01-01",
+                "2024-06-29",
+                public_at="2024-08-01T12:00:00Z",
+            ),
+            make_fact(
+                "current",
+                "Revenues",
+                "300",
+                "2025-01-01",
+                "2025-06-30",
+                public_at="2025-08-01T12:00:00Z",
+            ),
+        ]
+        states = fundamental_states(
+            make_material(rows),
+            time_policy="public_reconstructed",
+            views=("revenue_ttm",),
+        )
+        latest = states.iloc[-1]
+        self.assertEqual(latest["basis"], "ytd_bridge")
+        self.assertEqual(latest["period_start"], date(2024, 6, 30))
+        self.assertEqual(latest["value"], 1220.0)
+
+    def test_tied_base_facts_order_accessions_by_fact_id(self) -> None:
+        rows = [
+            make_fact("z-fact", "Assets", "100", None, "2025-03-31", accession="acc-a"),
+            make_fact("a-fact", "Assets", "100", None, "2025-03-31", accession="acc-z"),
+        ]
+        states = fundamental_states(
+            make_material(rows),
+            time_policy="public_reconstructed",
+            views=("total_assets_i",),
+        )
+        self.assertEqual(states["accessions"].tolist(), ["acc-z,acc-a"])
 
     def test_twelve_month_column_in_10q_is_not_fiscal_year(self) -> None:
         # A 12-month column reported inside a 10-Q (minor 7) must never become `fy`

@@ -8,6 +8,7 @@ import unittest
 import warnings
 from datetime import date, timedelta
 from typing import Any
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -658,6 +659,110 @@ class ExtraFeaturesTest(unittest.TestCase):
         self.assertEqual(live["si_coverage"], "covered")
         self.assertAlmostEqual(live["si_shares"], 200_000.0)
         self.assertAlmostEqual(live["si_change"], 0.25)
+
+    def test_short_interest_archive_clock_is_stable_across_asset_slices(self) -> None:
+        sessions = _nyse_sessions(date(2017, 12, 26), 24)
+        rows = [
+            {
+                "asset_id": ASSET_1,
+                "settlement_date": "2018-01-12",
+                "available_at": "2018-01-26T05:00:00Z",
+                "observed_at": "2018-01-29T17:00:00Z",
+                "current_short": 300_000.0,
+                "link_basis": "symbol_interval",
+            },
+            {
+                "asset_id": ASSET_2,
+                "settlement_date": "2017-12-29",
+                "available_at": "2018-01-05T00:00:00-05:00",
+                "observed_at": "2018-01-08T17:00:00Z",
+                "current_short": 200_000.0,
+                "link_basis": "symbol_interval",
+            },
+        ]
+        version = SyntheticVersion(
+            calendar=sessions,
+            universe=[
+                {"asset_id": ASSET_1, "symbol": "AAA"},
+                {"asset_id": ASSET_2, "symbol": "BBB"},
+            ],
+            families={"short_interest": pd.DataFrame(rows)},
+            manifest_extra={
+                "reference": {"short_interest": {"first_settlement": "2017-12-29"}}
+            },
+        )
+        part_index = [
+            {
+                "key": f"datasets/{version.id}/short_interest/part-{i:05d}.parquet",
+                "family": "short_interest",
+                "rows": 1,
+                "first_available_at": row["available_at"],
+                "last_available_at": row["available_at"],
+            }
+            for i, row in enumerate(rows)
+        ]
+        version.manifest.update(
+            part_index=part_index, files=[{"key": part["key"]} for part in part_index]
+        )
+        candidates = pd.concat(
+            [
+                _make_candidates(sessions, [ASSET_1]),
+                _make_candidates([d for d in sessions if d.year == 2017], [ASSET_2]),
+            ],
+            ignore_index=True,
+        )
+        sliced = candidates[candidates["signal_session"] >= date(2018, 1, 1)]
+        check_dates = candidates["entry_session"].isin(
+            [date(2018, 1, 4), date(2018, 1, 5), date(2018, 1, 26)]
+        )
+
+        for policy, later_coverage in (
+            ("public_reconstructed", "covered"),
+            ("observed_content", "unlinked"),
+        ):
+            with self.subTest(time_policy=policy):
+                full = short_interest_features(version, candidates, time_policy=policy)
+                with patch.object(version, "family", wraps=version.family) as family:
+                    by_year = short_interest_features(
+                        version, sliced, time_policy=policy
+                    )
+                pd.testing.assert_frame_equal(full.loc[sliced.index], by_year)
+                family.assert_called_once_with("short_interest", [ASSET_1])
+                self.assertEqual(
+                    full.loc[check_dates, "si_coverage"].tolist(),
+                    ["before_archive", "unlinked", later_coverage],
+                )
+
+    def test_short_interest_archive_fallback_counts_sessions_after_settlement(
+        self,
+    ) -> None:
+        settlement = date(2017, 12, 29)
+        sessions = [
+            d for d in _nyse_sessions(date(2017, 12, 26), 16) if d != settlement
+        ]
+        version = SyntheticVersion(
+            calendar=sessions,
+            universe=[{"asset_id": ASSET_1, "symbol": "AAA"}],
+            families={
+                "short_interest": pd.DataFrame(
+                    columns=["settlement_date", "available_at"]
+                )
+            },
+        )
+        candidates = _make_candidates(sessions, [ASSET_1])
+        result = short_interest_features(
+            version, candidates, time_policy="public_reconstructed"
+        )
+
+        self.assertEqual(
+            result.loc[
+                candidates["entry_session"].isin(
+                    [date(2018, 1, 11), date(2018, 1, 12)]
+                ),
+                "si_coverage",
+            ].tolist(),
+            ["before_archive", "unlinked"],
+        )
 
     def test_short_interest_split_flag_masks_change(self) -> None:
         sessions = _nyse_sessions(date(2026, 1, 14), 15)

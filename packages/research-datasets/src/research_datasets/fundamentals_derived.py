@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+from bisect import bisect_left, bisect_right
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -37,21 +38,24 @@ from .concepts import (
 )
 from .constants import KEYS
 
-STATE_COLUMNS: tuple[str, ...] = (
-    "cik",
-    "view",
-    "available_at",
-    "value",
-    "raw_value",
-    "status",
-    "period_start",
-    "period_end",
-    "basis",
-    "accessions",
-    "tag",
-    "currency",
-    "reference_date",
-)
+
+class _StateRow(NamedTuple):
+    cik: str
+    view: str
+    available_at: int
+    value: float
+    raw_value: str | None
+    status: str
+    period_start: date | None
+    period_end: date | None
+    basis: str
+    accessions: str
+    tag: str
+    currency: str
+    reference_date: date | None
+
+
+STATE_COLUMNS = _StateRow._fields
 
 FISCAL_QUARTER_COLUMNS: tuple[str, ...] = (
     "cik",
@@ -514,10 +518,14 @@ class IssuerStateMachine:
             (v, *parse_view_name(v)) for v in self.target_views
         ]
         self.record_quarters: tuple[str, ...] = tuple(dict.fromkeys(record_quarters))
+        self._needs_fiscal_calendar = bool(self.record_quarters) or any(
+            suffix not in {"i", "i_yoy"} for _, _, suffix in self._parsed_views
+        )
         self.current: dict[str, FactVersion] = {}
         self.by_period: dict[tuple[str, date | None, date], set[str]] = {}
+        self._base_values: dict[tuple[str, date | None, date], PeriodValue] = {}
         self.last_emitted: dict[str, tuple[Any, ...]] = {}
-        self.rows: list[dict[str, Any]] = []
+        self.rows: list[_StateRow] = []
         self.annual_only_steps: list[tuple[int, bool]] = []
         self.quarter_ledger: dict[tuple[str, date], dict[str, Any]] = {}
 
@@ -534,12 +542,15 @@ class IssuerStateMachine:
             idx = end_idx
 
     def _apply_batch(self, batch: Sequence[FactVersion], batch_clock: int) -> None:
+        # An observation can move between periods. Invalidate both affected values
+        # and let the next refresh evaluate each period after the whole batch.
         for version in batch:
             previous = self.current.get(version.fact_id)
             if previous is not None:
                 old_key = (previous.concept, previous.period_start, previous.period_end)
                 bucket = self.by_period.get(old_key)
                 if bucket is not None:
+                    self._base_values.pop(old_key, None)
                     bucket.discard(version.fact_id)
                     if not bucket:
                         del self.by_period[old_key]
@@ -549,6 +560,7 @@ class IssuerStateMachine:
                 self.current[version.fact_id] = version
                 new_key = (version.concept, version.period_start, version.period_end)
                 self.by_period.setdefault(new_key, set()).add(version.fact_id)
+                self._base_values.pop(new_key, None)
 
         self._refresh_views(batch_clock)
 
@@ -571,7 +583,9 @@ class IssuerStateMachine:
             candidates = [v for v in candidates if v.currency == chosen_ccy]
 
         avail_ns = max(v.available_ns for v in candidates)
-        first = min(candidates, key=lambda v: v.fact_id)
+        # Keep the representative fact's accession first in the provenance.
+        candidates.sort(key=lambda v: v.fact_id)
+        first = candidates[0]
         accessions = _join_accessions(*(v.accession for v in candidates))
         if any(v.decimal_value is None for v in candidates):
             return PeriodValue(
@@ -615,15 +629,6 @@ class IssuerStateMachine:
             currency=first.currency,
             reference_date=first.reference_date,
         )
-
-    def _has_nonzero_nci(self) -> bool:
-        for concept_name, start, end in list(self.by_period):
-            if concept_name not in {"net_income_nci", "minority_interest"}:
-                continue
-            pv = self._evaluate_base(concept_name, start, end)
-            if pv is not None and pv.usable and pv.decimal_value != 0:
-                return True
-        return False
 
     def _evaluate_composite_period(
         self,
@@ -772,7 +777,7 @@ class IssuerStateMachine:
         duration_periods: set[tuple[date, date]] = set()
         fy_periods: set[tuple[date, date]] = set()
         ytd_starts: set[date] = set()
-        q3m_periods: list[tuple[date, date]] = []
+        quarter_periods: set[tuple[date, date]] = set()
         interim_lengths: dict[date, set[int]] = {}
 
         for v in self.current.values():
@@ -797,7 +802,9 @@ class IssuerStateMachine:
                 ):
                     ytd_starts.add(v.period_start)
             elif 77 <= days <= 105:
-                q3m_periods.append(pair)
+                quarter_periods.add(pair)
+
+        q3m_periods = sorted(quarter_periods)
 
         # Candidate FY starts: (start, priority) where 0=FY, 1=YTD 6M/9M, 2=prior FY end + 1d
         raw_starts: list[tuple[date, int]] = []
@@ -822,7 +829,7 @@ class IssuerStateMachine:
         # Add standalone 3M starts only if not covered by an existing fiscal year window.
         # When an earlier comparative 3M period precedes an established FY start, infer
         # the prior fiscal year start by stepping back whole years first.
-        for qs, qe in sorted(set(q3m_periods)):
+        for qs, qe in q3m_periods:
             if any(-3 <= (qs - s).days <= 349 for s in fy_starts):
                 continue
             inferred: date | None = None
@@ -838,13 +845,16 @@ class IssuerStateMachine:
             fy_starts.append(inferred if inferred is not None else qs)
             fy_starts.sort()
 
+        ordered_periods = sorted(duration_periods)
+        start_days = [start.toordinal() for start, _ in ordered_periods]
         slots_list: list[_FiscalYearSlots] = []
         for idx, s in enumerate(fy_starts):
             next_s = fy_starts[idx + 1] if idx + 1 < len(fy_starts) else None
             e1 = e2 = e3 = e4 = None
-            for ps, pe in sorted(duration_periods):
-                if abs((ps - s).days) > 3:
-                    continue
+            start_day = s.toordinal()
+            first = bisect_left(start_days, start_day - 3)
+            last = bisect_right(start_days, start_day + 3)
+            for ps, pe in ordered_periods[first:last]:
                 days = _inclusive_days(ps, pe)
                 if 77 <= days <= 105:
                     e1 = pe if e1 is None or pe > e1 else e1
@@ -855,7 +865,11 @@ class IssuerStateMachine:
                 elif 350 <= days <= 380 and (ps, pe) in fy_periods:
                     e4 = pe if e4 is None or pe > e4 else e4
 
-            for qs, qe in sorted(set(q3m_periods)):
+            for qs, qe in q3m_periods:
+                if None not in (e1, e2, e3, e4) or (
+                    next_s is not None and qs >= next_s
+                ):
+                    break
                 if next_s is not None and qe >= next_s:
                     continue
                 offset = (qs - s).days
@@ -899,12 +913,13 @@ class IssuerStateMachine:
         if not period_map:
             return result
 
-        # Index duration periods for this concept.
-        dur_entries: list[tuple[date, date, int, PeriodValue]] = []
+        # Bound candidates by start day before applying the quarter's eligibility rules.
+        dur_entries: list[tuple[int, date, int, PeriodValue]] = []
         for (ps, pe), pv in period_map.items():
             if ps is not None:
-                dur_entries.append((ps, pe, _inclusive_days(ps, pe), pv))
-        dur_entries.sort(key=lambda item: (item[1], item[0]))
+                dur_entries.append((ps.toordinal(), pe, _inclusive_days(ps, pe), pv))
+        dur_entries.sort(key=lambda item: item[0])
+        start_days = [entry[0] for entry in dur_entries]
 
         def pick_direct_3m(
             expected_start: date | None,
@@ -913,41 +928,55 @@ class IssuerStateMachine:
             expected_end: date | None,
             upper_end: date | None,
         ) -> PeriodValue | None:
-            matches: list[PeriodValue] = []
-            for ps, pe, days, pv in dur_entries:
+            fy_day = fy_start.toordinal()
+            slot_first, slot_last = fy_day + slot_range[0], fy_day + slot_range[1]
+            first, last = slot_first, slot_last
+            expected_day = expected_start.toordinal() if expected_start else None
+            if expected_day is not None:
+                margin = 5 if expected_end is not None else 3
+                first = min(first, expected_day - margin)
+                last = max(last, expected_day + margin)
+
+            lo = bisect_left(start_days, first)
+            hi = bisect_right(start_days, last)
+            best: tuple[date, int] | None = None
+            match: PeriodValue | None = None
+            for ps, pe, days, pv in dur_entries[lo:hi]:
                 if not (77 <= days <= 105):
                     continue
                 if upper_end is not None and pe >= upper_end:
                     continue
-                if (
-                    expected_end is not None
-                    and abs((pe - expected_end).days) <= 3
-                    and expected_start is not None
-                    and abs((ps - expected_start).days) <= 5
-                ):
-                    matches.append(pv)
-                    continue
-                if expected_start is not None and abs((ps - expected_start).days) <= 3:
-                    matches.append(pv)
-                    continue
-                offset = (ps - fy_start).days
-                if slot_range[0] <= offset <= slot_range[1]:
-                    matches.append(pv)
-            return matches[-1] if matches else None
+                start_matches = expected_day is not None and (
+                    abs(ps - expected_day) <= 3
+                    or (
+                        abs(ps - expected_day) <= 5
+                        and expected_end is not None
+                        and abs((pe - expected_end).days) <= 3
+                    )
+                )
+                if slot_first <= ps <= slot_last or start_matches:
+                    key = (pe, ps)
+                    if best is None or key > best:
+                        best, match = key, pv
+            return match
 
         def pick_ytd(
             fy_start: date, min_days: int, max_days: int, require_fy: bool = False
         ) -> PeriodValue | None:
-            matches: list[PeriodValue] = []
-            for ps, pe, days, pv in dur_entries:
-                if abs((ps - fy_start).days) > 3:
-                    continue
+            fy_day = fy_start.toordinal()
+            lo = bisect_left(start_days, fy_day - 3)
+            hi = bisect_right(start_days, fy_day + 3)
+            best: tuple[date, int] | None = None
+            match: PeriodValue | None = None
+            for ps, pe, days, pv in dur_entries[lo:hi]:
                 if not (min_days <= days <= max_days):
                     continue
-                if require_fy and (ps, pe) not in fy_periods:
+                if require_fy and (date.fromordinal(ps), pe) not in fy_periods:
                     continue
-                matches.append(pv)
-            return matches[-1] if matches else None
+                key = (pe, ps)
+                if best is None or key > best:
+                    best, match = key, pv
+            return match
 
         def subtract_ytd(
             cur_ytd: PeriodValue,
@@ -1191,15 +1220,51 @@ class IssuerStateMachine:
         for pv in quarters_map.values():
             if pv.usable:
                 usable_quarters_by_end[pv.period_end] = pv
-        q_list = [usable_quarters_by_end[k] for k in sorted(usable_quarters_by_end)]
+        quarter_ends = sorted(end.toordinal() for end in usable_quarters_by_end)
+
+        def prev_quarter(current: PeriodValue) -> PeriodValue | None:
+            assert current.period_start is not None
+            expected_end = current.period_start.toordinal() - 1
+            earliest = expected_end - 5
+            latest = min(expected_end + 5, current.period_end.toordinal() - 1)
+            position = bisect_right(quarter_ends, latest)
+            while position and quarter_ends[position - 1] >= earliest:
+                position -= 1
+                previous = usable_quarters_by_end[
+                    date.fromordinal(quarter_ends[position])
+                ]
+                if previous.currency == current.currency:
+                    return previous
+            return None
 
         candidate_ends: set[date] = set(fy_by_end) | {
             pv.period_end for pv in quarters_map.values()
         }
         if spec.additive:
-            for ps, pe in period_map:
-                if ps is not None and 77 <= _inclusive_days(ps, pe) <= 290:
+            ytd_by_end: dict[date, list[PeriodValue]] = {}
+            periods_by_start: dict[int, list[tuple[int, int, PeriodValue]]] = {}
+            for order, ((ps, pe), pv) in enumerate(period_map.items()):
+                if ps is None:
+                    continue
+                days = _inclusive_days(ps, pe)
+                in_ytd_range = 77 <= days <= 290
+                if in_ytd_range:
                     candidate_ends.add(pe)
+                if pv.usable:
+                    periods_by_start.setdefault(ps.toordinal(), []).append(
+                        (order, days, pv)
+                    )
+                    if in_ytd_range:
+                        ytd_by_end.setdefault(pe, []).append(pv)
+            for ytd in ytd_by_end.values():
+                ytd.sort(
+                    key=lambda pv: _inclusive_days(
+                        pv.period_start or pv.period_end, pv.period_end
+                    ),
+                    reverse=True,
+                )
+
+            annual_ends = sorted(end.toordinal() for end in fy_by_end)
 
         for e in sorted(candidate_ends):
             # 1. Fiscal year end -> reported/composite FY directly.
@@ -1222,54 +1287,45 @@ class IssuerStateMachine:
 
             # 2. YTD bridge: FY_prev + YTD_cur(S, e) - YTD_prev(S_prev, e - 1y +-7d).
             if spec.additive:
-                ytd_cur_list = [
-                    pv
-                    for (ps, pe), pv in period_map.items()
-                    if pe == e
-                    and ps is not None
-                    and pv.usable
-                    and 77 <= _inclusive_days(ps, pe) <= 290
-                ]
-                ytd_cur_list.sort(
-                    key=lambda pv: _inclusive_days(pv.period_start or e, pv.period_end),
-                    reverse=True,
-                )
                 bridged: PeriodValue | None = None
-                for ytd_cur in ytd_cur_list:
+                for ytd_cur in ytd_by_end.get(e, ()):
                     assert ytd_cur.period_start is not None
                     s_cur = ytd_cur.period_start
                     len_cur = _inclusive_days(s_cur, e)
-                    fy_prev_cands = [
-                        fpv
-                        for fpv in fy_by_end.values()
-                        if fpv.usable
-                        and fpv.period_start is not None
-                        and fpv.currency == ytd_cur.currency
-                        and abs((s_cur - (fpv.period_end + timedelta(days=1))).days)
-                        <= 5
-                    ]
-                    if not fy_prev_cands:
+                    expected_annual_end = s_cur.toordinal() - 1
+                    annual_first = bisect_left(annual_ends, expected_annual_end - 5)
+                    annual_last = bisect_right(annual_ends, expected_annual_end + 5)
+                    fy_prev = None
+                    for end in reversed(annual_ends[annual_first:annual_last]):
+                        annual = fy_by_end[date.fromordinal(end)]
+                        if (
+                            annual.usable
+                            and annual.period_start is not None
+                            and annual.currency == ytd_cur.currency
+                        ):
+                            fy_prev = annual
+                            break
+                    if fy_prev is None:
                         continue
-                    fy_prev = max(fy_prev_cands, key=lambda fpv: fpv.period_end)
                     assert fy_prev.period_start is not None
-                    s_prev_fy = fy_prev.period_start
-                    exp_prev_end = _prev_year_date(e)
-                    ytd_prev_cands = [
-                        ppv
-                        for (pps, ppe), ppv in period_map.items()
-                        if pps is not None
-                        and ppv.usable
-                        and ppv.currency == ytd_cur.currency
-                        and abs((pps - s_prev_fy).days) <= 3
-                        and abs((ppe - exp_prev_end).days) <= 7
-                        and abs(_inclusive_days(pps, ppe) - len_cur) <= 7
-                    ]
-                    if not ytd_prev_cands:
+                    prior_start = fy_prev.period_start.toordinal()
+                    expected_prior_end = _prev_year_date(e)
+                    matches = []
+                    for start in range(prior_start - 3, prior_start + 4):
+                        for order, days, period in periods_by_start.get(start, ()):
+                            distance = abs(
+                                (period.period_end - expected_prior_end).days
+                            )
+                            if (
+                                period.currency == ytd_cur.currency
+                                and distance <= 7
+                                and abs(days - len_cur) <= 7
+                            ):
+                                matches.append((distance, order, period))
+                    if not matches:
                         continue
-                    ytd_prev = min(
-                        ytd_prev_cands,
-                        key=lambda ppv: abs((ppv.period_end - exp_prev_end).days),
-                    )
+                    # Equal-distance periods keep the order of the original period map.
+                    ytd_prev = min(matches)[2]
                     ttm_start = ytd_prev.period_end + timedelta(days=1)
                     if not (350 <= _inclusive_days(ttm_start, e) <= 380):
                         continue
@@ -1322,32 +1378,14 @@ class IssuerStateMachine:
             # 3. Sum of 4 contiguous quarters spanning 350..380 days.
             q4 = usable_quarters_by_end.get(e)
             if q4 is not None and q4.period_start is not None:
-
-                def _prev_quarter(cur_q: PeriodValue) -> PeriodValue | None:
-                    assert cur_q.period_start is not None
-                    matches = [
-                        cand
-                        for cand in q_list
-                        if cand.currency == cur_q.currency
-                        and cand.period_end < cur_q.period_end
-                        and abs(
-                            (
-                                cur_q.period_start
-                                - (cand.period_end + timedelta(days=1))
-                            ).days
-                        )
-                        <= 5
-                    ]
-                    return matches[-1] if matches else None
-
-                q3 = _prev_quarter(q4)
+                q3 = prev_quarter(q4)
                 q2 = (
-                    _prev_quarter(q3)
+                    prev_quarter(q3)
                     if q3 is not None and q3.period_start is not None
                     else None
                 )
                 q1 = (
-                    _prev_quarter(q2)
+                    prev_quarter(q2)
                     if q2 is not None and q2.period_start is not None
                     else None
                 )
@@ -1539,7 +1577,6 @@ class IssuerStateMachine:
         return has_annual
 
     def _refresh_views(self, batch_clock: int) -> None:
-        has_nci = self._has_nonzero_nci()
         is_annual_only = self._is_currently_annual_only()
         if (
             not self.annual_only_steps
@@ -1547,17 +1584,30 @@ class IssuerStateMachine:
         ):
             self.annual_only_steps.append((batch_clock, is_annual_only))
 
-        base_cache: dict[tuple[str, date | None, date], PeriodValue] = {}
         concept_periods: dict[str, dict[tuple[date | None, date], PeriodValue]] = {}
-        for c_name, start, end in list(self.by_period):
-            pv = self._evaluate_base(c_name, start, end)
-            if pv is not None:
-                base_cache[(c_name, start, end)] = pv
-                concept_periods.setdefault(c_name, {})[(start, end)] = pv
+        for key in self.by_period:
+            pv = self._base_values.get(key)
+            if pv is None:
+                pv = self._evaluate_base(*key)
+                if pv is None:
+                    continue
+                self._base_values[key] = pv
+            c_name, start, end = key
+            concept_periods.setdefault(c_name, {})[(start, end)] = pv
 
-        # Candidate period keys per composite.
-        all_duration_keys = {(ps, pe) for (_, ps, pe) in base_cache if ps is not None}
-        all_instant_keys = {(None, pe) for (_, ps, pe) in base_cache if ps is None}
+        has_nci = any(
+            pv.usable and pv.decimal_value != 0
+            for name in ("net_income_nci", "minority_interest")
+            for pv in concept_periods.get(name, {}).values()
+        )
+
+        # Use (start, end) order for ties in selectors that consume composite maps.
+        all_duration_keys = sorted(
+            {(ps, pe) for (_, ps, pe) in self._base_values if ps is not None}
+        )
+        all_instant_keys = sorted(
+            {(None, pe) for (_, ps, pe) in self._base_values if ps is None}
+        )
         for comp_name, comp_spec in COMPOSITES.items():
             keys = (
                 all_instant_keys if comp_spec.kind == "instant" else all_duration_keys
@@ -1565,14 +1615,18 @@ class IssuerStateMachine:
             comp_map: dict[tuple[date | None, date], PeriodValue] = {}
             for ps, pe in keys:
                 pv = self._evaluate_composite_period(
-                    comp_name, ps, pe, base_cache, has_nci
+                    comp_name, ps, pe, self._base_values, has_nci
                 )
                 if pv is not None:
                     comp_map[(ps, pe)] = pv
             if comp_map:
                 concept_periods[comp_name] = comp_map
 
-        slots_list, fy_periods = self._build_fiscal_calendar()
+        slots_list, fy_periods = (
+            self._build_fiscal_calendar()
+            if self._needs_fiscal_calendar
+            else ([], set())
+        )
 
         needed_ttm = {
             c_name
@@ -1623,7 +1677,7 @@ class IssuerStateMachine:
                     )
                     qa_map = quarters_by_concept.get(leg_a, {})
                     qb_map = quarters_by_concept.get(leg_b, {})
-                    for q_key in set(qa_map).intersection(qb_map):
+                    for q_key in sorted(qa_map.keys() & qb_map.keys()):
                         if q_key in comp_q:
                             continue
                         pa_v, pb_v = qa_map[q_key], qb_map[q_key]
@@ -1769,21 +1823,21 @@ class IssuerStateMachine:
                     )
                     self.last_emitted[view_name] = tombstone
                     self.rows.append(
-                        {
-                            "cik": self.cik,
-                            "view": view_name,
-                            "available_at": batch_clock,
-                            "value": float("nan"),
-                            "raw_value": None,
-                            "status": "metric_missing",
-                            "period_start": None,
-                            "period_end": None,
-                            "basis": "",
-                            "accessions": "",
-                            "tag": "",
-                            "currency": "",
-                            "reference_date": None,
-                        }
+                        _StateRow(
+                            self.cik,
+                            view_name,
+                            batch_clock,
+                            float("nan"),
+                            None,
+                            "metric_missing",
+                            None,
+                            None,
+                            "",
+                            "",
+                            "",
+                            "",
+                            None,
+                        )
                     )
                 continue
 
@@ -1808,21 +1862,21 @@ class IssuerStateMachine:
                 else chosen.status
             )
             self.rows.append(
-                {
-                    "cik": self.cik,
-                    "view": view_name,
-                    "available_at": batch_clock,
-                    "value": num if status in {"ok", "approximate"} else float("nan"),
-                    "raw_value": chosen.raw_value,
-                    "status": status,
-                    "period_start": chosen.period_start,
-                    "period_end": chosen.period_end,
-                    "basis": chosen.basis,
-                    "accessions": chosen.accessions,
-                    "tag": chosen.tag,
-                    "currency": chosen.currency,
-                    "reference_date": chosen.reference_date,
-                }
+                _StateRow(
+                    self.cik,
+                    view_name,
+                    batch_clock,
+                    num if status in {"ok", "approximate"} else float("nan"),
+                    chosen.raw_value,
+                    status,
+                    chosen.period_start,
+                    chosen.period_end,
+                    chosen.basis,
+                    chosen.accessions,
+                    chosen.tag,
+                    chosen.currency,
+                    chosen.reference_date,
+                )
             )
 
     def _select_view_state(
@@ -2274,7 +2328,7 @@ def _iter_fact_frames(
 
 
 def _format_state_frame(
-    rows: list[dict[str, Any]],
+    rows: list[_StateRow],
     *,
     time_policy: str,
     stats: Mapping[str, int],
@@ -2301,6 +2355,7 @@ def _format_state_frame(
         return empty
 
     frame = pd.DataFrame(rows, columns=list(STATE_COLUMNS))
+    rows.clear()
     frame["available_at"] = pd.to_datetime(frame["available_at"], unit="ns", utc=True)
     frame["value"] = frame["value"].astype("float64")
     frame["status"] = pd.Categorical(
@@ -2461,7 +2516,7 @@ def fundamental_states(
         "dropped_unmapped_tags": 0,
         "dropped_unit_mismatch": 0,
     }
-    all_rows: list[dict[str, Any]] = []
+    all_rows: list[_StateRow] = []
     annual_only_steps: dict[str, list[tuple[int, bool]]] = {}
     by_cik_buffer: dict[str, list[FactVersion]] = {}
 
@@ -2488,15 +2543,18 @@ def fundamental_states(
             totals[key] = totals.get(key, 0) + count
         for v in versions:
             by_cik_buffer.setdefault(v.cik, []).append(v)
+        versions.clear()
 
     for cik in sorted(by_cik_buffer):
-        issuer_versions = by_cik_buffer[cik]
+        # An issuer is replayed once. Release its facts before accumulating more states.
+        issuer_versions = by_cik_buffer.pop(cik)
         issuer_versions.sort(key=lambda v: (v.available_ns, v.observation_sequence))
         machine = IssuerStateMachine(cik, target_views=target_views)
         machine.ingest(issuer_versions)
         all_rows.extend(machine.rows)
         if machine.annual_only_steps:
             annual_only_steps[cik] = machine.annual_only_steps
+        del issuer_versions, machine
 
     limitations = list(manifest.get("limitations", [])) + [
         "Derived fundamentals (single quarters, TTM, YoY) are computed from as-filed XBRL facts.",
@@ -2549,16 +2607,18 @@ def fiscal_quarters(
         )
         for v in versions:
             by_cik_buffer.setdefault(v.cik, []).append(v)
+        versions.clear()
 
     ledger_rows: list[dict[str, Any]] = []
     for cik in sorted(by_cik_buffer):
-        issuer_versions = by_cik_buffer[cik]
+        issuer_versions = by_cik_buffer.pop(cik)
         issuer_versions.sort(key=lambda v: (v.available_ns, v.observation_sequence))
         machine = IssuerStateMachine(cik, target_views=(), record_quarters=concept_list)
         machine.ingest(issuer_versions)
         for _, entry in sorted(machine.quarter_ledger.items()):
             row = {col: entry[col] for col in FISCAL_QUARTER_COLUMNS}
             ledger_rows.append(row)
+        del issuer_versions, machine
 
     if not ledger_rows:
         empty = pd.DataFrame(columns=list(FISCAL_QUARTER_COLUMNS))
@@ -2808,6 +2868,13 @@ def derived_fundamentals(
         else False
         for i in range(len(samples))
     ]
+    signal_ordinals = np.asarray([day.toordinal() for day in signal_days])
+    mapped = np.asarray([bool(cik) for cik in sample_ciks])
+    parser = np.asarray([diag.max_parser for diag in check_diags])
+    overrides = np.asarray([diag.override_status for diag in check_diags], dtype=object)
+    unsupported = overrides == "issuer_not_sec_filer"
+    eligible = mapped & valid_decision & ~unsupported
+    mapping_status = np.asarray(missing_reasons, dtype=object)
 
     work_samples = pd.DataFrame(
         {
@@ -2817,22 +2884,20 @@ def derived_fundamentals(
         index=samples.index,
     )
 
-    join_cols = [
-        "value",
-        "status",
-        "period_end",
-        "available_at",
-        "basis",
-        "accessions",
-        "tag",
-        "currency",
-        "reference_date",
-    ]
-    ciks_with_view: dict[str, set[str]] = {}
-    if not states.empty:
-        for view_name, grp in states.groupby("view", observed=True):
-            ciks_with_view[str(view_name)] = set(grp["cik"].astype(str))
-
+    # Convert each state's date once, before broadcasting it onto decision rows.
+    join_cols = ["value", "status", "period_ordinal"]
+    if provenance:
+        join_cols.extend(
+            [
+                "period_end",
+                "available_at",
+                "basis",
+                "accessions",
+                "tag",
+                "currency",
+                "reference_date",
+            ]
+        )
     new_cols: dict[str, Any] = {}
     for view in selected_views:
         c_name, suffix = parse_view_name(view)
@@ -2841,7 +2906,14 @@ def derived_fundamentals(
         default_stale_limit = thresholds.get(suffix, thresholds.get(base_suffix, 200))
         fy_stale_limit = thresholds.get("fy", 460)
 
-        sub = states[states["view"] == view] if not states.empty else states
+        rows = states.loc[states["view"].eq(view)]
+        sub = rows.assign(
+            period_ordinal=rows["period_end"].map(
+                lambda value: (
+                    day.toordinal() if (day := _parse_iso_date(value)) else np.nan
+                )
+            )
+        )
         joined = asof.asof_join(
             work_samples,
             sub,
@@ -2853,54 +2925,37 @@ def derived_fundamentals(
         )
 
         vals = joined["value"].to_numpy(dtype="float64", copy=True)
-        raw_status = joined["status"].astype(object).to_numpy(copy=True)
-        p_ends = joined["period_end"].tolist()
-        ages = np.full(len(samples), np.nan, dtype="float64")
-        known_ciks = ciks_with_view.get(view, set())
+        final_status = joined["status"].to_numpy(dtype=object, copy=True)
+        has_state = eligible & pd.notna(final_status)
+        no_state = eligible & ~has_state
+        needs_new_parser = parser < spec_min_parser
+        final_status[no_state] = np.where(
+            needs_new_parser[no_state], "not_captured", "metric_missing"
+        )
+        if no_state.any():
+            known_ciks = sub["cik"].unique()
+            final_status[no_state & work_samples["cik"].isin(known_ciks)] = (
+                "not_yet_available"
+            )
+            no_state_checked = no_state & pd.notna(overrides)
+            final_status[no_state_checked] = overrides[no_state_checked]
+        final_status[
+            has_state & (final_status == "metric_missing") & needs_new_parser
+        ] = "not_captured"
+        final_status[~eligible] = "issuer_not_sec_filer"
+        final_status[mapped & ~valid_decision] = "invalid_value"
+        final_status[~mapped] = mapping_status[~mapped]
+        vals[~has_state] = np.nan
 
-        final_status: list[str] = []
-        for i in range(len(samples)):
-            cik = sample_ciks[i]
-            if not cik:
-                vals[i] = np.nan
-                final_status.append(missing_reasons[i] or "mapping_missing")
-                continue
-            if not valid_decision[i]:
-                vals[i] = np.nan
-                final_status.append("invalid_value")
-                continue
-            diag = check_diags[i]
-            if diag.override_status == "issuer_not_sec_filer":
-                vals[i] = np.nan
-                final_status.append("issuer_not_sec_filer")
-                continue
-            st = raw_status[i]
-            if pd.isna(st) or not st:
-                vals[i] = np.nan
-                if diag.override_status is not None:
-                    final_status.append(diag.override_status)
-                elif cik in known_ciks:
-                    final_status.append("not_yet_available")
-                elif spec_min_parser > diag.max_parser:
-                    final_status.append("not_captured")
-                else:
-                    final_status.append("metric_missing")
-                continue
-            st_str = str(st)
-            if st_str == "metric_missing" and spec_min_parser > diag.max_parser:
-                st_str = "not_captured"
-            pe = _parse_iso_date(p_ends[i])
-            if pe is not None:
-                age_val = float((signal_days[i] - pe).days)
-                ages[i] = age_val
-                limit = (
-                    fy_stale_limit
-                    if base_suffix == "ttm" and annual_only_flags[i]
-                    else default_stale_limit
-                )
-                if st_str in {"ok", "approximate"} and age_val > limit:
-                    st_str = "stale"
-            final_status.append(st_str)
+        ages = signal_ordinals - joined["period_ordinal"].to_numpy(dtype="float64")
+        ages[~has_state] = np.nan
+        age_limit = (
+            np.where(annual_only_flags, fy_stale_limit, default_stale_limit)
+            if base_suffix == "ttm"
+            else default_stale_limit
+        )
+        usable = (final_status == "ok") | (final_status == "approximate")
+        final_status[usable & (ages > age_limit)] = "stale"
 
         new_cols[f"{view}_value"] = vals
         new_cols[f"{view}_status"] = pd.Categorical(
