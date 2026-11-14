@@ -294,7 +294,21 @@ class BenchVersion:
     ) -> pd.DataFrame:
         frame = self.frames[name]
         frame = frame[frame["asset_id"].isin(self.resolve(symbols))]
+        if start is not None and "date" in frame:
+            frame = frame[frame["date"].ge(str(start))]
+        if end is not None and "date" in frame:
+            frame = frame[frame["date"].le(str(end))]
         return frame[list(columns)] if columns else frame
+
+    def total_returns(
+        self,
+        symbols: Any = None,
+        start: Any = None,
+        end: Any = None,
+        *,
+        columns: Any = None,
+    ) -> pd.DataFrame:
+        return self.family("daily_returns", symbols, start, end, columns=columns)
 
     def fundamentals(
         self, asset_ids: Sequence[str], metrics: Sequence[str] | None = None
