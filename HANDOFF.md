@@ -5,7 +5,7 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-Private operating follow-ups (including branch `codex/update-private-pin`) are tracked in `private/HANDOFF.md`.
+Private operating follow-ups (including branch `codex/update-private-pin-2`) are tracked in `private/HANDOFF.md`.
 
 `packages/research-datasets` memory, indexing, coverage-slice, period-anchor, panel-benchmark, earnings-projection,
 and vectorized fundamental-factor updates landed on `main` (`75e518c4`) after branch CI passed.
