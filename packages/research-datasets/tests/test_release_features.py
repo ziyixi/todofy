@@ -19,6 +19,7 @@ from research_datasets import (
     default_extractor_version,
     release_features,
 )
+from tests.test_fundamentals_derived import make_fact
 
 ASSET_A = "11111111-1111-4111-8111-111111111111"
 CIK_A = "0000100001"
@@ -62,6 +63,7 @@ class _SyntheticVersion:
         extraction_results: pd.DataFrame | None = None,
         extraction_facts: pd.DataFrame | None = None,
         fundamentals_df: pd.DataFrame | None = None,
+        earnings_announcements: pd.DataFrame | None = None,
         daily_returns_df: pd.DataFrame | None = None,
         raw_prices_df: pd.DataFrame | None = None,
     ) -> None:
@@ -72,6 +74,7 @@ class _SyntheticVersion:
             ("extraction_results", extraction_results),
             ("extraction_facts", extraction_facts),
             ("fundamentals", fundamentals_df),
+            ("earnings_announcements", earnings_announcements),
             ("daily_returns", daily_returns_df),
         ):
             if frame is not None:
@@ -122,6 +125,232 @@ class _SyntheticVersion:
 
 
 class ReleaseFeaturesTest(unittest.TestCase):
+    def test_revenue_yoy_uses_clocked_quarter_for_validated_period(self) -> None:
+        sessions = _business_sessions("2025-05-01", 3)
+        cands = _candidates(sessions, [0, 1])
+        accession = "0000100001-25-000010"
+        doc_id = f"sec_release_documents:{CIK_A}:{accession}:ex991.htm"
+        release_clock = "2025-05-01T21:30:00Z"
+        doc = {
+            "document_id": doc_id,
+            "cik": CIK_A,
+            "accession": accession,
+            "role": "press_release",
+            "capture_status": "captured",
+            "accepted_at": release_clock,
+            "observed_at": release_clock,
+            "filing_date": "2025-05-01",
+            "report_date": "2025-05-01",
+        }
+        fact = {
+            "document_id": doc_id,
+            "cik": CIK_A,
+            "accession": accession,
+            "extractor_version": EXTRACTOR_V2,
+            "fact_type": "result",
+            "metric": "revenue",
+            "basis": "gaap",
+            "period_kind": "quarter",
+            "period_relation": "reported",
+            "fiscal_year": 2025,
+            "quarter": 2,
+            "period_check": "consistent",
+            "target_period_end": "2025-03-29",
+            "unit": "money",
+            "currency": "USD",
+            "value_low_base": 120.0,
+            "value_high_base": 120.0,
+            "validation_status": "valid",
+            "accepted_at": release_clock,
+            "recorded_at": release_clock,
+        }
+        prior = make_fact(
+            "prior",
+            "Revenues",
+            "100",
+            "2023-12-31",
+            "2024-03-30",
+            cik=CIK_A,
+            public_at="2024-05-01T12:00:00Z",
+            accession="0000100001-24-000010",
+        )
+
+        def read_version(
+            result: dict,
+            prior_facts: list[dict],
+            reports: list[dict] | None = None,
+        ) -> _SyntheticVersion:
+            return _SyntheticVersion(
+                calendar=sessions,
+                default_extractor=EXTRACTOR_V2,
+                release_documents=pd.DataFrame([doc]),
+                extraction_facts=pd.DataFrame([result]),
+                fundamentals_df=pd.DataFrame(prior_facts),
+                earnings_announcements=pd.DataFrame(reports)
+                if reports is not None
+                else None,
+            )
+
+        version = read_version(fact, [prior])
+        ledger = research_datasets.fiscal_quarters(
+            version, time_policy="public_reconstructed", concepts=("revenue",)
+        )
+        self.assertEqual(ledger["value_first"].tolist(), [100.0])
+        self.assertEqual(ledger["period_end"].tolist(), [date(2024, 3, 30)])
+
+        out = release_features(version, cands, time_policy="public_reconstructed")
+        self.assertEqual(out["release_revenue"].tolist(), [120.0, 120.0])
+        np.testing.assert_allclose(out["release_revenue_yoy"], [0.2, 0.2])
+        observed = release_features(version, cands, time_policy="observed_content")
+        np.testing.assert_allclose(observed["release_revenue_yoy"], [0.2, 0.2])
+        unclocked = read_version(
+            {key: val for key, val in fact.items() if key != "recorded_at"}, [prior]
+        )
+        observed = release_features(unclocked, cands, time_policy="observed_content")
+        self.assertTrue(observed["release_revenue_yoy"].isna().all())
+
+        restated = prior | {
+            "value": "110",
+            "observation_sequence": 2,
+            "public_at": "2025-05-02T20:00:00Z",
+            "public_date": "2025-05-02",
+        }
+        late = prior | {
+            "public_at": "2025-05-02T20:00:00Z",
+            "public_date": "2025-05-02",
+        }
+        ambiguous = prior | {
+            "fact_id": "other-quarter",
+            "period_end": "2024-03-23",
+            "public_at": "2024-04-30T12:00:00Z",
+            "public_date": "2024-04-30",
+        }
+        matched = {
+            "asset_id": ASSET_A,
+            "cik": CIK_A,
+            "announcement_id": f"{CIK_A}:{accession}",
+            "kind": "8k_item_2_02",
+            "period_end_basis": "matched_report",
+            "period_end": "2025-03-29",
+            "report_accession": "0000100001-25-000011",
+            "report_public_at": "2025-05-02T20:00:00Z",
+            "observed_available_at": release_clock,
+        }
+        without_anchor = fact | {"period_check": "unknown", "target_period_end": None}
+        future_conflict = matched | {
+            "period_end": "2025-04-05",
+            "report_accession": "0000100001-25-000012",
+            "report_public_at": "2025-05-08T20:00:00Z",
+        }
+        cases = (
+            (
+                "first value",
+                fact,
+                [prior, restated],
+                None,
+                "public_reconstructed",
+                [0.2, 0.2],
+            ),
+            ("prior clock", fact, [late], None, "public_reconstructed", [np.nan, 0.2]),
+            (
+                "two prior quarters",
+                fact,
+                [prior, ambiguous],
+                None,
+                "public_reconstructed",
+                [np.nan, np.nan],
+            ),
+            (
+                "currency",
+                fact | {"currency": "EUR"},
+                [prior],
+                None,
+                "public_reconstructed",
+                [np.nan, np.nan],
+            ),
+            (
+                "unspecified accounting basis",
+                fact | {"basis": "unspecified"},
+                [prior],
+                None,
+                "public_reconstructed",
+                [np.nan, np.nan],
+            ),
+            (
+                "unit",
+                fact | {"unit": "money_per_share"},
+                [prior],
+                None,
+                "public_reconstructed",
+                [np.nan, np.nan],
+            ),
+            (
+                "no anchor",
+                without_anchor,
+                [prior],
+                None,
+                "public_reconstructed",
+                [np.nan, np.nan],
+            ),
+            (
+                "estimated date",
+                without_anchor,
+                [prior],
+                [matched | {"period_end_basis": "estimated"}],
+                "public_reconstructed",
+                [np.nan, np.nan],
+            ),
+            (
+                "wrong release",
+                without_anchor,
+                [prior],
+                [matched | {"announcement_id": f"{CIK_A}:other"}],
+                "public_reconstructed",
+                [np.nan, np.nan],
+            ),
+            (
+                "matched report clock",
+                without_anchor,
+                [prior],
+                [matched],
+                "public_reconstructed",
+                [np.nan, 0.2],
+            ),
+            (
+                "future conflict",
+                without_anchor,
+                [prior],
+                [matched, future_conflict],
+                "public_reconstructed",
+                [np.nan, 0.2],
+            ),
+            (
+                "visible conflict",
+                without_anchor,
+                [prior],
+                [
+                    matched,
+                    future_conflict | {"report_public_at": matched["report_public_at"]},
+                ],
+                "public_reconstructed",
+                [np.nan, np.nan],
+            ),
+            (
+                "missing observed report clock",
+                without_anchor,
+                [prior],
+                [matched],
+                "observed_content",
+                [np.nan, np.nan],
+            ),
+        )
+        for name, result, prior_facts, reports, policy, expected in cases:
+            with self.subTest(name=name):
+                version = read_version(result, prior_facts, reports)
+                out = release_features(version, cands, time_policy=policy)
+                self.assertEqual(out["release_revenue"].tolist(), [120.0, 120.0])
+                np.testing.assert_allclose(out["release_revenue_yoy"], expected)
+
     def test_family_specs_and_manifest_validation(self) -> None:
         self.assertEqual(research_datasets.__version__, "2.3.0")
         self.assertEqual(

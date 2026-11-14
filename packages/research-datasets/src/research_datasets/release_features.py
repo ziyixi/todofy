@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import math
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, timedelta
 from typing import Any
 
@@ -279,178 +279,111 @@ def _decision_cutoffs(calendar: Sequence[date]) -> tuple[list[date], np.ndarray]
     return sessions, cutoffs
 
 
-def _quarter_number(row: Mapping[str, Any]) -> int | None:
-    q = row.get("quarter")
-    if q is not None and pd.notna(q):
-        try:
-            qi = int(q)
-            if 1 <= qi <= 4:
-                return qi
-        except (TypeError, ValueError):
-            pass
-    kind = str(row.get("period_kind") or "").strip().lower()
-    if kind == "full_year":
-        return 4
-    return None
+def _period_end(value: Any) -> date | None:
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError:
+        return None
 
 
-def _prior_quarter_lookup(
+def _matched_report_periods(
+    version: Any, asset_ids: Sequence[str]
+) -> dict[tuple[str, str, str], set[tuple[int, date, str]]]:
+    frame = _read_optional_family(
+        version, "earnings_announcements", identities=asset_ids
+    )
+    columns = [
+        "asset_id",
+        "cik",
+        "announcement_id",
+        "kind",
+        "period_end_basis",
+        "period_end",
+        "report_accession",
+        "report_public_at",
+    ]
+    if frame is None or not set(columns).issubset(frame.columns):
+        return {}
+    out: dict[tuple[str, str, str], set[tuple[int, date, str]]] = {}
+    for aid, cik, ann_id, kind, basis, period, report_id, public in frame[
+        columns
+    ].itertuples(index=False, name=None):
+        if str(kind) != "8k_item_2_02" or str(basis) != "matched_report":
+            continue
+        cik = _pad_cik(cik)
+        if not cik or not isinstance(ann_id, str) or not ann_id.startswith(f"{cik}:"):
+            continue
+        accession = ann_id.split(":", 1)[1]
+        if (
+            not accession
+            or not isinstance(report_id, str)
+            or not report_id
+            or report_id == accession
+        ):
+            continue
+        known_at = clocks.clock(public)
+        end = _period_end(period)
+        if known_at is not None and end is not None:
+            out.setdefault((str(aid), cik, accession), set()).add(
+                (int(known_at.value), end, report_id)
+            )
+    return out
+
+
+def _reported_period_end(
+    fact: Mapping[str, Any],
+    matched_reports: Iterable[tuple[int, date, str]],
+    decision_ns: int,
+) -> date | None:
+    if str(fact.get("period_check")) == "consistent":
+        explicit = _period_end(fact.get("target_period_end"))
+        if explicit is not None:
+            return explicit
+    matches = {
+        (period, report_id)
+        for known_ns, period, report_id in matched_reports
+        if known_ns <= decision_ns
+    }
+    return next(iter(matches))[0] if len(matches) == 1 else None
+
+
+def _quarter_revenue(
     version: Any, ciks: Sequence[str], policy: str
-) -> dict[tuple[str, int, int, str], list[tuple[int, float, date | None]]]:
-    """Build PIT-ordered ``(cik, fiscal_year, quarter, concept) -> [(known_ns, val, period_end)]``."""
+) -> dict[tuple[str, date, str], tuple[int, float]]:
     if not ciks or "fundamentals" not in _candidates.families(version):
         return {}
-    try:
-        ledger = _fundamentals_derived.fiscal_quarters(
-            version,
-            time_policy=policy,
-            concepts=("revenue", "eps_diluted"),
-            ciks=list(ciks),
-        )
-    except (AttributeError, KeyError, TypeError, ValueError):
-        return {}
-    if ledger is None or ledger.empty:
-        return {}
-    lookup: dict[tuple[str, int, int, str], list[tuple[int, float, date | None]]] = {}
-    known_col = (
-        "first_known_at"
-        if "first_known_at" in ledger.columns
-        else "available_at"
-        if "available_at" in ledger.columns
-        else None
+    ledger = _fundamentals_derived.fiscal_quarters(
+        version, time_policy=policy, concepts=("revenue",), ciks=list(ciks)
     )
-    val_col = (
-        "first_value"
-        if "first_value" in ledger.columns
-        else "value"
-        if "value" in ledger.columns
-        else None
-    )
-    if known_col is None or val_col is None:
-        return {}
-    known_ts = _parse_utc(ledger[known_col])
-    for idx, row in ledger.iterrows():
-        ts = known_ts.loc[idx]
-        if pd.isna(ts):
+    out: dict[tuple[str, date, str], tuple[int, float]] = {}
+    for row in ledger.itertuples(index=False):
+        if row.status_first not in {"ok", "approximate"} or not math.isfinite(
+            row.value_first
+        ):
             continue
-        cik = _pad_cik(str(row.get("cik", "")))
-        concept = str(row.get("concept", ""))
-        fy = row.get("fiscal_year")
-        fq_raw = row.get("fiscal_quarter", row.get("quarter"))
-        val = row.get(val_col)
-        if not cik or not concept or pd.isna(fy) or pd.isna(fq_raw) or pd.isna(val):
-            continue
-        fq_str = str(fq_raw).strip().upper()
-        if fq_str.startswith("Q") and fq_str[1:].isdigit():
-            q_num = int(fq_str[1:])
-        elif fq_str == "FY":
-            q_num = 4
-        else:
-            try:
-                q_num = int(float(fq_str))
-            except ValueError:
-                continue
-        val_f = float(val)
-        if not math.isfinite(val_f):
-            continue
-        pend_raw = row.get("period_end")
-        pend = (
-            clocks.day(pend_raw)
-            if pend_raw is not None and pd.notna(pend_raw)
-            else None
-        )
-        key = (cik, int(fy), q_num, concept)
-        lookup.setdefault(key, []).append((int(ts.value), val_f, pend))
-    for entries in lookup.values():
-        entries.sort(key=lambda item: item[0])
-    return lookup
+        if pd.notna(row.available_at_first):
+            out[(row.cik, row.period_end, row.currency)] = (
+                int(row.available_at_first.value),
+                row.value_first,
+            )
+    return out
 
 
-def _pit_quarter_value(
-    lookup: Mapping[tuple[str, int, int, str], list[tuple[int, float, date | None]]],
+def _prior_revenue(
+    quarter_revenue: Mapping[tuple[str, date, str], tuple[int, float]],
     cik: str,
-    fiscal_year: int,
-    quarter: int,
-    concept: str,
+    period_end: date,
+    currency: str,
     decision_ns: int,
-) -> tuple[float, date | None]:
-    entries = lookup.get((cik, fiscal_year, quarter, concept))
-    if not entries:
-        return (math.nan, None)
-    chosen_val = math.nan
-    chosen_end: date | None = None
-    for known_ns, val, pend in entries:
-        if known_ns <= decision_ns:
-            chosen_val = val
-            chosen_end = pend
-        else:
-            break
-    return (chosen_val, chosen_end)
-
-
-def _split_factor_lookup(
-    version: Any, asset_ids: Sequence[str]
-) -> dict[str, tuple[np.ndarray, np.ndarray]]:
-    if not asset_ids or "daily_returns" not in _candidates.families(version):
-        return {}
-    try:
-        dr = version.total_returns(list(asset_ids))
-    except (AttributeError, KeyError, TypeError, ValueError):
-        dr = _read_optional_family(version, "daily_returns")
-    if dr is None or dr.empty or "split_index" not in dr.columns:
-        return {}
-    out: dict[str, tuple[np.ndarray, np.ndarray]] = {}
-    dr_copy = dr[["asset_id", "date", "split_index"]].copy()
-    dr_copy["asset_id"] = dr_copy["asset_id"].astype(str)
-    dr_copy["date_ord"] = dr_copy["date"].map(lambda d: clocks.day(d).toordinal())
-    dr_copy["split_index"] = pd.to_numeric(dr_copy["split_index"], errors="coerce")
-    dr_copy = dr_copy.dropna(subset=["split_index"]).sort_values(
-        ["asset_id", "date_ord"]
-    )
-    for aid, grp in dr_copy.groupby("asset_id", sort=False):
-        out[str(aid)] = (
-            grp["date_ord"].to_numpy(dtype="int64"),
-            grp["split_index"].to_numpy(dtype="float64"),
-        )
-    return out
-
-
-def _split_at(
-    splits: Mapping[str, tuple[np.ndarray, np.ndarray]], asset_id: str, session: date
 ) -> float:
-    pair = splits.get(asset_id)
-    if pair is None or len(pair[0]) == 0:
-        return 1.0
-    ords, vals = pair
-    pos = int(np.searchsorted(ords, session.toordinal(), side="right")) - 1
-    if pos < 0:
-        return float(vals[0]) if vals[0] > 0 else 1.0
-    return float(vals[pos]) if vals[pos] > 0 else 1.0
-
-
-def _raw_close_lookup(
-    version: Any, asset_ids: Sequence[str]
-) -> dict[tuple[str, date], float]:
-    if not asset_ids:
-        return {}
-    prices_fn = getattr(version, "prices", None)
-    if not callable(prices_fn):
-        return {}
-    try:
-        raw = prices_fn(list(asset_ids), adjusted=False)
-    except (AttributeError, KeyError, TypeError, ValueError):
-        return {}
-    if raw is None or raw.empty or "close" not in raw.columns:
-        return {}
-    out: dict[tuple[str, date], float] = {}
-    for aid, dt, close in zip(
-        raw["asset_id"].astype(str),
-        raw["date"].map(clocks.day),
-        pd.to_numeric(raw["close"], errors="coerce"),
-    ):
-        if pd.notna(close) and float(close) > 0:
-            out[(aid, dt)] = float(close)
-    return out
+    anniversary = _fundamentals_derived._prev_year_date(period_end)
+    matches = []
+    for days in range(-7, 8):
+        key = (cik, anniversary + timedelta(days=days), currency)
+        entry = quarter_revenue.get(key)
+        if entry is not None and entry[0] <= decision_ns:
+            matches.append(entry[1])
+    return matches[0] if len(matches) == 1 and matches[0] > 0 else math.nan
 
 
 def release_features(
@@ -654,9 +587,15 @@ def release_features(
     for flist in facts_by_doc.values():
         flist.sort(key=lambda item: item["_sort_key"])
 
-    quarter_lookup = _prior_quarter_lookup(version, unique_ciks, policy)
-    splits_lookup = _split_factor_lookup(version, unique_assets)
-    raw_closes = _raw_close_lookup(version, unique_assets)
+    quarter_revenue = (
+        _quarter_revenue(version, unique_ciks, policy) if facts_by_doc else {}
+    )
+    # The frozen announcement only clocks its 8-K observation, not the matched report.
+    report_periods = (
+        _matched_report_periods(version, unique_assets)
+        if quarter_revenue and policy == "public_reconstructed"
+        else {}
+    )
 
     mcap_arr: np.ndarray | None = None
     if fundamentals is not None and "market_cap_issuer_value" in fundamentals.columns:
@@ -769,52 +708,45 @@ def release_features(
             if rev_fact is not None:
                 rev_val = float(rev_fact["_mid_base"])
                 num_cols["release_revenue"][i] = rev_val
-                fy = rev_fact.get("fiscal_year")
-                q_num = _quarter_number(rev_fact)
+                currency = str(rev_fact.get("currency"))
                 if (
-                    fy is not None
-                    and pd.notna(fy)
-                    and q_num is not None
-                    and str(rev_fact.get("period_kind") or "quarter") == "quarter"
-                ):
-                    prior_rev, _ = _pit_quarter_value(
-                        quarter_lookup, cik, int(fy) - 1, q_num, "revenue", dec_ns
+                    quarter_revenue
+                    and str(rev_fact.get("basis")) == "gaap"
+                    and str(rev_fact.get("period_relation")) == "reported"
+                    and str(rev_fact.get("period_kind")) == "quarter"
+                    and str(rev_fact.get("unit")) == "money"
+                    and re.fullmatch(r"[A-Z]{3}", currency)
+                    and (
+                        policy == "public_reconstructed"
+                        or clocks.clock(rev_fact.get("recorded_at")) is not None
                     )
-                    if math.isfinite(prior_rev) and prior_rev > 0:
-                        num_cols["release_revenue_yoy"][i] = rev_val / prior_rev - 1.0
+                ):
+                    end = _reported_period_end(
+                        rev_fact,
+                        report_periods.get(
+                            (asset_ids[i], cik, latest["accession"]), ()
+                        ),
+                        dec_ns,
+                    )
+                    release_day = (
+                        pd.Timestamp(latest["public_ns"], unit="ns", tz="UTC")
+                        .tz_convert(NEW_YORK)
+                        .date()
+                    )
+                    if end is not None and end <= release_day:
+                        prior_rev = _prior_revenue(
+                            quarter_revenue, cik, end, currency, dec_ns
+                        )
+                        if math.isfinite(prior_rev):
+                            num_cols["release_revenue_yoy"][i] = (
+                                rev_val / prior_rev - 1.0
+                            )
 
             if ni_fact is not None:
                 num_cols["release_net_income"][i] = float(ni_fact["_mid_base"])
 
             if eps_gaap_fact is not None:
-                eps_val = float(eps_gaap_fact["_mid_base"])
-                num_cols["release_eps_diluted"][i] = eps_val
-                fy = eps_gaap_fact.get("fiscal_year")
-                q_num = _quarter_number(eps_gaap_fact)
-                raw_px = raw_closes.get((asset_ids[i], sig_sess), math.nan)
-                if (
-                    fy is not None
-                    and pd.notna(fy)
-                    and q_num is not None
-                    and str(eps_gaap_fact.get("period_kind") or "quarter") == "quarter"
-                    and math.isfinite(raw_px)
-                    and raw_px > 0
-                ):
-                    prior_eps, prior_end = _pit_quarter_value(
-                        quarter_lookup, cik, int(fy) - 1, q_num, "eps_diluted", dec_ns
-                    )
-                    if math.isfinite(prior_eps):
-                        sp_now = _split_at(splits_lookup, asset_ids[i], sig_sess)
-                        sp_prev = (
-                            _split_at(splits_lookup, asset_ids[i], prior_end)
-                            if prior_end is not None
-                            else sp_now
-                        )
-                        ratio = sp_now / sp_prev if sp_prev > 0 else 1.0
-                        adj_prior_eps = prior_eps / ratio if ratio > 0 else prior_eps
-                        num_cols["release_eps_sue_rw"][i] = (
-                            eps_val - adj_prior_eps
-                        ) / raw_px
+                num_cols["release_eps_diluted"][i] = float(eps_gaap_fact["_mid_base"])
 
             if eps_adj_fact is not None:
                 num_cols["release_eps_adjusted"][i] = float(eps_adj_fact["_mid_base"])
