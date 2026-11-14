@@ -7,6 +7,11 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 Private operating follow-ups are tracked in `private/HANDOFF.md`.
 
+Branch `codex/reader-panel-release` integrates the checked `packages/research-datasets` memory, indexing,
+coverage-slice, period-anchor, panel-benchmark, earnings-projection, and vectorized fundamental-factor updates
+onto `main` (`ruff check`, `ruff format --check`, and all 17 `//packages/research-datasets/tests/...` Bazel
+test targets passed locally). Land after branch CI, then pin the resulting `main` SHA in the private consumer.
+
 Branch `claude-schema-diagnostic` reports `claude_schema_complexity` for Anthropic's documented structured-output
 compilation limit response. Other HTTP refusals keep their existing mapping. The diagnostic is a fixed value, and
 the upstream error body stays private. The 42 adapter tests, worker typecheck and lint targets passed. The
