@@ -1,11 +1,11 @@
 # Handoff
 
-Updated 2026-11-09 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
+Updated 2026-11-14 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
 Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-Private operating follow-ups (including branch `codex/update-private-pin-2`) are tracked in `private/HANDOFF.md`.
+Private operating follow-ups (including branch `claude/update-private-pin-3`) are tracked in `private/HANDOFF.md`.
 
 `packages/research-datasets` memory, indexing, coverage-slice, period-anchor, panel-benchmark, earnings-projection,
 and vectorized fundamental-factor updates landed on `main` (`75e518c4`) after branch CI passed.
