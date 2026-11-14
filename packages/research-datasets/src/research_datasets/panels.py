@@ -1118,7 +1118,11 @@ def panel(
             dict.fromkeys([*selected_assets, *([bench_id] if bench_id else [])])
         )
         dr_df = (
-            version.family("daily_returns", price_ids)
+            version.family(
+                "daily_returns",
+                price_ids,
+                columns=["asset_id", "date", "row_kind", "tr_index"],
+            )
             if "daily_returns" in families
             else None
         )
@@ -1126,16 +1130,23 @@ def panel(
             _project_prices(version, price_ids, adjusted=True, fields=("close",)),
             ("close",),
         )
-        ev_obs_cal = (
-            _observations(version)
-            if "earnings_observations" in families and "event_observations" in families
-            else None
-        )
         earn_obs_cal = (
             version.family("earnings_observations", selected_assets)
             if "earnings_observations" in families
             else None
         )
+        ev_obs_cal = None
+        if (
+            "event_observations" in families
+            and earn_obs_cal is not None
+            and "event_uid" in earn_obs_cal
+        ):
+            uids = sorted(set(earn_obs_cal["event_uid"].astype(str)) - {""})
+            if uids:
+                reader = getattr(version, "_earnings_event_observations", None)
+                ev_obs_cal = (
+                    reader(uids) if callable(reader) else _observations(version)
+                )
         earn_df = _sec_events.earnings_features(
             ann_df,
             sec_samples,

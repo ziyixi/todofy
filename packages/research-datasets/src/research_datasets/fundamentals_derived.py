@@ -3054,7 +3054,7 @@ def fundamental_factors(derived: pd.DataFrame) -> pd.DataFrame:
 
     cols = set(derived.columns)
 
-    def _get_view(view: str) -> tuple[np.ndarray, list[str], np.ndarray, list[str]]:
+    def _get_view(view: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         v_col, s_col, a_col, p_col, c_col = (
             f"{view}_value",
             f"{view}_status",
@@ -3065,15 +3065,18 @@ def fundamental_factors(derived: pd.DataFrame) -> pd.DataFrame:
         if v_col not in cols or s_col not in cols:
             return (
                 np.full(n, np.nan, dtype="float64"),
-                ["metric_missing"] * n,
+                np.full(n, "metric_missing", dtype=object),
                 np.full(n, np.nan, dtype="float64"),
-                [""] * n,
+                np.full(n, "", dtype=object),
             )
         vals = derived[v_col].to_numpy(dtype="float64", copy=False)
-        sts = [
-            "metric_missing" if pd.isna(x) or not x else str(x)
-            for x in derived[s_col].tolist()
-        ]
+        sts = np.array(
+            [
+                "metric_missing" if pd.isna(x) or not x else str(x)
+                for x in derived[s_col]
+            ],
+            dtype=object,
+        )
         if p_col in cols:
             pe_ords = np.array(
                 [
@@ -3090,111 +3093,102 @@ def fundamental_factors(derived: pd.DataFrame) -> pd.DataFrame:
         else:
             pe_ords = np.full(n, np.nan, dtype="float64")
         ccys = (
-            ["" if pd.isna(x) or not x else str(x) for x in derived[c_col].tolist()]
+            np.array(
+                ["" if pd.isna(x) or not x else str(x) for x in derived[c_col]],
+                dtype=object,
+            )
             if c_col in cols
-            else [""] * n
+            else np.full(n, "", dtype=object)
         )
         return vals, sts, pe_ords, ccys
 
-    cache: dict[str, tuple[np.ndarray, list[str], np.ndarray, list[str]]] = {}
+    cache: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]] = {}
 
-    def view_data(view: str) -> tuple[np.ndarray, list[str], np.ndarray, list[str]]:
+    def view_data(view: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         if view not in cache:
             cache[view] = _get_view(view)
         return cache[view]
 
+    def usable(status: np.ndarray) -> np.ndarray:
+        return (status == "ok") | (status == "approximate")
+
+    def units_mismatch(first: np.ndarray, second: np.ndarray) -> np.ndarray:
+        return (first != "") & (second != "") & (first != second)
+
+    def finish_ratio(
+        numerator: np.ndarray,
+        denominator: np.ndarray,
+        statuses: tuple[np.ndarray, ...],
+        finite_inputs: np.ndarray,
+        matching_period: np.ndarray,
+        mismatched_units: np.ndarray,
+    ) -> tuple[np.ndarray, pd.Categorical]:
+        # Later assignments give earlier validation checks precedence.
+        status = np.full(n, "ok", dtype=object)
+        for source in statuses:
+            status[source == "approximate"] = "approximate"
+        status[denominator <= 0.0] = "invalid_value"
+        status[mismatched_units] = "unit_unavailable"
+        status[~matching_period] = "period_mismatch"
+        status[~finite_inputs] = "invalid_value"
+        for source in reversed(statuses):
+            invalid = ~usable(source)
+            status[invalid] = source[invalid]
+        vals = np.full(n, np.nan, dtype="float64")
+        valid = usable(status)
+        with np.errstate(over="ignore", invalid="ignore"):
+            np.divide(numerator, denominator, out=vals, where=valid)
+        invalid = valid & ~np.isfinite(vals)
+        vals[invalid] = np.nan
+        status[invalid] = "invalid_value"
+        return vals, pd.Categorical(status, categories=list(FUNDAMENTAL_STATUSES))
+
     def _ratio(num_view: str, den_view: str) -> tuple[np.ndarray, pd.Categorical]:
         nv, ns, np_ord, nc = view_data(num_view)
         dv, ds, dp_ord, dc = view_data(den_view)
-        vals = np.full(n, np.nan, dtype="float64")
-        statuses: list[str] = []
-        for i in range(n):
-            if ns[i] not in {"ok", "approximate"}:
-                statuses.append(ns[i])
-                continue
-            if ds[i] not in {"ok", "approximate"}:
-                statuses.append(ds[i])
-                continue
-            if not (np.isfinite(nv[i]) and np.isfinite(dv[i])):
-                statuses.append("invalid_value")
-                continue
-            if not (np.isfinite(np_ord[i]) and np.isfinite(dp_ord[i])) or (
-                abs(np_ord[i] - dp_ord[i]) > 7.0
-            ):
-                statuses.append("period_mismatch")
-                continue
-            if nc[i] and dc[i] and nc[i] != dc[i]:
-                statuses.append("unit_unavailable")
-                continue
-            if dv[i] <= 0.0:
-                statuses.append("invalid_value")
-                continue
-            res = nv[i] / dv[i]
-            if not np.isfinite(res):
-                statuses.append("invalid_value")
-                continue
-            vals[i] = res
-            statuses.append("approximate" if "approximate" in {ns[i], ds[i]} else "ok")
-        return vals, pd.Categorical(statuses, categories=list(FUNDAMENTAL_STATUSES))
+        with np.errstate(over="ignore", invalid="ignore"):
+            matching = (
+                np.isfinite(np_ord)
+                & np.isfinite(dp_ord)
+                & (np.abs(np_ord - dp_ord) <= 7.0)
+            )
+        return finish_ratio(
+            nv,
+            dv,
+            (ns, ds),
+            np.isfinite(nv) & np.isfinite(dv),
+            matching,
+            units_mismatch(nc, dc),
+        )
 
     def _accruals() -> tuple[np.ndarray, pd.Categorical]:
         niv, nis, nip, nic = view_data("net_income_ttm")
         ocfv, ocfs, ocfp, ocfc = view_data("operating_cash_flow_ttm")
         tav, tas, tap, tac = view_data("total_assets_i")
-        vals = np.full(n, np.nan, dtype="float64")
-        statuses: list[str] = []
-        for i in range(n):
-            bad = next(
-                (
-                    s
-                    for s in (nis[i], ocfs[i], tas[i])
-                    if s not in {"ok", "approximate"}
-                ),
-                None,
+        with np.errstate(over="ignore", invalid="ignore"):
+            span = np.maximum(np.maximum(nip, ocfp), tap) - np.minimum(
+                np.minimum(nip, ocfp), tap
             )
-            if bad is not None:
-                statuses.append(bad)
-                continue
-            if not (
-                np.isfinite(niv[i]) and np.isfinite(ocfv[i]) and np.isfinite(tav[i])
-            ):
-                statuses.append("invalid_value")
-                continue
-            pts = (nip[i], ocfp[i], tap[i])
-            if not all(np.isfinite(p) for p in pts) or (max(pts) - min(pts) > 7.0):
-                statuses.append("period_mismatch")
-                continue
-            ccys = {c for c in (nic[i], ocfc[i], tac[i]) if c}
-            if len(ccys) > 1:
-                statuses.append("unit_unavailable")
-                continue
-            if tav[i] <= 0.0:
-                statuses.append("invalid_value")
-                continue
-            res = (niv[i] - ocfv[i]) / tav[i]
-            if not np.isfinite(res):
-                statuses.append("invalid_value")
-                continue
-            vals[i] = res
-            statuses.append(
-                "approximate" if "approximate" in {nis[i], ocfs[i], tas[i]} else "ok"
-            )
-        return vals, pd.Categorical(statuses, categories=list(FUNDAMENTAL_STATUSES))
+            numerator = niv - ocfv
+        return finish_ratio(
+            numerator,
+            tav,
+            (nis, ocfs, tas),
+            np.isfinite(niv) & np.isfinite(ocfv) & np.isfinite(tav),
+            np.isfinite(nip) & np.isfinite(ocfp) & np.isfinite(tap) & (span <= 7.0),
+            units_mismatch(nic, ocfc)
+            | units_mismatch(nic, tac)
+            | units_mismatch(ocfc, tac),
+        )
 
     def _passthrough(view: str) -> tuple[np.ndarray, pd.Categorical]:
         vv, vs, _, _ = view_data(view)
-        vals = np.full(n, np.nan, dtype="float64")
-        statuses: list[str] = []
-        for i in range(n):
-            if vs[i] not in {"ok", "approximate"}:
-                statuses.append(vs[i])
-                continue
-            if not np.isfinite(vv[i]):
-                statuses.append("invalid_value")
-                continue
-            vals[i] = vv[i]
-            statuses.append(vs[i])
-        return vals, pd.Categorical(statuses, categories=list(FUNDAMENTAL_STATUSES))
+        valid = usable(vs)
+        finite = np.isfinite(vv)
+        status = np.where(valid & ~finite, "invalid_value", vs)
+        return np.where(valid & finite, vv, np.nan), pd.Categorical(
+            status, categories=list(FUNDAMENTAL_STATUSES)
+        )
 
     computed: dict[str, tuple[np.ndarray, pd.Categorical]] = {
         "gross_margin_ttm": _ratio("gross_profit_ttm", "revenue_ttm"),

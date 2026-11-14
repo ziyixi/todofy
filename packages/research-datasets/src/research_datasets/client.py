@@ -1075,6 +1075,7 @@ class Dataset:
         tags: Sequence[str] | None = None,
         columns: Sequence[str] | None = None,
         optional_columns: bool = False,
+        event_uids: Sequence[str] | None = None,
     ) -> pd.DataFrame:
         spec = self._require_family(family)
         attrs: dict[str, Any] = {"dataset_version": self.id, "family": family}
@@ -1122,6 +1123,7 @@ class Dataset:
             tuple(tags) if tags is not None else None,
             tuple(columns) if columns is not None else None,
             optional_columns,
+            None if event_uids is None else tuple(event_uids),
         )
         if cache_key in self._df_cache:
             return _copy_frame(self._df_cache[cache_key])
@@ -1165,6 +1167,11 @@ class Dataset:
                 "CAPABILITY_MISSING", f"{family} 缺少 {time_col} 时间列。"
             )
         scalar_filters: list[tuple[str, Sequence[Any]]] = []
+        if event_uids is not None and "event_uid" in names:
+            uid_type = ds.schema.field("event_uid").type
+            if uid_type in (pa.string(), pa.large_string()):
+                # Keep null rows for the calendar resolver's legacy string conversion.
+                scalar_filters.append(("event_uid", [*event_uids, None]))
         asset_ids_wanted = None
         if identities is not None:
             # Families that link events to securities carry an asset_ids list instead.
@@ -1427,6 +1434,22 @@ class Dataset:
             end=end,
             columns=columns,
             optional_columns=True,
+        )
+
+    def _earnings_event_observations(self, event_uids: Sequence[str]) -> pd.DataFrame:
+        """Load complete link histories for the requested earnings events."""
+        return self._read_family(
+            "event_observations",
+            columns=(
+                "source",
+                "event_uid",
+                "observation_sequence",
+                "asset_ids",
+                "observation_recorded_at",
+                "content_first_seen_at",
+            ),
+            optional_columns=True,
+            event_uids=event_uids,
         )
 
     def source_checks(self, symbols: str | Sequence[str] | None = None) -> pd.DataFrame:
