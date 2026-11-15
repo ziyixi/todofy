@@ -78,9 +78,8 @@ codes generically. It changes no source, so it publishes no service and no priva
 
 ## Latest verified release
 
-Main `0d2b491a` published the optional `PRIVATE_DEPLOY_VARS` workflow pass-through and the pinned private application;
-matching reconciliation passed with zero infrastructure drift. See the
-[November 15 archive](docs/history/handoff-2026-11-15.md).
+Main `8f9871f6` published the pinned private application; matching reconciliation passed with zero infrastructure
+drift. See the [November 15 archive](docs/history/handoff-2026-11-15.md).
 
 Shared Worker receipt recovery (`7ef001fe`) adds fixed failure stages, exact committed-result readback and a
 guarded receipt-only path without application redeployment. The old statusless Tasks receipt remains historical
