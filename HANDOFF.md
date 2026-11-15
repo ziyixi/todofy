@@ -78,7 +78,7 @@ codes generically. It changes no source, so it publishes no service and no priva
 
 ## Latest verified release
 
-Main `8f9871f6` published the pinned private application; matching reconciliation passed with zero infrastructure
+Main `a790bbdf` published the pinned private application; matching reconciliation passed with zero infrastructure
 drift. See the [November 15 archive](docs/history/handoff-2026-11-15.md).
 
 Shared Worker receipt recovery (`7ef001fe`) adds fixed failure stages, exact committed-result readback and a
