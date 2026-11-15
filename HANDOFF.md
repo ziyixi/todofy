@@ -5,13 +5,11 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-Private operating follow-ups (including branch `feat/home-namespace-duration-warning`) are tracked in `private/HANDOFF.md`.
+Private operating follow-ups (including branch `feat/private-deploy-vars`) are tracked in `private/HANDOFF.md`.
 
-Branch `feat/home-namespace-duration-warning` warns in Home's daily digest and attention state when any single Durable
-Object namespace exceeds 15% of the daily duration allowance (`1,950 GB-s`) for a completed UTC day, surfaces a generic
-`collector off track` probe detail when an HTTP probe reports `off_track` with a reason code, and advances the private
-application pin. All 69 Home and repository audit checks passed locally. Land after `CI gate` passes, then verify the
-Home deployment, private publication, same-SHA reconciliation, and a completed UTC-day Durable Object namespace readback.
+Branch `feat/private-deploy-vars` forwards the optional `PRIVATE_DEPLOY_VARS` repository variable to the private release
+entry point and advances the private application pin; when unset, release behavior is unchanged. Land after `CI gate`
+passes, then verify the private publication and same-SHA reconciliation.
 
 `packages/research-datasets` memory, indexing, coverage-slice, period-anchor, panel-benchmark, earnings-projection,
 and vectorized fundamental-factor updates landed on `main` (`75e518c4`) after branch CI passed.
@@ -81,8 +79,9 @@ codes generically. It changes no source, so it publishes no service and no priva
 
 ## Latest verified release
 
-Main `e213919a` published the checked private correction and Home; matching reconciliation passed. See the
-[November 8 archive](docs/history/handoff-2026-11-08.md#private-runtime-recovery).
+Main `f59c46a5` published Home's Durable Object per-namespace duration warning and the pinned private application;
+matching reconciliation passed with zero infrastructure drift. See the
+[November 15 archive](docs/history/handoff-2026-11-15.md).
 
 Shared Worker receipt recovery (`7ef001fe`) adds fixed failure stages, exact committed-result readback and a
 guarded receipt-only path without application redeployment. The old statusless Tasks receipt remains historical

@@ -76,6 +76,7 @@ jobs:
           PRIVATE_RELEASE_OPERATION: ${{ inputs.operation }}
           PRIVATE_INFRA_EXPECT: ${{ inputs.expect }}
           PRIVATE_K3S_MANIFESTS: ${{ inputs.manifests }}
+          PRIVATE_DEPLOY_VARS: ${{ vars.PRIVATE_DEPLOY_VARS }}
           K3S_CLUSTER_CA: ${{ vars.K3S_CLUSTER_CA }}
           PLATFORM_ACCESS_CLIENT_ID: ${{ secrets.PLATFORM_ACCESS_CLIENT_ID }}
           PLATFORM_ACCESS_CLIENT_SECRET: ${{ secrets.PLATFORM_ACCESS_CLIENT_SECRET }}

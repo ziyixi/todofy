@@ -5,6 +5,8 @@ current production state; [HANDOFF](../HANDOFF.md) names the current rollout and
 
 ## Archived handoffs
 
+- [November 15](history/handoff-2026-11-15.md): Home Durable Object per-namespace duration warning and private pin.
+- [November 8](history/handoff-2026-11-08.md): Fleet K3s workload discovery, dataset reader pin and runtime recovery.
 - [October 31](history/handoff-2026-10-31.md): Bazel package ownership, shared build recipes and equivalence checks.
 - [October 30](history/handoff-2026-10-30.md): build migration context and historical acceptance boundaries.
 
