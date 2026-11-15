@@ -5,11 +5,10 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-Private operating follow-ups (including branch `feat/private-deploy-vars`) are tracked in `private/HANDOFF.md`.
+Private operating follow-ups (including branch `chore/advance-private-source`) are tracked in `private/HANDOFF.md`.
 
-Branch `feat/private-deploy-vars` forwards the optional `PRIVATE_DEPLOY_VARS` repository variable to the private release
-entry point and advances the private application pin; when unset, release behavior is unchanged. Land after `CI gate`
-passes, then verify the private publication and same-SHA reconciliation.
+Branch `chore/advance-private-source` advances the private application pin; land after `CI gate` passes, then verify
+the private publication and same-SHA reconciliation.
 
 `packages/research-datasets` memory, indexing, coverage-slice, period-anchor, panel-benchmark, earnings-projection,
 and vectorized fundamental-factor updates landed on `main` (`75e518c4`) after branch CI passed.
@@ -79,7 +78,7 @@ codes generically. It changes no source, so it publishes no service and no priva
 
 ## Latest verified release
 
-Main `f59c46a5` published Home's Durable Object per-namespace duration warning and the pinned private application;
+Main `0d2b491a` published the optional `PRIVATE_DEPLOY_VARS` workflow pass-through and the pinned private application;
 matching reconciliation passed with zero infrastructure drift. See the
 [November 15 archive](docs/history/handoff-2026-11-15.md).
 
