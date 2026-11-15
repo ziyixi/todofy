@@ -25,7 +25,10 @@ export interface ProbeResult {
   readonly http_status: number | null;
   readonly latency_ms: number | null;
   readonly error: ProbeDoc['error'];
+  readonly reason?: string;
 }
+
+const PROBE_REASON_RE = /^[a-z][a-z0-9_]{0,63}$/;
 
 /** One probe; never throws. `clock` is Date.now (it advances across I/O in workerd). */
 export async function probeUrl(
@@ -53,9 +56,21 @@ export async function probeUrl(
     // Nothing to read either way.
   }
   let error: ProbeResult['error'] = null;
-  if (!target.expect.includes(response.status)) error = 'http_status';
-  else if (target.content_type !== undefined && mediaType(response.headers.get('content-type')) !== target.content_type) error = 'content_type';
-  return { ok: error === null, http_status: response.status, latency_ms: latency, error };
+  let reason: string | undefined;
+  if (!target.expect.includes(response.status)) {
+    error = 'http_status';
+    const header = response.headers.get('x-probe-reason');
+    if (header !== null && PROBE_REASON_RE.test(header)) reason = header;
+  } else if (target.content_type !== undefined && mediaType(response.headers.get('content-type')) !== target.content_type) {
+    error = 'content_type';
+  }
+  return {
+    ok: error === null,
+    http_status: response.status,
+    latency_ms: latency,
+    error,
+    ...(reason === undefined ? {} : { reason }),
+  };
 }
 
 /** `Text/Plain; charset=utf-8` → `text/plain`; no header → null. */
@@ -72,6 +87,7 @@ export function nextProbeDoc(previous: ProbeDoc | null, result: ProbeResult, now
     http_status: result.http_status,
     latency_ms: result.latency_ms,
     error: result.error,
+    ...(result.reason === undefined ? {} : { reason: result.reason }),
     consecutive_failures: result.ok ? 0 : (previous?.consecutive_failures ?? 0) + 1,
   };
 }

@@ -11,6 +11,7 @@ import type { DigestDoc } from './docs.ts';
 import { CONFIG_DRIFT_CATEGORIES, configurationFindings, type DriftDoc } from './drift.ts';
 import { hoursLeft, reachesPercent, type DesiredGuard } from './guard.ts';
 import { DIGEST_ITEMS_MAX } from './idl.ts';
+import { ALLOWANCES, DO_NAMESPACE_WARN_PERCENT } from './limits.ts';
 import { isOpsCode, isOpsSource, METRICS_MAX_KEYS, OPS_APPS } from './ops-client.ts';
 import { DAY_MS, HOUR_MS, MINUTE_MS, iso, isTimestamp, utcDay } from './time.ts';
 
@@ -128,6 +129,24 @@ export function candidates(input: DigestInput): Candidate[] {
   }
   if (usage.fresh) {
     for (const row of usage.rows) {
+      if (row.id === 'do_duration' && row.breakdown.length > 0) {
+        const threshold = (ALLOWANCES.do_duration.limit * DO_NAMESPACE_WARN_PERCENT) / 100;
+        const above = row.breakdown.filter((b) => b.value > threshold);
+        const top = above[0];
+        if (top !== undefined) {
+          out.push({
+            source: 'cloudflare',
+            code: 'do_namespace_duration_high',
+            severity: 'warning',
+            metrics: {
+              used: top.value,
+              percent: Math.round((top.value / ALLOWANCES.do_duration.limit) * 1000) / 10,
+              limit: threshold,
+              namespaces: above.length,
+            },
+          });
+        }
+      }
       if (row.percent === null || row.used === null || !reachesPercent(row, GUARD_SHED_PERCENT)) continue;
       const metrics: Record<string, number> = { percent: row.percent, used: row.used, limit: row.limit };
       if (row.projected_percent !== null) metrics.projected_percent = row.projected_percent;

@@ -170,7 +170,9 @@ function probeVerdict(entry: EntryDef, probe: PublicProbe, input: EvalInput, reg
   const doc = input.probes[entry.id];
   if (doc === undefined) return { level: 'unknown', reason: 'never_checked' };
   if (!recent(doc.checked_at, now)) return { level: 'unknown', reason: 'stale' };
-  let verdict: Verdict = doc.ok ? OK : { level: doc.consecutive_failures >= 2 ? 'critical' : 'warning', reason: doc.error ?? 'http_status' };
+  let verdict: Verdict = doc.ok
+    ? OK
+    : { level: doc.consecutive_failures >= 2 ? 'critical' : 'warning', reason: doc.reason ?? doc.error ?? 'http_status' };
   if (probe.error_rate === true && scriptsFresh(input.scripts, now)) {
     const activity = activityOf(entryScripts(entry.id, registry), input.scripts, now);
     const errors = errorLevel(activity.requests, activity.errors);

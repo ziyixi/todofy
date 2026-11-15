@@ -111,6 +111,35 @@ describe('digest items', () => {
     expect(items({ usage: { ...input().usage, rows: [ai(99)] } }).map(itemKey)).toEqual(['cloudflare:ai_neurons_high']);
   });
 
+  it('warns when any single Durable Object namespace exceeds 15 % of the daily duration allowance (1,950 GB-s)', () => {
+    const doRow = (breakdown: QuotaRow['breakdown'], used = 3_000): QuotaRow => ({
+      ...quota('do_duration', Math.round((used / 13_000) * 1000) / 10),
+      unit: 'gb_seconds',
+      used,
+      limit: 13_000,
+      breakdown,
+    });
+    // Exactly at 1,950 GB-s (15 %): no warning.
+    expect(
+      items({
+        usage: { ...input().usage, rows: [doRow([{ name: 'ns-a', value: 1_950 }, { name: 'ns-b', value: 1_050 }])] },
+      }),
+    ).toEqual([]);
+    // Above 1,950 GB-s: warns even when account-wide DO duration is well below 80 %.
+    const high = items({
+      usage: { ...input().usage, rows: [doRow([{ name: 'ns-a', value: 2_600 }, { name: 'ns-b', value: 2_000 }, { name: 'ns-c', value: 400 }], 5_000)] },
+    });
+    expect(high).toEqual([
+      {
+        source: 'cloudflare',
+        code: 'do_namespace_duration_high',
+        severity: 'warning',
+        since: '2026-09-29T14:00:00.000Z',
+        metrics: { used: 2_600, percent: 20, limit: 1_950, namespaces: 2 },
+      },
+    ]);
+  });
+
   it('reports the analytics token missing or failing for 2 h', () => {
     expect(items({ usage: { ...input().usage, configured: false } }).map(itemKey)).toEqual(['dashboard:usage_not_configured']);
     const failing = { ...input().usage, consecutive_failures: 5, fetched_at: NOW - 2 * 3_600_000, last_http_status: 401 };

@@ -45,6 +45,20 @@ describe('probeUrl', () => {
     expect(await probeUrl(TARGET, redirect, clock(0, 40))).toEqual({ ok: false, http_status: 308, latency_ms: 40, error: 'http_status' });
     const down: FetchLike = () => Promise.resolve(new Response('bad gateway', { status: 502 }));
     expect(await probeUrl(TARGET, down, clock(0, 5))).toMatchObject({ ok: false, http_status: 502, error: 'http_status' });
+    const offTrack: FetchLike = () =>
+      Promise.resolve(new Response(null, { status: 503, headers: { 'x-probe-reason': 'collector_off_track_low_rate' } }));
+    const reasoned = await probeUrl(TARGET, offTrack, clock(0, 12));
+    expect(reasoned).toEqual({
+      ok: false,
+      http_status: 503,
+      latency_ms: 12,
+      error: 'http_status',
+      reason: 'collector_off_track_low_rate',
+    });
+    expect(nextProbeDoc(null, reasoned, NOW).reason).toBe('collector_off_track_low_rate');
+    const unsafeHeader: FetchLike = () =>
+      Promise.resolve(new Response(null, { status: 503, headers: { 'x-probe-reason': 'Not A Safe Code!' } }));
+    expect((await probeUrl(TARGET, unsafeHeader, clock(0, 8))).reason).toBeUndefined();
   });
 
   it('turns a timeout and a network error into codes without a status', async () => {

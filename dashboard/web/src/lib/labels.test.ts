@@ -39,6 +39,9 @@ describe('labels', () => {
     for (const id of QUOTA_RESOURCES) expect(QUOTA[id]).toBeTruthy()
     expect(signalLabel('d1_rows_read_high')).toBe('D1 读取行数用量高')
     expect(signalLabel('ai_neurons_high')).toBe('Workers AI neurons 用量高')
+    expect(signalLabel('do_namespace_duration_high')).toBe('单个 Durable Object 命名空间时长偏高')
+    expect(signalLabel('collector_off_track')).toBe('collector off track')
+    expect(signalLabel('collector_off_track_low_rate')).toBe('collector off track (low_rate)')
     expect(guardReasonLabel('quota_r2_class_a')).toBe('配额：R2 A 类操作')
   })
 

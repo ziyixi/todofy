@@ -206,11 +206,14 @@ const SIGNALS: Readonly<Record<string, string>> = {
   tick_stale: '定时检查已停止',
   app_unreachable: '应用无法连接',
   app_down: '应用不可用',
+  do_namespace_duration_high: '单个 Durable Object 命名空间时长偏高',
 }
 
 /** Signal, digest item or banner code → Chinese; `<quota id>_high` → "<resource> 用量高". */
 export function signalLabel(code: string): string {
   if (Object.hasOwn(SIGNALS, code)) return SIGNALS[code] as string
+  const offTrack = /^collector_off_track(?:_([a-z0-9_]+))?$/.exec(code)
+  if (offTrack) return offTrack[1] ? `collector off track (${offTrack[1]})` : 'collector off track'
   const quota = /^(.+)_high$/.exec(code)
   if (quota && isQuotaId(quota[1] as string)) {
     const name = QUOTA[quota[1] as QuotaResource]

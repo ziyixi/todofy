@@ -91,6 +91,8 @@ export interface ProbeDoc {
    * another media type than the registry's `content_type`), or null when ok.
    */
   readonly error: 'timeout' | 'network_error' | 'http_status' | 'content_type' | null;
+  /** Optional machine code supplied by the probed endpoint on an `http_status` failure (`x-probe-reason`). */
+  readonly reason?: string;
   readonly consecutive_failures: number;
 }
 

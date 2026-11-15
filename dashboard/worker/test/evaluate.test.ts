@@ -121,6 +121,17 @@ describe('entry health (the tile: the entry\'s own health, Q2)', () => {
       reason: 'http_status',
       metric: null,
     });
+    expect(
+      state('website', {
+        probes: {
+          website: probe({ ok: false, http_status: 503, error: 'http_status', reason: 'collector_off_track_low_rate', consecutive_failures: 1 }),
+        },
+      }),
+    ).toMatchObject({
+      level: 'warning',
+      reason: 'collector_off_track_low_rate',
+      metric: null,
+    });
     expect(state('website', { probes: { website: probe({ ok: false, http_status: null, latency_ms: null, error: 'timeout', consecutive_failures: 2 }) } })).toMatchObject({
       level: 'critical',
       reason: 'timeout',

@@ -51,3 +51,6 @@ export const ALLOWANCES: Readonly<Record<QuotaResource, Allowance>> = {
  * "1,000,000 seconds * 128 MB / 1 GB = 128,000 GB-s", i.e. a factor of 0.128 (decimal GB).
  */
 export const DO_DURATION_GB = 0.128;
+
+/** Warn when any single Durable Object namespace exceeds this share of the daily duration allowance. */
+export const DO_NAMESPACE_WARN_PERCENT = 15;
