@@ -16,6 +16,9 @@ on:
           - verify
           - data-check
           - cache-reset
+          - restore-check
+          - runtime-restart
+          - runtime-terminate
           - k3s-check
           - k3s-plan
           - k3s-apply

@@ -158,13 +158,21 @@ class PrivateReleaseWorkflow(unittest.TestCase):
             "./.github/actions/setup-bazel", "actions/setup-node@", "opentofu/setup-opentofu@",
         ))]
         self.assertEqual(len(setup), 3)
-        for operation in ("k3s-check", "k3s-plan", "k3s-apply", "release", "publish",
+        cluster_only = {
+            "k3s-check",
+            "k3s-plan",
+            "k3s-apply",
+            "restore-check",
+            "runtime-restart",
+            "runtime-terminate",
+        }
+        for operation in (*cluster_only, "release", "publish",
                           "finish-worker", "verify", "infra-plan", "infra-apply", "data-check", "k3s-future"):
             self.context["inputs.operation"] = operation
             with self.subTest(operation=operation):
                 selected = [self.condition("observer-access", step["if"]) if step.get("if") else True
                             for step in setup]
-                self.assertEqual(selected, [operation not in {"k3s-check", "k3s-plan", "k3s-apply"}] * 3)
+                self.assertEqual(selected, [operation not in cluster_only] * 3)
         entry = steps[-1]
         self.assertNotIn("if", entry)
         self.assertIn('python3 private/ci/release.py --operation "$PRIVATE_RELEASE_OPERATION"', entry["run"])
@@ -280,8 +288,9 @@ class PrivateReleaseWorkflow(unittest.TestCase):
 
     def test_every_operation_captures_private_output_and_preserves_the_exit_status(self):
         private_output = '{"event":"synthetic","source":"synthetic-private-source"}\n'
-        operations = ("release", "publish", "finish-worker", "verify", "data-check", "infra-plan",
-                      "infra-apply", "k3s-check", "k3s-plan", "k3s-apply", "not-an-operation")
+        operations = ("release", "publish", "finish-worker", "verify", "data-check", "restore-check",
+                      "runtime-restart", "runtime-terminate", "infra-plan", "infra-apply", "k3s-check",
+                      "k3s-plan", "k3s-apply", "not-an-operation")
         with tempfile.TemporaryDirectory() as directory:
             for operation in operations:
                 for status in (0, 7):
