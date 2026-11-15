@@ -5,10 +5,9 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-Private operating follow-ups (including branch `chore/advance-private-source`) are tracked in `private/HANDOFF.md`.
+Private operating follow-ups (including branch `chore/add-runtime-ops`) are tracked in `private/HANDOFF.md`.
 
-Branch `chore/advance-private-source` advances the private application pin; land after `CI gate` passes, then verify
-the private publication and same-SHA reconciliation.
+Branch `chore/add-runtime-ops` advances the private application pin and adds operational verification and runtime resilience workflow actions; land only after branch `CI gate` passes and live pre-release idle checks complete, then verify private publication and same-SHA reconciliation.
 
 `packages/research-datasets` memory, indexing, coverage-slice, period-anchor, panel-benchmark, earnings-projection,
 and vectorized fundamental-factor updates landed on `main` (`75e518c4`) after branch CI passed.
