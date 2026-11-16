@@ -69,13 +69,25 @@ def calendar(version_or_manifest: Any, sessions: Sequence[Any], **options: Any):
     )
 
 
-def membership_rule(present: bool, universe: str) -> str | None:
+def membership_rule(
+    present: bool, universe: str, version_or_manifest: Any = None
+) -> str | None:
     """The membership rule ``universe`` asks for, or None for a static universe."""
     if not isinstance(universe, str) or not universe:
         raise ValueError('universe must be "pit", "static" or a rule version')
     if universe == "static":
         return None
-    rule = DEFAULT_UNIVERSE_RULE if universe == "pit" else universe
+    if universe == "pit":
+        target = (
+            version_or_manifest["manifest"]
+            if isinstance(version_or_manifest, Mapping)
+            and "manifest" in version_or_manifest
+            else version_or_manifest
+        )
+        rule_info = membership_months(target) if target is not None else {}
+        rule = str(rule_info.get("rule_version") or DEFAULT_UNIVERSE_RULE)
+    else:
+        rule = universe
     return rule if present else None
 
 
@@ -183,7 +195,7 @@ def latest_membership(
     exported = (rule_info or {}).get("export_rules")
     if (
         frame.empty
-        and rule != DEFAULT_UNIVERSE_RULE
+        and rule not in {DEFAULT_UNIVERSE_RULE, (rule_info or {}).get("rule_version")}
         and not (isinstance(exported, (list, tuple)) and rule in exported)
     ):
         raise ValueError(f"Universe rule {rule!r} has no membership in this version")
@@ -309,7 +321,9 @@ def build_candidates(
         raise ValueError("No candidate securities selected")
     cal = calendar(version, version.calendar, next_session=next_session)
     positions = signal_positions(cal, start, end, sampling)
-    rule = membership_rule("universe_membership" in families(version), universe)
+    rule = membership_rule(
+        "universe_membership" in families(version), universe, version
+    )
     frame = candidate_frame(cal, asset_ids, positions, version.universe)
     total = len(frame)
     carried_from: str | None = None

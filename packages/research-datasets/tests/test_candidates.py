@@ -327,6 +327,44 @@ class ClockTest(unittest.TestCase):
                     labels.iloc[0]["label_start"], pd.Timestamp("2026-01-29T14:30:00Z")
                 )
 
+    def test_membership_rule_reads_manifest_universe_rule_version(self) -> None:
+        v2_rows = [member(A, "2026-01", True, rule="pit-largecap-v2")]
+        v2_version = LabelVersion(
+            [A, B, BENCH],
+            days=DAYS[:5],
+            families={
+                "universe_membership": v2_rows,
+                "daily_returns": [
+                    *session_rows(A, [10.0 + i for i in range(5)], days=DAYS[:5]),
+                    *benchmark_rows(DAYS[:5]),
+                ],
+            },
+            manifest={
+                "universe_rule": {
+                    "rule_version": "pit-largecap-v2",
+                    "last_effective_month": "2026-02",
+                }
+            },
+        )
+        self.assertEqual(
+            candidates.membership_rule(True, "pit", v2_version), "pit-largecap-v2"
+        )
+        self.assertEqual(
+            candidates.membership_rule(
+                True,
+                "pit",
+                {"manifest": {"universe_rule": {"rule_version": "pit-largecap-v2"}}},
+            ),
+            "pit-largecap-v2",
+        )
+        self.assertEqual(
+            candidates.membership_rule(True, "pit", {"universe_rule": {}}),
+            "pit-largecap-v1",
+        )
+        built = research_datasets.build_candidates(v2_version, [A])
+        self.assertEqual(built.attrs["parameters"]["universe_rule"], "pit-largecap-v2")
+        self.assertFalse(built.empty)
+
 
 if __name__ == "__main__":
     unittest.main()

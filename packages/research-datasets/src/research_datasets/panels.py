@@ -531,10 +531,12 @@ def prepare(
         train_d, val_d = _day(train_end), _day(validation_end)
         if not start_d <= train_d < val_d < end_d:
             raise ValueError("Require start <= train_end < validation_end < end")
-    rule = _candidates.membership_rule(_membership_present(material), universe)
-    universe_basis = _candidates.require_pit(rule, allow_static_universe)
     if not isinstance(material, Mapping):
         material = material_from_version(material, dataset_id, asset_ids, benchmark_id)
+    rule = _candidates.membership_rule(
+        _membership_present(material), universe, material
+    )
+    universe_basis = _candidates.require_pit(rule, allow_static_universe)
     manifest = material["manifest"]
     digest = material["manifest_sha256"]
     if (
@@ -829,7 +831,7 @@ def forward_returns(
     """
     horizon_list, single = _labels.horizons(horizons)
     policy = _labels.terminal_policy(terminal_policy)
-    rule = _candidates.membership_rule(_membership_present(version), universe)
+    rule = _candidates.membership_rule(_membership_present(version), universe, version)
     universe_basis = _candidates.require_pit(rule, allow_static_universe)
     benchmark_id = str(version.resolve(benchmark)[0])
     if isinstance(candidates_or_symbols, pd.DataFrame):
@@ -1028,7 +1030,7 @@ def panel(
     _policy(time_policy)
     fund_policy = _policy(fundamental_time_policy or time_policy)
     horizon_list, _ = _labels.horizons(horizons)
-    rule = _candidates.membership_rule(_membership_present(version), universe)
+    rule = _candidates.membership_rule(_membership_present(version), universe, version)
     _candidates.require_pit(rule, allow_static_universe)
     candidates = build_candidates(
         version,
