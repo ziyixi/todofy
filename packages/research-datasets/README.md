@@ -103,8 +103,10 @@ panel = ds.panel(
   month. Without symbols, benchmarks and non-common securities are left out. `next_session=` gives the last frozen
   session a live decision.
 - Membership is monthly: a row is in the universe when the latest membership of its entry session's month says so
-  (`universe="pit"` uses the default rule; a rule version such as `"pit-liquid-v1"` picks another, which must exist in
-  the version). A month whose latest observation is a warm-up row is unknown (NA). Non-members are dropped unless
+  (`universe="pit"` uses the manifest's `universe_rule.rule_version`, else `DEFAULT_UNIVERSE_RULE`
+  (`"pit-largecap-v2"`); a rule version such as `"pit-liquid-v1"` picks another, which must exist in the version).
+  Candidates, labels and panels record the applied rule in `attrs["parameters"]["universe_rule"]`.
+  A month whose latest observation is a warm-up row is unknown (NA). Non-members are dropped unless
   `keep_non_members=True`.
 - Live panels: when `next_session` falls in the month right after the last frozen membership month, its rows use
   that month and set `membership_carried` (the run record names the month). A later month is not carried: live
@@ -226,3 +228,18 @@ panel = ds.panel(
   and stays missing until the reader can verify comparable per-share bases.
 - `panel(..., include_release=False)` keeps release extraction features off by default until a production extractor
   version is published in the manifest, and accepts `True` or an explicit `extractor_version` string.
+
+### 2.3.1
+
+- `DEFAULT_UNIVERSE_RULE` is `"pit-largecap-v2"`. `universe="pit"` still prefers the manifest's
+  `universe_rule.rule_version`, so a version that exports v2 and v1 rows uses v2 for candidates, labels and the
+  `not_in_universe` masks. `panel(...)` also sets `attrs["parameters"]` (the run record's parameters), so
+  `attrs["parameters"]["universe_rule"]` names the applied rule on candidates, labels and panels alike.
+- Derived fundamentals no longer label a decision without a state as `not_yet_available` because the frozen history
+  holds a later state for that issuer: that label revealed a later filing to an earlier decision (and, through
+  valuation, could switch `net_payout_yield` between a value and missing). Such rows are `metric_missing` (or
+  `not_captured`); derived values were not affected.
+- `tests/test_fundamentals_truncation.py` reads random fact histories (restated comparatives, amendments, corrected
+  and retracted observations, YTD-only cash flows, twelve-week interims, annual-only and late first filers) in full
+  and without the facts available after a cutoff; derived fundamentals, factors and valuation decided at or before the
+  cutoff must be identical under both time policies.

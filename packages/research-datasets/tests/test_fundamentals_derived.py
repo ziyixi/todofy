@@ -1741,8 +1741,10 @@ class TrailingAndFiscalQuartersTest(unittest.TestCase):
         self.assertEqual(res.iloc[2]["revenue_q_status"], "annual_only")
         self.assertEqual(res.iloc[2]["revenue_ttm_status"], "ok")
         self.assertAlmostEqual(res.iloc[2]["revenue_ttm_value"], 800.0)
-        # Before first filing -> not_yet_available
-        self.assertEqual(res.iloc[3]["revenue_q_status"], "not_yet_available")
+        # Before the first filing -> metric_missing: the later filing is not visible
+        # at this decision, so it cannot turn the status into not_yet_available.
+        self.assertEqual(res.iloc[3]["revenue_q_status"], "metric_missing")
+        self.assertNotIn("not_yet_available", set(res.iloc[3].astype(str)))
         # v1 parser check -> min_parser=2 concept (rnd) is not_captured, min_parser=1 (gross_profit) is metric_missing
         self.assertEqual(res.iloc[4]["rnd_q_status"], "not_captured")
         self.assertEqual(res.iloc[4]["gross_profit_q_status"], "metric_missing")

@@ -215,7 +215,7 @@ def _make_candidates(sessions: list[date], asset_ids: list[str]) -> pd.DataFrame
 
 class ExtraFeaturesTest(unittest.TestCase):
     def test_constants_and_version(self) -> None:
-        self.assertEqual(research_datasets.__version__, "2.3.0")
+        self.assertEqual(research_datasets.__version__, "2.3.1")
         self.assertEqual(len(REFERENCE_SERIES), 36)
         self.assertEqual(len(REFERENCE_ETFS), 19)
         self.assertEqual(
@@ -1369,7 +1369,7 @@ class ExtraFeaturesTest(unittest.TestCase):
         membership = pd.DataFrame(
             [
                 {
-                    "rule_version": "pit-largecap-v1",
+                    "rule_version": "pit-largecap-v2",
                     "effective_month": "2026-01",
                     "effective_from": "2026-01-02",
                     "asset_id": ASSET_1,
@@ -1379,7 +1379,7 @@ class ExtraFeaturesTest(unittest.TestCase):
                     "observation_sequence": 1,
                 },
                 {
-                    "rule_version": "pit-largecap-v1",
+                    "rule_version": "pit-largecap-v2",
                     "effective_month": "2026-02",
                     "effective_from": "2026-02-02",
                     "asset_id": ASSET_1,
@@ -1389,7 +1389,7 @@ class ExtraFeaturesTest(unittest.TestCase):
                     "observation_sequence": 1,
                 },
                 {
-                    "rule_version": "pit-largecap-v1",
+                    "rule_version": "pit-largecap-v2",
                     "effective_month": "2026-02",
                     "effective_from": "2026-02-02",
                     "asset_id": ASSET_2,
@@ -1399,7 +1399,7 @@ class ExtraFeaturesTest(unittest.TestCase):
                     "observation_sequence": 1,
                 },
                 {
-                    "rule_version": "pit-largecap-v1",
+                    "rule_version": "pit-largecap-v2",
                     "effective_month": "2026-02",
                     "effective_from": "2026-02-02",
                     "asset_id": ASSET_3,
@@ -1535,7 +1535,7 @@ class ExtraFeaturesTest(unittest.TestCase):
             prices_raw=pd.DataFrame(raw_rows),
             manifest_extra={
                 "universe_membership": {
-                    "default_rule": "pit-largecap-v1",
+                    "default_rule": "pit-largecap-v2",
                     "months": ["2026-01", "2026-02"],
                 }
             },
