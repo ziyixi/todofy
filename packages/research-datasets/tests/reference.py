@@ -922,13 +922,8 @@ def reference_fundamental_features(
                 and row["_period_end_day"] <= report_limit
             ]
             if not possible:
-                feature["status"] = (
-                    "retracted"
-                    if retracted
-                    else "not_yet_available"
-                    if (cik_padded, metric) in grouped
-                    else "metric_missing"
-                )
+                # A later version of the metric may not show at this decision.
+                feature["status"] = "retracted" if retracted else "metric_missing"
             elif not matching_unit:
                 feature["status"] = "unit_unavailable"
             elif not matching_period or not dated:

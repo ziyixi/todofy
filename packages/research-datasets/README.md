@@ -234,12 +234,18 @@ panel = ds.panel(
 - `DEFAULT_UNIVERSE_RULE` is `"pit-largecap-v2"`. `universe="pit"` still prefers the manifest's
   `universe_rule.rule_version`, so a version that exports v2 and v1 rows uses v2 for candidates, labels and the
   `not_in_universe` masks. `panel(...)` also sets `attrs["parameters"]` (the run record's parameters), so
-  `attrs["parameters"]["universe_rule"]` names the applied rule on candidates, labels and panels alike.
+  `attrs["parameters"]["universe_rule"]` names the applied rule on candidates, labels and panels alike. Only the
+  rule `universe="pit"` resolves to may lack membership rows; any other rule version (now including the default when
+  the manifest names a different rule) must have rows or be listed in `export_rules`.
 - Derived fundamentals no longer label a decision without a state as `not_yet_available` because the frozen history
   holds a later state for that issuer: that label revealed a later filing to an earlier decision (and, through
   valuation, could switch `net_payout_yield` between a value and missing). Such rows are `metric_missing` (or
-  `not_captured`); derived values were not affected.
+  `not_captured`); derived values were not affected. The legacy engine (`fundamental_features`,
+  `fundamental_ratios`, `panel(fundamentals="legacy")`) had the same status leak and now also reports
+  `metric_missing` before the first available version; its values were not affected.
 - `tests/test_fundamentals_truncation.py` reads random fact histories (restated comparatives, amendments, corrected
   and retracted observations, YTD-only cash flows, twelve-week interims, annual-only and late first filers) in full
   and without the facts available after a cutoff; derived fundamentals, factors and valuation decided at or before the
-  cutoff must be identical under both time policies.
+  cutoff must be identical under both time policies. Besides random cutoffs it cuts one nanosecond before facts that
+  become available later on a decision day than its 06:00 decision, where a look-ahead window shorter than a day
+  would show.

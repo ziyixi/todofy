@@ -26,6 +26,11 @@ NEW_YORK = ZoneInfo("America/New_York")
 POLICIES = ("public_reconstructed", "observed_content")
 SEEDS = (20261117, 20261118)
 CUTOFFS_PER_POLICY = 4
+# Same-day boundary cutoffs per policy: the shortest gaps after a decision, plus random.
+BOUNDARY_NEAREST = 2
+BOUNDARY_RANDOM = 2
+# Samples are decided weekly on Tuesdays at 06:00 New York (see random_material).
+DECISION_WEEKDAY = 1
 
 # Base annual amounts; flows also get YTD and (for most tags) three-month facts.
 FLOW = {
@@ -88,9 +93,15 @@ class Issuer:
 
     def filing(self, period_end: date, lag_days: int) -> tuple[pd.Timestamp, str]:
         day = weekday(period_end + timedelta(days=lag_days + self.rng.randint(0, 6)))
-        # A quarter of the filings are public exactly at a 06:00 decision instant.
-        if self.rng.random() < 0.25:
+        roll = self.rng.random()
+        # A quarter of the filings are public at 06:00 (a decision instant on Tuesdays).
+        if roll < 0.25:
             hour, minute = 6, 0
+        elif roll < 0.4:
+            # Some are public on a decision day, minutes to hours after its decision.
+            day += timedelta(days=(DECISION_WEEKDAY - day.weekday()) % 7)
+            after = self.rng.randint(1, 240)
+            hour, minute = 6 + after // 60, after % 60
         else:
             hour, minute = self.rng.randint(6, 19), self.rng.choice((0, 15, 30, 59))
         self.filings += 1
@@ -350,6 +361,24 @@ def available_at(facts: pd.DataFrame, time_policy: str) -> pd.Series:
     return public.where(public >= observed, observed)
 
 
+def same_day_boundaries(
+    clocks: pd.Series, decisions: pd.Series
+) -> list[tuple[pd.Timedelta, pd.Timestamp]]:
+    """(gap, clock) of fact clocks later on a decision day than its 06:00 decision,
+    shortest gap first. One nanosecond before such a clock the fact is dropped while
+    the same-day decision stays, so a look-ahead window shorter than a day (a date-level
+    availability, a grace added to the decision) shows there and rarely elsewhere."""
+    by_day = {
+        instant.tz_convert(NEW_YORK).date(): instant for instant in set(decisions)
+    }
+    found = []
+    for clock in sorted(set(clocks)):
+        decision = by_day.get(clock.tz_convert(NEW_YORK).date())
+        if decision is not None and clock > decision:
+            found.append((clock - decision, clock))
+    return sorted(found)
+
+
 def outputs(
     material: dict[str, Any],
     samples: pd.DataFrame,
@@ -391,12 +420,23 @@ class TruncationInvarianceTest(unittest.TestCase):
                 self.assertTrue(facts["form"].str.endswith("/A").any())  # amendments
             for time_policy in POLICIES:
                 full = outputs(material, samples, splits, time_policy)
-                self.assert_cases_covered(full, seed, time_policy)
+                self.assert_cases_covered(full, facts, seed, time_policy)
                 clocks = available_at(facts, time_policy)
                 rng = random.Random(f"{seed}:{time_policy}")
                 # Fact clocks (kept: available_at == cutoff) and decision instants.
                 picks = rng.sample(sorted(set(clocks)), CUTOFFS_PER_POLICY - 1)
                 picks += rng.sample(sorted(set(decisions)), 1)
+                # One nanosecond before facts public later on a decision day.
+                boundaries = same_day_boundaries(clocks, decisions)
+                with self.subTest(seed=seed, policy=time_policy, check="boundaries"):
+                    self.assertGreaterEqual(
+                        len(boundaries), BOUNDARY_NEAREST + BOUNDARY_RANDOM
+                    )
+                    self.assertLessEqual(boundaries[0][0], timedelta(hours=1))
+                chosen = boundaries[:BOUNDARY_NEAREST] + rng.sample(
+                    boundaries[BOUNDARY_NEAREST:], BOUNDARY_RANDOM
+                )
+                picks += [clock - pd.Timedelta(1, "ns") for _, clock in chosen]
                 for cutoff in sorted(set(picks)):
                     past = (decisions <= cutoff).to_numpy()
                     if not past.any():
@@ -420,7 +460,11 @@ class TruncationInvarianceTest(unittest.TestCase):
                             )
 
     def assert_cases_covered(
-        self, full: dict[str, pd.DataFrame], seed: int, time_policy: str
+        self,
+        full: dict[str, pd.DataFrame],
+        facts: pd.DataFrame,
+        seed: int,
+        time_policy: str,
     ) -> None:
         """The histories must reach the paths this guard is about."""
         derived, value = full["derived"], full["valuation"]
@@ -446,6 +490,29 @@ class TruncationInvarianceTest(unittest.TestCase):
                 self.assertTrue(
                     np.isfinite(value[f"{name}_value"].to_numpy(dtype=float)).any(),
                     name,
+                )
+            # The twelve-week filer (always issuer 2) reaches its own fiscal slots: a Q3
+            # from the 36- and 24-week YTDs, a Q4 from the 364/371-day year less 36 weeks.
+            revenue = facts[
+                facts["cik"].eq(f"{2:010d}")
+                & facts["tag"].eq("Revenues")
+                & facts["period_start"].notna()
+            ]
+            length = (
+                pd.to_datetime(revenue["period_end"])
+                - pd.to_datetime(revenue["period_start"])
+            ).dt.days + 1
+            quarters = derived[
+                derived["asset_id"].eq(asset(2)) & derived["revenue_q_value"].notna()
+            ]
+            ends = quarters["revenue_q_period_end"].astype(str)
+            for days, basis in (
+                ({252}, "ytd_difference"),
+                ({364, 371}, "fy_minus_ytd"),
+            ):
+                slot = ends.isin(set(revenue.loc[length.isin(days), "period_end"]))
+                self.assertTrue(
+                    quarters.loc[slot, "revenue_q_basis"].eq(basis).any(), basis
                 )
 
 

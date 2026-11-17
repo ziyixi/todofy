@@ -466,6 +466,54 @@ class UniverseRuleTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "pit-largecap-v1"):
             research_datasets.forward_returns(version, legacy, benchmark=BENCH)
 
+    def test_only_the_versions_pit_rule_may_lack_rows(self) -> None:
+        families = {
+            "universe_membership": [
+                member(A, "2026-01", True, rule="pit-largecap-v1"),
+                member(A, "2026-02", True, rule="pit-largecap-v1"),
+            ],
+            "daily_returns": [
+                *session_rows(A, [10.0 + i for i in range(len(DAYS))], days=DAYS),
+                *benchmark_rows(DAYS),
+            ],
+        }
+        # An older freeze names v1 and holds only v1 rows: v2 is refused, not empty.
+        older = LabelVersion(
+            [A, BENCH],
+            days=DAYS,
+            families=families,
+            manifest={
+                "universe_rule": {
+                    "rule_version": "pit-largecap-v1",
+                    "first_effective_month": "2026-01",
+                    "last_effective_month": "2026-02",
+                }
+            },
+        )
+        missing = "'pit-largecap-v2' has no membership"
+        with self.assertRaisesRegex(ValueError, missing):
+            research_datasets.build_candidates(older, [A], universe="pit-largecap-v2")
+        with self.assertRaisesRegex(ValueError, missing):
+            research_datasets.forward_returns(
+                older, [A], benchmark=BENCH, horizons=1, universe="pit-largecap-v2"
+            )
+        pit = research_datasets.build_candidates(older, [A])
+        self.assertEqual(pit.attrs["parameters"]["universe_rule"], "pit-largecap-v1")
+        self.assertTrue(pit["in_universe"].all())
+        # Without a named rule "pit" is the default, whose rows may be absent.
+        unnamed = LabelVersion(
+            [A, BENCH],
+            days=DAYS,
+            families=families,
+            manifest={"universe_rule": {}},
+        )
+        frame = research_datasets.build_candidates(unnamed, [A], keep_non_members=True)
+        self.assertEqual(
+            frame.attrs["parameters"]["universe_rule"],
+            research_datasets.DEFAULT_UNIVERSE_RULE,
+        )
+        self.assertTrue(frame["in_universe"].isna().all())
+
 
 if __name__ == "__main__":
     unittest.main()

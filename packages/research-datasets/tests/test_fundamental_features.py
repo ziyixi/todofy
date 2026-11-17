@@ -121,6 +121,26 @@ class FundamentalFeaturesTest(unittest.TestCase):
         self.assertEqual(result.revenue_value.tolist(), [100, 100, 200, 200])
         self.assertEqual(result.iloc[2].revenue_fact_id, "new-filing")
 
+    def test_status_before_the_first_filing_does_not_reveal_it(self):
+        # Public after the second decision. Before it the issuer reads as one that never
+        # reports the metric: no "not yet available" status announcing the filing.
+        first = fact(
+            public_at="2026-03-10T13:00:00Z",
+            public_date="2026-03-10",
+            observed_at="2026-03-10T13:00:00Z",
+            content_first_seen_at="2026-03-10T13:00:00Z",
+        )
+        never = fact(metric="cash", tag="CashAndCashEquivalentsAtCarryingValue")
+        for policy in ("public_reconstructed", "observed_content"):
+            with self.subTest(policy=policy):
+                filed = self.prepare(material([first]), time_policy=policy)
+                absent = self.prepare(material([never]), time_policy=policy)
+                self.assertEqual(
+                    filed.revenue_status.astype(str).tolist(),
+                    ["metric_missing", "metric_missing", "ok", "ok"],
+                )
+                assert_frame_equal(filed.iloc[:2], absent.iloc[:2])
+
     def test_observed_withdrawal_and_reappearance_use_actual_capture_clocks(self):
         source = material(
             [
@@ -227,8 +247,8 @@ class FundamentalFeaturesTest(unittest.TestCase):
         # value (clock_unknown) once its capture minus CAPTURE_GRACE is at or before the
         # decision: 13:00Z is exactly the 10:00Z decision of 03-10 plus three hours.
         for observed, expected in (
-            ("2026-03-10T13:00:00Z", ["not_yet_available"] + ["clock_unknown"] * 3),
-            ("2026-03-10T13:01:00Z", ["not_yet_available"] * 2 + ["clock_unknown"] * 2),
+            ("2026-03-10T13:00:00Z", ["metric_missing"] + ["clock_unknown"] * 3),
+            ("2026-03-10T13:01:00Z", ["metric_missing"] * 2 + ["clock_unknown"] * 2),
         ):
             with self.subTest(observed=observed):
                 source = material(
@@ -339,7 +359,7 @@ class FundamentalFeaturesTest(unittest.TestCase):
                     material([accepted]), candidates, time_policy=policy
                 )
                 self.assertEqual(
-                    result.revenue_status.tolist(), ["not_yet_available", "ok"]
+                    result.revenue_status.tolist(), ["metric_missing", "ok"]
                 )
                 self.assertEqual(
                     result.revenue_available_at.iloc[1],
@@ -701,8 +721,11 @@ class FundamentalsPortTest(unittest.TestCase):
                             for metric in metrics:
                                 for status in actual[f"{metric}_status"]:
                                     statuses[status] = statuses.get(status, 0) + 1
-        # Not vacuous: every status occurs and the lower-period scan was exercised.
-        self.assertEqual(set(statuses), set(fundamentals.STATUSES))
+        # Not vacuous: every status occurs (but not_yet_available, which would reveal a
+        # later filing) and the lower-period scan was exercised.
+        self.assertEqual(
+            set(statuses), set(fundamentals.STATUSES) - {"not_yet_available"}
+        )
         self.assertGreater(len(scans), 0)
         self.assertGreater(statuses["ok"], 1000)
 

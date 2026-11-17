@@ -183,8 +183,8 @@ def latest_membership(
     rule_info: Mapping[str, Any] | None = None,
 ) -> pd.DataFrame:
     """The latest observation per (month, security) of ``rule``, with a boolean
-    ``warmup``. A named rule (not the default) needs rows or the manifest's
-    ``export_rules``."""
+    ``warmup``. A rule other than the one ``universe="pit"`` resolves to (the
+    manifest's rule, else the default) needs rows or the manifest's ``export_rules``."""
     frame = membership if membership is not None else pd.DataFrame()
     missing = set(MEMBERSHIP_COLUMNS) - set(frame.columns)
     if missing and not frame.empty:
@@ -193,9 +193,10 @@ def latest_membership(
         frame = pd.DataFrame(columns=list(MEMBERSHIP_COLUMNS))
     frame = frame[frame["rule_version"].astype(str) == rule]
     exported = (rule_info or {}).get("export_rules")
+    pit_rule = str((rule_info or {}).get("rule_version") or DEFAULT_UNIVERSE_RULE)
     if (
         frame.empty
-        and rule not in {DEFAULT_UNIVERSE_RULE, (rule_info or {}).get("rule_version")}
+        and rule != pit_rule
         and not (isinstance(exported, (list, tuple)) and rule in exported)
     ):
         raise ValueError(f"Universe rule {rule!r} has no membership in this version")
