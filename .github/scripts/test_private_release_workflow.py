@@ -165,6 +165,7 @@ class PrivateReleaseWorkflow(unittest.TestCase):
             "restore-check",
             "runtime-restart",
             "runtime-terminate",
+            "quant-v4-gates",
         }
         for operation in (*cluster_only, "release", "publish",
                           "finish-worker", "verify", "infra-plan", "infra-apply", "data-check", "k3s-future"):
@@ -289,7 +290,7 @@ class PrivateReleaseWorkflow(unittest.TestCase):
     def test_every_operation_captures_private_output_and_preserves_the_exit_status(self):
         private_output = '{"event":"synthetic","source":"synthetic-private-source"}\n'
         operations = ("release", "publish", "finish-worker", "verify", "data-check", "restore-check",
-                      "runtime-restart", "runtime-terminate", "infra-plan", "infra-apply", "k3s-check",
+                      "runtime-restart", "runtime-terminate", "quant-v4-gates", "infra-plan", "infra-apply", "k3s-check",
                       "k3s-plan", "k3s-apply", "not-an-operation")
         with tempfile.TemporaryDirectory() as directory:
             for operation in operations:
