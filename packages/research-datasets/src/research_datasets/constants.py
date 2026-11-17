@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import time, timedelta
 from types import MappingProxyType
 
-__version__ = "2.3.1"
+__version__ = "2.4.0"
 API = "v1"
 
 # The newest manifest layout this SDK reads; client_min_version is checked separately.
@@ -148,27 +148,34 @@ class FamilySpec:
 
 
 _V1 = frozenset({1})
+# Schema version 2 of a version family (3 of event_observations) drops its hash and
+# surrogate columns (observation_id, content_hash, inputs_hash, version_id; fact_id
+# comes back through derived_columns); event_observations 3 also moves title, summary
+# and source_url to event_text.
+_V12 = frozenset({1, 2})
 FAMILY_SPECS: dict[str, FamilySpec] = {
-    "events": FamilySpec("asset_id", "event_date", frozenset({1, 2})),
+    "events": FamilySpec("asset_id", "event_date", _V12),
     "event_observations": FamilySpec(
-        "asset_id", "observation_recorded_at", frozenset({1, 2})
+        "asset_id", "observation_recorded_at", frozenset({1, 2, 3})
     ),
+    # Text of each event version whose title, summary or source_url changed.
+    "event_text": FamilySpec("none", None, _V1),
     "source_checks": FamilySpec("asset_id", "checked_at", _V1),
     "price_coverage": FamilySpec("asset_id", None, _V1),
-    "security_history": FamilySpec("asset_id", "observed_at", _V1),
-    "earnings_observations": FamilySpec("asset_id", "observed_at", _V1),
+    "security_history": FamilySpec("asset_id", "observed_at", _V12),
+    "earnings_observations": FamilySpec("asset_id", "observed_at", _V12),
     "earnings_announcements": FamilySpec("asset_id", "public_at", _V1),
-    "fundamentals": FamilySpec("cik", None, _V1),
+    "fundamentals": FamilySpec("cik", None, _V12),
     "financial_checks": FamilySpec("cik", "checked_at", _V1),
-    "issuer_profiles": FamilySpec("cik", "observed_at", _V1),
-    "share_classes": FamilySpec("cik", None, _V1),
+    "issuer_profiles": FamilySpec("cik", "observed_at", _V12),
+    "share_classes": FamilySpec("cik", None, _V12),
     "share_class_checks": FamilySpec("cik", "checked_at", _V1),
     "symbol_history": FamilySpec("asset_id", None, _V1),
     "issuer_history": FamilySpec("asset_id", None, _V1),
-    "news_versions": FamilySpec("none", "observed_at", _V1),
+    "news_versions": FamilySpec("none", "observed_at", _V12),
     # Label and corporate-action inputs: monthly membership, exits, actions and returns.
-    "universe_membership": FamilySpec("asset_id", "effective_from", _V1),
-    "delistings": FamilySpec("asset_id", "observed_at", _V1),
+    "universe_membership": FamilySpec("asset_id", "effective_from", _V12),
+    "delistings": FamilySpec("asset_id", "observed_at", _V12),
     "corporate_actions": FamilySpec("asset_id", "effect_date", _V1),
     "daily_returns": FamilySpec("asset_id", "date", _V1),
     "return_reconciliation": FamilySpec("asset_id", "date", _V1),

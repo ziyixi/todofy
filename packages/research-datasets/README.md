@@ -249,3 +249,27 @@ panel = ds.panel(
   cutoff must be identical under both time policies. Besides random cutoffs it cuts one nanosecond before facts that
   become available later on a decision day than its 06:00 decision, where a look-ahead window shorter than a day
   would show.
+
+### 2.4.0
+
+- Reads release format v4 (`client_min_version` `"2.4.0"`; older SDKs refuse it with `CLIENT_TOO_OLD`). Releases
+  written before v4 read exactly as with 2.3.1.
+- New family schema versions drop hash and surrogate columns: `fundamentals` 2 (`observation_id`, `content_hash`,
+  `fact_id`), `event_observations` 3 (`observation_id`, `content_hash`; `title`, `summary`, `source_url` move to the
+  new family `event_text`), `news_versions` 2 (`version_id`), `universe_membership` 2 (`observation_id`,
+  `inputs_hash`), `delistings`, `earnings_observations`, `issuer_profiles`, `share_classes` 2 (`observation_id`,
+  `content_hash`) and `security_history` 2 (`observation_id`).
+- The manifest's `derived_columns` names a column the reader rebuilds from its own row:
+  `{"fundamentals": {"fact_id": "sha256-json-v1"}}` is the SHA-256 of `json.dumps([cik, taxonomy, tag, unit,
+  period_start, period_end, accession], separators=(",", ":"))`, and `{"news_versions": {"version_id":
+  "sha256-pipe-v1"}}` the SHA-256 of `event_id|provider_updated_at|headline_sha256|summary_sha256`.
+  `fundamentals()`, `iter_fundamentals()` and `family()` add the column first, where older releases store it. A
+  stored column always wins; an unknown formula raises `INTEGRITY`.
+- `ds.event_observations(..., with_text=True)` (or `columns` naming `title`, `summary` or `source_url`) adds the
+  text of each version from `event_text`: the row of the same `event_uid` with the largest `observation_sequence`
+  at or before the version's. Text columns come last; the panel's projected read never loads text.
+- A release written with a `profile` (`training`, `full`, `scratch`) lists every family it wrote. Reading any other
+  family, `ds.events()` included, raises `CAPABILITY_MISSING` ("not in profile training"); releases without a
+  profile keep the old behaviour (`ds.events()` returns an empty frame when there are no events).
+- `audit()` checks `(fact_id, observation_sequence)` and reads `observation_id` only when present; without it
+  `summary["observation_id_unique"]` reports the natural key.
