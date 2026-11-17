@@ -1560,9 +1560,26 @@ class Dataset:
         if not missing or frame.columns.empty:
             return frame
         if frame.empty:
-            return frame.assign(**{name: pd.Series(dtype=object) for name in missing})
+            # No versions: empty text columns, typed as event_text stores them.
+            self._require_family("event_text")
+            parts = self._family_parts("event_text")
+            empty = (
+                pads.dataset([str(self._client._part(parts[0]))], format="parquet")
+                .schema.empty_table()
+                .to_pandas()
+                if parts
+                else pd.DataFrame()
+            )
+            return frame.assign(
+                **{
+                    name: empty[name] if name in empty else pd.Series(dtype=object)
+                    for name in missing
+                }
+            )
         uids = frame["event_uid"].dropna().unique().tolist()
-        texts = self._read_family("event_text", event_uids=uids)
+        texts = (
+            self._read_family("event_text", event_uids=uids) if uids else pd.DataFrame()
+        )
         keys = ["event_uid", "observation_sequence"]
         if texts.empty or texts.duplicated(keys).any():
             raise DatasetError("INTEGRITY", "event_text 缺失或主键重复。")

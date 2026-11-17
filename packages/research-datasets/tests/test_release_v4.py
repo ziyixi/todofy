@@ -337,12 +337,17 @@ class ReleaseV4Test(unittest.TestCase):
                         old.event_observations(["GOOG"], columns=columns),
                         check_exact=True,
                     )
-            window = {"start": S[9], "end": S[11]}
-            assert_frame_equal(
-                new.event_observations(**window, with_text=True),
-                old.event_observations(**window)[full.columns],
-                check_exact=True,
-            )
+            for window in ({"start": S[9], "end": S[11]}, {"start": S[0], "end": S[0]}):
+                with self.subTest(window=window):
+                    expected = old.event_observations(**window)
+                    assert_frame_equal(
+                        new.event_observations(**window, with_text=True),
+                        expected[full.columns],
+                        check_exact=True,
+                    )
+            # The empty window still has typed columns: text columns typed as stored.
+            self.assertTrue(expected.empty)
+            self.assertIn("title", expected.columns)
             # On a v3 release the stored text is the text.
             assert_frame_equal(
                 old.event_observations(with_text=True), old.event_observations()
