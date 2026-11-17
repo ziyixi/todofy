@@ -19,6 +19,7 @@ on:
           - restore-check
           - runtime-restart
           - runtime-terminate
+          - quant-v4-gates
           - k3s-check
           - k3s-plan
           - k3s-apply
