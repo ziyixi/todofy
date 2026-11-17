@@ -205,6 +205,7 @@ class SurrogateFormulaTest(unittest.TestCase):
             ["0000000101", "ifrs", "Back\\slash", "EUR", "", "2025-12-31", "b"],
             ["0000000101", "ifrs", "Ümlaut", "EUR", "", "2025-12-31", "c"],
             ["0000000101", "ifrs", "Tab\there", "EUR", "", "2025-12-31", "d"],
+            ["0000000101", "ifrs", "Del\x7f~", "EUR", "", "2025-12-31", "g"],
             ["0000000101", "ifrs", "emoji \U0001f600", "EUR", "", "2025-12-31", "e"],
             ["0000000101", "us-gaap", "Cash", "USD", None, "2025-12-31", "f"],
         ]
@@ -229,6 +230,35 @@ class SurrogateFormulaTest(unittest.TestCase):
         self.assertEqual(surrogates.version_ids(table).to_pylist(), [expected])
         with self.assertRaises(ValueError):
             surrogates.version_ids(pa.Table.from_pylist([dict(row, event_id=None)]))
+
+    def test_version_id_reproduces_the_collector_writer(self) -> None:
+        """Two rows the collector's news writer wrote, ids included (formula F5 of the
+        storage v4 design, from the collector's frozen surrogate fixture)."""
+        headline = "3f129db1c99d5196b657c1ef3aeb3c0346031993a43ef3a7544a9d0b227e164e"
+        rows = [
+            {
+                "event_id": "alpaca_news:42",
+                "provider_updated_at": "2026-02-05T21:00:00Z",
+                "headline_sha256": headline,
+                "summary_sha256": "11507a0e2f5e69d5dfa40a62a1bd7b6e"
+                "e57e6bcd85c67c9b8431b36fff21c437",
+                "id": "66a5e314790f6e0f9234410fbd1f3a35"
+                "16b0cd89e64901a65ae76af78b2fb073",
+            },
+            {
+                "event_id": "alpaca_news:42",
+                "provider_updated_at": "",
+                "headline_sha256": headline,
+                "summary_sha256": "761b7ad8ad439b2855fcbb611331c646"
+                "ef0870b0631247bba3f3025cb6df5a53",
+                "id": "67e238a63445256cb470012bffeb5927"
+                "68501c750c530ad36061ebf30b7f697a",
+            },
+        ]
+        self.assertEqual(
+            surrogates.version_ids(pa.Table.from_pylist(rows)).to_pylist(),
+            [row["id"] for row in rows],
+        )
 
 
 class ReleaseV4Test(unittest.TestCase):

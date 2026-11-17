@@ -2417,6 +2417,18 @@ def _state_cache_paths(
     return directory / f"{digest}.parquet", directory / f"{digest}.meta.json"
 
 
+_STATE_TEXT_COLUMNS = (
+    "cik",
+    "view",
+    "raw_value",
+    "status",
+    "basis",
+    "accessions",
+    "tag",
+    "currency",
+)
+
+
 def _load_cached_states(parquet_path: Path, meta_path: Path) -> pd.DataFrame | None:
     if not parquet_path.is_file() or not meta_path.is_file():
         return None
@@ -2425,6 +2437,27 @@ def _load_cached_states(parquet_path: Path, meta_path: Path) -> pd.DataFrame | N
         meta = json.loads(meta_path.read_text("utf-8"))
     except Exception:  # noqa: BLE001
         return None
+    if frame.empty:
+        empty = _format_state_frame(
+            [], time_policy="", stats={}, limitations=(), annual_only_steps=None
+        )
+        empty.attrs.clear()
+        empty.attrs.update(meta)
+        return empty
+    # Parquet gives text and date columns other dtypes and pd.NA for None: rebuild them
+    # from the Python values they were computed from, so a cached frame equals a
+    # computed one exactly (dtypes and missing values included).
+    for col in _STATE_TEXT_COLUMNS:
+        frame[col] = pd.Series(
+            [value if isinstance(value, str) else None for value in frame[col]],
+            index=frame.index,
+        )
+    for col in ("period_start", "period_end", "reference_date"):
+        frame[col] = pd.Series(
+            [_parse_iso_date(value) for value in frame[col].astype(object)],
+            index=frame.index,
+            dtype=object,
+        )
     frame["available_at"] = pd.to_datetime(frame["available_at"], utc=True)
     frame["value"] = frame["value"].astype("float64")
     frame["status"] = pd.Categorical(
@@ -2432,9 +2465,6 @@ def _load_cached_states(parquet_path: Path, meta_path: Path) -> pd.DataFrame | N
     )
     for col in ("cik", "view", "basis", "tag", "currency"):
         frame[col] = frame[col].astype("category")
-    for col in ("period_start", "period_end", "reference_date"):
-        if col in frame.columns:
-            frame[col] = frame[col].map(_parse_iso_date)
     frame.attrs.update(meta)
     return frame
 

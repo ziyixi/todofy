@@ -273,3 +273,7 @@ panel = ds.panel(
   profile keep the old behaviour (`ds.events()` returns an empty frame when there are no events).
 - `audit()` checks `(fact_id, observation_sequence)` and reads `observation_id` only when present; without it
   `summary["observation_id_unique"]` reports the natural key.
+- A warm derived-state cache (`cache_dir/derived/…`) now returns exactly the frame a cold run computes. Before, its
+  text and date columns came back with Parquet dtypes and `pd.NA` for missing dates, so `fundamental_states()` and
+  `derived_fundamentals(..., provenance=True)` differed between a first and a repeated run; values were not
+  affected.

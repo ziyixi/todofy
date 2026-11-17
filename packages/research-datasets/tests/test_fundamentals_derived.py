@@ -1927,6 +1927,82 @@ class TrailingAndFiscalQuartersTest(unittest.TestCase):
             )
             self.assertEqual(s_pub.iloc[0]["value"], s_pub_cached.iloc[0]["value"])
 
+    def test_cached_states_equal_computed_states_exactly(self) -> None:
+        """A warm state cache returns the frame a cold one computes: same dtypes, and
+        None (not pd.NA or an Arrow date type) for missing dates and raw values."""
+        rows = [
+            make_fact(
+                "rev-q1",
+                "Revenues",
+                "100",
+                "2025-01-01",
+                "2025-03-31",
+                accession="acc-q1",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            make_fact(
+                "rev-fy",
+                "Revenues",
+                "400",
+                "2024-01-01",
+                "2024-12-31",
+                form="10-K",
+                period_kind="annual",
+                accession="acc-fy",
+                public_at="2025-02-15T12:00:00Z",
+            ),
+            make_fact(
+                "cash",
+                "CashAndCashEquivalentsAtCarryingValue",
+                "50",
+                None,
+                "2025-03-31",
+                metric="cash",
+                period_kind="instant",
+                accession="acc-q1",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+        ]
+        samples = pd.DataFrame(
+            {
+                "asset_id": [ASSET_A, ASSET_A, ASSET_B],
+                "signal_session": ["2025-01-10", "2025-06-02", "2025-06-02"],
+                "decision_at": [
+                    "2025-01-13T10:00:00Z",
+                    "2025-06-03T10:00:00Z",
+                    "2025-06-03T10:00:00Z",
+                ],
+            }
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            mat = make_material(rows, cache_dir=tmp, manifest_sha256="b" * 64)
+            mat["manifest"]["dataset_id"] = "ds-warm-cache"
+            for policy in research_datasets.POLICIES:
+                with self.subTest(policy=policy):
+                    outputs = [
+                        (
+                            fundamental_states(mat, time_policy=policy),
+                            derived_fundamentals(
+                                mat, samples, time_policy=policy, provenance=True
+                            ),
+                        )
+                        for _ in ("cold", "warm")
+                    ]
+                    (cold_states, cold), (warm_states, warm) = outputs
+                    self.assertIn(None, cold_states["period_start"].tolist())
+                    pd.testing.assert_frame_equal(
+                        warm_states, cold_states, check_exact=True
+                    )
+                    self.assertEqual(warm_states.attrs, cold_states.attrs)
+                    pd.testing.assert_frame_equal(warm, cold, check_exact=True)
+            empty = make_material([], cache_dir=tmp, manifest_sha256="c" * 64)
+            empty["manifest"]["dataset_id"] = "ds-warm-cache-empty"
+            cold_empty, warm_empty = (
+                fundamental_states(empty, time_policy="observed_content")
+                for _ in ("cold", "warm")
+            )
+            pd.testing.assert_frame_equal(warm_empty, cold_empty, check_exact=True)
+
 
 if __name__ == "__main__":
     unittest.main()

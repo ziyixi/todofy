@@ -5,6 +5,10 @@ its own row. The manifest then names the formula, ``{"fundamentals": {"fact_id":
 "sha256-json-v1"}}``, and the reader recomputes the column exactly as the collector wrote
 it. A stored column always wins. A formula id never changes meaning: a new rule needs a
 new id, and an id this SDK does not know is refused.
+
+``sha256-pipe-v1`` is the collector's surrogate formula F5 (storage design v4); the other
+dropped observation ids hash a ``content_hash``, ``inputs_hash`` or full link list that a
+release does not carry either, so no release can name them.
 """
 
 from __future__ import annotations
@@ -34,9 +38,9 @@ VERSION_ID_FIELDS = (
     "headline_sha256",
     "summary_sha256",
 )
-# Text json.dumps writes differently from itself: a quote, a backslash, a control
-# character or (ensure_ascii) any non-ASCII character.
-_JSON_ESCAPED = r'["\\\x00-\x1f]|[^\x00-\x7f]'
+# Text json.dumps writes differently from itself (json's ESCAPE_ASCII): a quote, a
+# backslash, or anything outside printable ASCII (control characters, DEL, non-ASCII).
+_JSON_ESCAPED = r'[\\"]|[^ -~]'
 
 
 @dataclass(frozen=True)
