@@ -792,9 +792,14 @@ class NeutralizeTest(unittest.TestCase):
             )
 
 
+V2 = "pit-largecap-v2"
+EXPORT_RULES = [V2, "pit-largecap-v1", "pit-liquid-v1"]
+
+
 def membership_bundle() -> dict[str, bytes]:
-    """Synthetic bundle objects: AAPL leaves pit-largecap-v1 in February, GOOG exits
-    for cash at session 20, AAPL has a disputed session 4."""
+    """Synthetic bundle objects: AAPL leaves pit-largecap-v2 (the manifest's rule) in
+    February, GOOG exits for cash at session 20, AAPL has a disputed session 4. The
+    exported pit-largecap-v1 rows disagree in February (AAPL stays, GOOG leaves)."""
     sessions = bundle.SESSIONS
     rows: list[dict[str, Any]] = []
     for item, base in (
@@ -826,12 +831,12 @@ def membership_bundle() -> dict[str, bytes]:
             "warmup": False,
             "observation_sequence": 1,
         }
-        for rule in ("pit-largecap-v1", "pit-liquid-v1")
+        for rule in EXPORT_RULES
         for month, item, member in (
             ("2026-01", bundle.ASSET_A, True),
             ("2026-01", bundle.ASSET_G1, True),
-            ("2026-02", bundle.ASSET_A, rule == "pit-liquid-v1"),
-            ("2026-02", bundle.ASSET_G1, True),
+            ("2026-02", bundle.ASSET_A, rule != V2),
+            ("2026-02", bundle.ASSET_G1, rule != "pit-largecap-v1"),
         )
     ]
     delistings = [
@@ -848,7 +853,10 @@ def membership_bundle() -> dict[str, bytes]:
             "universe_membership": membership,
             "daily_returns": rows,
             "delistings": delistings,
-        }
+        },
+        manifest_updates={
+            "universe_rule": {"rule_version": V2, "export_rules": EXPORT_RULES}
+        },
     )
     return objects
 
@@ -901,10 +909,21 @@ class FamilyLabelTest(unittest.TestCase):
             self.assertEqual(provenance["parameters"]["return_basis"], "total_return")
             self.assertEqual(provenance["counts"]["not_in_universe_dropped"], 5)
             self.assertEqual(provenance["label_overlap"], {"1": 1.0, "5": 5.0})
+            # The manifest's v2 rule is applied and recorded (v1 rows would keep AAPL
+            # in February and drop GOOG).
+            self.assertEqual(ds.manifest["universe_rule"]["rule_version"], V2)
+            self.assertEqual(frame.attrs["parameters"]["universe_rule"], V2)
+            self.assertEqual(provenance["parameters"]["universe_rule"], V2)
+            labels = ds.forward_returns(["AAPL", "GOOG"], horizons=1, **window)
+            self.assertEqual(labels.attrs["parameters"]["universe_rule"], V2)
+            self.assertEqual(labels.attrs["counts"]["not_in_universe_dropped"], 5)
             liquid = ds.forward_returns(
                 ["AAPL"], universe="pit-liquid-v1", horizons=1, **window
             )
             self.assertEqual(len(liquid), 23)
+            self.assertEqual(
+                liquid.attrs["parameters"]["universe_rule"], "pit-liquid-v1"
+            )
             static = ds.forward_returns(
                 ["AAPL"], universe="static", allow_static_universe=True, **window
             )
@@ -930,6 +949,7 @@ class FamilyLabelTest(unittest.TestCase):
             self.assertEqual(run["counts"]["not_in_universe_dropped"], 5)
             self.assertEqual(run["counts"]["in_universe"], run["counts"]["candidates"])
             self.assertEqual(run["parameters"]["universe_basis"], "pit")
+            self.assertEqual(run["parameters"]["universe_rule"], V2)
             self.assertEqual(set(labels["return_basis"]), {"total_return"})
             self.assertTrue(labels["trainable_1d"].any())
             embargoed = splits[splits["purge_reason"] == "embargo"]

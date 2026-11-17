@@ -372,8 +372,10 @@ class ContractRegressionTest(unittest.TestCase):
             ("2.2.1", True),
             ("2.3.0rc1", True),
             ("2.3.0", True),
-            ("2.3.1", False),
-            ("2.3.1rc1", False),
+            ("2.3.1rc1", True),
+            ("2.3.1", True),
+            ("2.3.2rc1", False),
+            ("2.3.2", False),
             ("2.4.0", False),
             ("next", False),
         ):

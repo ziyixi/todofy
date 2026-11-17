@@ -24,7 +24,7 @@ def member(
     *,
     sequence: int = 1,
     warmup: bool = False,
-    rule: str = "pit-largecap-v1",
+    rule: str = "pit-largecap-v2",  # the default rule
 ) -> dict[str, Any]:
     return {
         "rule_version": rule,
@@ -357,13 +357,162 @@ class ClockTest(unittest.TestCase):
             ),
             "pit-largecap-v2",
         )
+        # Without a manifest rule the default applies; an older manifest keeps its rule.
+        self.assertEqual(research_datasets.DEFAULT_UNIVERSE_RULE, "pit-largecap-v2")
         self.assertEqual(
             candidates.membership_rule(True, "pit", {"universe_rule": {}}),
+            "pit-largecap-v2",
+        )
+        self.assertEqual(
+            candidates.membership_rule(
+                True, "pit", {"universe_rule": {"rule_version": "pit-largecap-v1"}}
+            ),
             "pit-largecap-v1",
         )
         built = research_datasets.build_candidates(v2_version, [A])
         self.assertEqual(built.attrs["parameters"]["universe_rule"], "pit-largecap-v2")
         self.assertFalse(built.empty)
+
+
+class UniverseRuleTest(unittest.TestCase):
+    def test_v2_manifest_rule_wins_over_coexisting_v1_rows(self) -> None:
+        # A freeze exports v2 and v1 rows together; v1 disagrees with v2 in every cell.
+        v2_cells = {
+            (A, "2026-01"): True,
+            (B, "2026-01"): False,
+            (A, "2026-02"): True,
+            (B, "2026-02"): True,
+        }
+        rows = [
+            member(
+                item, month, flag if rule == "pit-largecap-v2" else not flag, rule=rule
+            )
+            for rule in ("pit-largecap-v1", "pit-largecap-v2")
+            for (item, month), flag in v2_cells.items()
+        ]
+        version = LabelVersion(
+            [A, B, BENCH],
+            days=DAYS,
+            families={
+                "universe_membership": rows,
+                "daily_returns": [
+                    *session_rows(A, [10.0 + i for i in range(len(DAYS))], days=DAYS),
+                    *session_rows(B, [20.0 + i for i in range(len(DAYS))], days=DAYS),
+                    *benchmark_rows(DAYS),
+                ],
+            },
+            manifest={
+                "universe_rule": {
+                    "rule_version": "pit-largecap-v2",
+                    "export_rules": ["pit-largecap-v2", "pit-largecap-v1"],
+                    "first_effective_month": "2026-01",
+                    "last_effective_month": "2026-02",
+                }
+            },
+        )
+
+        def expected(frame: pd.DataFrame, rule_is_v2: bool = True) -> list[Any]:
+            out: list[Any] = []
+            for item, entry in zip(frame["asset_id"], frame["entry_session"]):
+                flag = v2_cells.get((item, f"{entry:%Y-%m}") if entry else None)
+                out.append(pd.NA if flag is None else flag == rule_is_v2)
+            return out
+
+        def observed(frame: pd.DataFrame) -> list[Any]:
+            return [pd.NA if pd.isna(v) else bool(v) for v in frame["in_universe"]]
+
+        # Candidates: membership, kept rows and the recorded rule all come from v2.
+        grid = research_datasets.build_candidates(
+            version, [A, B], keep_non_members=True
+        )
+        self.assertEqual(grid.attrs["parameters"]["universe_rule"], "pit-largecap-v2")
+        self.assertEqual(observed(grid), expected(grid))
+        members = sum(v is True for v in expected(grid))
+        self.assertEqual(members, 44)  # A: 24 Jan/Feb entries, B: 20 Feb entries
+        kept = research_datasets.build_candidates(version, [A, B])
+        self.assertEqual(len(kept), members)
+        self.assertTrue(kept["in_universe"].all())
+        self.assertEqual(kept.attrs["counts"]["not_in_universe_dropped"], 8)
+        self.assertEqual(kept.attrs["parameters"]["universe_rule"], "pit-largecap-v2")
+
+        # Labels built from symbols: the same v2 rows, masks and parameters.
+        labels = research_datasets.forward_returns(
+            version, [A, B], benchmark=BENCH, horizons=1
+        )
+        self.assertEqual(
+            labels[["asset_id", "signal_session"]].values.tolist(),
+            kept[["asset_id", "signal_session"]].values.tolist(),
+        )
+        self.assertEqual(labels.attrs["parameters"]["universe_rule"], "pit-largecap-v2")
+        self.assertEqual(labels.attrs["parameters"]["universe_basis"], "pit")
+        self.assertEqual(labels.attrs["masks"]["1"]["not_in_universe"], 8)
+        self.assertEqual(labels.attrs["counts"]["not_in_universe_dropped"], 8)
+        # Labels over the full grid: not_in_universe rows are exactly v2's non-members.
+        graded = research_datasets.forward_returns(
+            version, grid, benchmark=BENCH, horizons=1
+        )
+        self.assertEqual(observed(graded), expected(grid))
+        self.assertEqual(graded.attrs["masks"]["1"]["not_in_universe"], 8)
+        outside = ~graded["in_universe"].fillna(False).to_numpy(dtype=bool)
+        self.assertFalse(graded.loc[outside, "trainable_1d"].any())
+        self.assertTrue(graded.loc[~outside, "trainable_1d"].all())
+
+        # The v1 rows are present and differ: asking for v1 is explicit and recorded.
+        legacy = research_datasets.build_candidates(
+            version, [A, B], universe="pit-largecap-v1", keep_non_members=True
+        )
+        self.assertEqual(legacy.attrs["parameters"]["universe_rule"], "pit-largecap-v1")
+        self.assertEqual(observed(legacy), expected(legacy, rule_is_v2=False))
+        with self.assertRaisesRegex(ValueError, "pit-largecap-v1"):
+            research_datasets.forward_returns(version, legacy, benchmark=BENCH)
+
+    def test_only_the_versions_pit_rule_may_lack_rows(self) -> None:
+        families = {
+            "universe_membership": [
+                member(A, "2026-01", True, rule="pit-largecap-v1"),
+                member(A, "2026-02", True, rule="pit-largecap-v1"),
+            ],
+            "daily_returns": [
+                *session_rows(A, [10.0 + i for i in range(len(DAYS))], days=DAYS),
+                *benchmark_rows(DAYS),
+            ],
+        }
+        # An older freeze names v1 and holds only v1 rows: v2 is refused, not empty.
+        older = LabelVersion(
+            [A, BENCH],
+            days=DAYS,
+            families=families,
+            manifest={
+                "universe_rule": {
+                    "rule_version": "pit-largecap-v1",
+                    "first_effective_month": "2026-01",
+                    "last_effective_month": "2026-02",
+                }
+            },
+        )
+        missing = "'pit-largecap-v2' has no membership"
+        with self.assertRaisesRegex(ValueError, missing):
+            research_datasets.build_candidates(older, [A], universe="pit-largecap-v2")
+        with self.assertRaisesRegex(ValueError, missing):
+            research_datasets.forward_returns(
+                older, [A], benchmark=BENCH, horizons=1, universe="pit-largecap-v2"
+            )
+        pit = research_datasets.build_candidates(older, [A])
+        self.assertEqual(pit.attrs["parameters"]["universe_rule"], "pit-largecap-v1")
+        self.assertTrue(pit["in_universe"].all())
+        # Without a named rule "pit" is the default, whose rows may be absent.
+        unnamed = LabelVersion(
+            [A, BENCH],
+            days=DAYS,
+            families=families,
+            manifest={"universe_rule": {}},
+        )
+        frame = research_datasets.build_candidates(unnamed, [A], keep_non_members=True)
+        self.assertEqual(
+            frame.attrs["parameters"]["universe_rule"],
+            research_datasets.DEFAULT_UNIVERSE_RULE,
+        )
+        self.assertTrue(frame["in_universe"].isna().all())
 
 
 if __name__ == "__main__":

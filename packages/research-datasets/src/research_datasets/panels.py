@@ -1532,6 +1532,8 @@ def panel(
         ),
     )
     combined.attrs["provenance"] = provenance
+    # Like candidates and labels, the panel names the universe rule it applied here.
+    combined.attrs["parameters"] = dict(provenance["parameters"])
     if output_dir is not None:
         destination = Path(output_dir)
         destination.mkdir(parents=True, exist_ok=True)

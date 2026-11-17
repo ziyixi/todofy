@@ -687,10 +687,12 @@ class FactEngine:
         possible = steps.counts.values[steps.counts.at(issuer, instant)] > 0
         in_unit = steps.unit_counts.values[steps.unit_counts.at(issuer, instant)] > 0
         retracted = steps.retracted.values[steps.retracted.at(issuer, instant)] > 0
+        # Without a version at the decision the status stays metric_missing even when the
+        # frozen history has a later one: "not yet available" would reveal that filing.
         status[query] = np.where(
             possible,
             np.where(in_unit, PERIOD_UNAVAILABLE, UNIT_UNAVAILABLE),
-            np.where(retracted, RETRACTED, NOT_YET),
+            np.where(retracted, RETRACTED, METRIC_MISSING),
         )
         dated = possible & in_unit & (bound > 0)
         query, issuer, instant, bound = (

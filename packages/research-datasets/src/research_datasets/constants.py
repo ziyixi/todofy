@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import time, timedelta
 from types import MappingProxyType
 
-__version__ = "2.3.0"
+__version__ = "2.3.1"
 API = "v1"
 
 # The newest manifest layout this SDK reads; client_min_version is checked separately.
@@ -33,8 +33,9 @@ RANK_WINDOW_SESSIONS = 21
 SAMPLINGS: tuple[str, ...] = ("daily", "weekly", "monthly")
 DEFAULT_HORIZONS: tuple[int, ...] = (5, 21, 63, 126)
 MAX_HORIZON = 756
-# Monthly point-in-time membership rule used when universe="pit".
-DEFAULT_UNIVERSE_RULE = "pit-largecap-v1"
+# Monthly point-in-time membership rule used when universe="pit" and the manifest
+# names no universe_rule.rule_version.
+DEFAULT_UNIVERSE_RULE = "pit-largecap-v2"
 # Default candidate sets keep these security types when the universe records one.
 CANDIDATE_SECURITY_TYPES = frozenset({"common", "common_presumed"})
 # Reader assumption for an exit whose terminal value is not a stored fact: a performance

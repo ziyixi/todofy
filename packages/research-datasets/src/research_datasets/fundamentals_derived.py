@@ -2933,10 +2933,9 @@ def derived_fundamentals(
             needs_new_parser[no_state], "not_captured", "metric_missing"
         )
         if no_state.any():
-            known_ciks = sub["cik"].unique()
-            final_status[no_state & work_samples["cik"].isin(known_ciks)] = (
-                "not_yet_available"
-            )
+            # No state at the decision stays metric_missing (or not_captured) even when
+            # the frozen history has a later one: labelling it "not yet available" would
+            # reveal that later state to the earlier decision.
             no_state_checked = no_state & pd.notna(overrides)
             final_status[no_state_checked] = overrides[no_state_checked]
         final_status[
