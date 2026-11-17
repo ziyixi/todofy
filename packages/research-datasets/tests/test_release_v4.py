@@ -219,6 +219,27 @@ class SurrogateFormulaTest(unittest.TestCase):
         self.assertEqual(surrogates.fact_ids(table).to_pylist(), expected)
         self.assertEqual(surrogates.fact_ids(table.slice(0, 0)).to_pylist(), [])
 
+    def test_recompute_in_slices_equals_one_pass(self) -> None:
+        table = pa.Table.from_pylist(
+            [
+                dict(
+                    zip(
+                        surrogates.FACT_ID_FIELDS,
+                        ["0000000101", "us-gaap", f"Tag{i}", "USD"]
+                        + [None if i == 3 else "", "2025-12-31", f'a"{i}'],
+                    )
+                )
+                for i in range(7)
+            ]
+        )
+        formula = surrogates.FORMULAS["sha256-json-v1"]
+        with mock.patch.object(surrogates, "SLICE_ROWS", 3):
+            sliced = surrogates.derive(formula, table)
+            empty = surrogates.derive(formula, table.slice(0, 0))
+        self.assertEqual(sliced.num_chunks, 3)
+        self.assertEqual(sliced.to_pylist(), surrogates.fact_ids(table).to_pylist())
+        self.assertEqual((empty.type, len(empty)), (pa.string(), 0))
+
     def test_version_id_matches_the_writer_rule(self) -> None:
         row = {
             "event_id": "alpaca_news:1",
@@ -288,7 +309,11 @@ class ReleaseV4Test(unittest.TestCase):
                 self.assertEqual(caught.exception.reason, "INTEGRITY")
 
     def test_family_reads_equal_v3_minus_the_cut_columns(self) -> None:
-        with Session(self.v3) as old, Session(self.v4) as new:
+        with (
+            mock.patch.object(surrogates, "SLICE_ROWS", 2),
+            Session(self.v3) as old,
+            Session(self.v4) as new,
+        ):
             for family in ("fundamentals", "news_versions", "earnings_observations"):
                 with self.subTest(family=family):
                     expected = old.family(family).drop(
@@ -365,6 +390,68 @@ class ReleaseV4Test(unittest.TestCase):
             with self.assertRaises(research_datasets.DatasetError) as caught:
                 ds.event_observations(with_text=True)
             self.assertEqual(caught.exception.reason, "INTEGRITY")
+        objects = dict(self.v4)
+        _write(objects, "event_text", _read(objects, "event_text").drop(["summary"]))
+        with Session(_manifest(objects)) as ds:
+            with self.assertRaises(research_datasets.DatasetError) as caught:
+                ds.event_observations(with_text=True)
+            self.assertEqual(caught.exception.reason, "INTEGRITY")
+
+    def test_text_relocation_must_be_one_this_sdk_joins_back(self) -> None:
+        """Schema 3 text is stored or moved to event_text; any other move is refused."""
+        for relocated in (
+            {"event_observations": {"event_texts": TEXT}},
+            {"event_observations": {"event_text": [*TEXT, "body"]}},
+            {"news_versions": {"event_text": TEXT}},
+            {},
+        ):
+            objects = _manifest(dict(self.v4), relocated_columns=relocated)
+            with self.subTest(relocated=relocated), Session(objects) as ds:
+                for options in ({"with_text": True}, {"columns": ["title"]}, {}):
+                    with self.assertRaises(research_datasets.DatasetError) as caught:
+                        ds.event_observations(**options)
+                    self.assertEqual(caught.exception.reason, "INTEGRITY")
+        relocated = {"news_versions": {"event_text": TEXT}}
+        with Session(_manifest(dict(self.v4), relocated_columns=relocated)) as ds:
+            with self.assertRaises(research_datasets.DatasetError) as caught:
+                ds.family("news_versions")
+            self.assertEqual(caught.exception.reason, "INTEGRITY")
+        # The freeze's fallback: schema 3 still stores its text and relocates none.
+        observations = _read(self.v3, "event_observations")
+        cut = [c for c in CUTS["event_observations"] if c not in TEXT]
+        objects = dict(self.v4)
+        _write(
+            objects,
+            "event_observations",
+            observations.drop([c for c in cut if c in observations.column_names]),
+        )
+        with (
+            Session(self.v3) as old,
+            Session(_manifest(objects, relocated_columns={})) as new,
+        ):
+            expected = old.event_observations().drop(columns=cut, errors="ignore")
+            for options in ({"with_text": True}, {}):
+                assert_frame_equal(
+                    new.event_observations(**options), expected, check_exact=True
+                )
+
+    def test_fact_id_must_be_stored_or_derived(self) -> None:
+        """Cutting fact_id without naming its formula is refused: no fact is dropped."""
+        derived = {"news_versions": DERIVED["news_versions"]}
+        with Session(_manifest(dict(self.v4), derived_columns=derived)) as ds:
+            for name, read in (
+                ("fundamentals", ds.fundamentals),
+                ("iter_fundamentals", lambda: list(ds.iter_fundamentals())),
+                (
+                    "fundamental_states",
+                    lambda: ds.fundamental_states(time_policy=POLICIES[0]),
+                ),
+                ("audit", lambda: ds.audit(["AAPL", "GOOG", "GOOGL"])),
+            ):
+                with self.subTest(read=name):
+                    with self.assertRaises(research_datasets.DatasetError) as caught:
+                        read()
+                    self.assertEqual(caught.exception.reason, "INTEGRITY")
 
     def test_stored_column_wins_and_unknown_formulas_are_refused(self) -> None:
         objects = dict(self.v4)

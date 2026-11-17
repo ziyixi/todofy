@@ -153,6 +153,8 @@ _V1 = frozenset({1})
 # comes back through derived_columns); event_observations 3 also moves title, summary
 # and source_url to event_text.
 _V12 = frozenset({1, 2})
+# The text event_observations 3 stores or moves to event_text (relocated_columns).
+EVENT_TEXT_COLUMNS: tuple[str, ...] = ("title", "summary", "source_url")
 FAMILY_SPECS: dict[str, FamilySpec] = {
     "events": FamilySpec("asset_id", "event_date", _V12),
     "event_observations": FamilySpec(

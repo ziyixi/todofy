@@ -9,6 +9,8 @@ new id, and an id this SDK does not know is refused.
 ``sha256-pipe-v1`` is the collector's surrogate formula F5 (storage design v4); the other
 dropped observation ids hash a ``content_hash``, ``inputs_hash`` or full link list that a
 release does not carry either, so no release can name them.
+
+Readers key on ``fundamentals.fact_id``, so a release stores it or names its formula.
 """
 
 from __future__ import annotations
@@ -38,6 +40,11 @@ VERSION_ID_FIELDS = (
     "headline_sha256",
     "summary_sha256",
 )
+# Columns readers key on: a release stores each one or names its formula.
+REQUIRED: dict[str, tuple[str, ...]] = {"fundamentals": ("fact_id",)}
+# Rows hashed per slice: the temporary Python strings of a slice stay in the tens of MB
+# however large the family is (the whole fundamentals family at once took about 3 GiB).
+SLICE_ROWS = 100_000
 # Text json.dumps writes differently from itself (json's ESCAPE_ASCII): a quote, a
 # backslash, or anything outside printable ASCII (control characters, DEL, non-ASCII).
 _JSON_ESCAPED = r'[\\"]|[^ -~]'
@@ -101,6 +108,17 @@ def version_ids(table: pa.Table) -> pa.Array:
     if any(column.null_count for column in columns):
         raise ValueError("news_versions version_id fields must not be null")
     return _sha256_hex(pc.binary_join_element_wise(*columns, "|").to_pylist())
+
+
+def derive(formula: Formula, table: pa.Table) -> pa.ChunkedArray:
+    """``formula`` over ``table``, one slice of ``SLICE_ROWS`` rows at a time."""
+    return pa.chunked_array(
+        [
+            formula.compute(table.slice(start, SLICE_ROWS))
+            for start in range(0, table.num_rows, SLICE_ROWS)
+        ],
+        pa.string(),
+    )
 
 
 FORMULAS: dict[str, Formula] = {

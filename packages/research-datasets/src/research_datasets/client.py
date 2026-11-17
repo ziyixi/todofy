@@ -36,6 +36,7 @@ from .constants import (
     DATA_FAMILIES,
     DEFAULT_EXTRA_GROUPS,
     DEFAULT_HORIZONS,
+    EVENT_TEXT_COLUMNS,
     FAMILY_SPECS,
     FIELDS,
     MANIFEST_SCHEMA_MAX,
@@ -109,7 +110,7 @@ from .sec_events import (
 from .sec_events import (
     sec_event_specs as _sec_event_specs,
 )
-from .surrogates import FORMULAS, Formula
+from .surrogates import FORMULAS, REQUIRED, Formula, derive
 from .valuation import (
     valuation as _valuation,
 )
@@ -692,7 +693,7 @@ def _add_derived(
     then keep ``columns`` in their order."""
     for position, (name, formula) in enumerate(derived.items()):
         try:
-            values = formula.compute(table)
+            values = derive(formula, table)
         except ValueError as error:
             raise DatasetError(
                 "INTEGRITY", f"{formula.family}.{name} 无法重算：{error}。"
@@ -988,13 +989,42 @@ class Dataset:
                 "CLIENT_TOO_OLD",
                 f"{family} 数据族的 schema_version {schema} 需要更新的 SDK（本 SDK {__version__}）。",
             )
+        self._relocated(family)  # refuses a move this SDK cannot join back
         return spec
+
+    def _relocated(self, family: str) -> list[str]:
+        """Columns of ``family`` the manifest moved to another family. The one move this
+        SDK joins back is event_observations text to event_text; any other is refused."""
+        moves = (self.manifest.get("relocated_columns") or {}).get(family) or {}
+        names = [name for columns in moves.values() for name in columns]
+        if moves and (
+            family != "event_observations"
+            or set(moves) != {"event_text"}
+            or not set(names) <= set(EVENT_TEXT_COLUMNS)
+        ):
+            raise DatasetError(
+                "INTEGRITY", f"本 SDK 不支持 {family} 的列迁移 {dict(moves)}。"
+            )
+        return names
+
+    def _check_event_text(self, stored: set[str]) -> None:
+        """From schema 3 event_observations stores each text column or moves it to
+        event_text (the freeze keeps text stored when event_text cannot rebuild it)."""
+        info = self.manifest["data_families"]["event_observations"]
+        moved = self._relocated("event_observations")
+        lost = sorted(set(EVENT_TEXT_COLUMNS) - stored - set(moved))
+        if info.get("schema_version", 1) >= 3 and lost:
+            raise DatasetError(
+                "INTEGRITY",
+                f"event_observations 缺少 {lost}，manifest 也未声明它们迁到 event_text。",
+            )
 
     def _derived(self, family: str, stored: set[str]) -> dict[str, Formula]:
         """The manifest's derived columns of ``family`` its parts do not store.
 
         A stored column always wins; a formula this SDK does not know, or one that is
-        not the formula of that column, is refused.
+        not the formula of that column, is refused, and so is a family that neither
+        stores nor derives a column readers key on (``fundamentals.fact_id``).
         """
         blocks = self.manifest.get("derived_columns") or {}
         derived = {}
@@ -1012,6 +1042,16 @@ class Dataset:
                     "INTEGRITY", f"{family} 缺少重算 {column} 所需的列：{missing}。"
                 )
             derived[column] = formula
+        absent = [
+            name
+            for name in REQUIRED.get(family, ())
+            if name not in stored and name not in derived
+        ]
+        if absent:
+            raise DatasetError(
+                "INTEGRITY",
+                f"{family} 既没有存储 {absent}，manifest 也未声明它们的派生公式。",
+            )
         return derived
 
     def _issuer_ids(
@@ -1235,6 +1275,8 @@ class Dataset:
         paths = [str(self._client._part(item)) for item in parts]
         ds = pads.dataset(paths, format="parquet")
         names = set(ds.schema.names)
+        if family == "event_observations":
+            self._check_event_text(names)
         derived = self._derived(family, names)
         readable = names | set(derived)
         if columns is not None and optional_columns:
@@ -1523,10 +1565,8 @@ class Dataset:
         only with ``with_text=True`` (appended last) or when ``columns`` names them: each
         version gets the text of its latest text row at or before its sequence.
         """
-        moved = (
-            (self.manifest.get("relocated_columns") or {}).get("event_observations")
-            or {}
-        ).get("event_text", [])
+        self._require_family("event_observations")
+        moved = self._relocated("event_observations")
         text = [
             name
             for name in moved
@@ -1581,8 +1621,12 @@ class Dataset:
             self._read_family("event_text", event_uids=uids) if uids else pd.DataFrame()
         )
         keys = ["event_uid", "observation_sequence"]
-        if texts.empty or texts.duplicated(keys).any():
-            raise DatasetError("INTEGRITY", "event_text 缺失或主键重复。")
+        if (
+            texts.empty
+            or not {*keys, *missing} <= set(texts.columns)
+            or texts.duplicated(keys).any()
+        ):
+            raise DatasetError("INTEGRITY", "event_text 缺失、缺列或主键重复。")
         versions = pd.DataFrame(
             {
                 "event_uid": frame["event_uid"].to_numpy(dtype=object),

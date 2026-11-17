@@ -264,13 +264,19 @@ panel = ds.panel(
   period_start, period_end, accession], separators=(",", ":"))`, and `{"news_versions": {"version_id":
   "sha256-pipe-v1"}}` the SHA-256 of `event_id|provider_updated_at|headline_sha256|summary_sha256`.
   `fundamentals()`, `iter_fundamentals()` and `family()` add the column first, where older releases store it. A
-  stored column always wins; an unknown formula raises `INTEGRITY`.
+  stored column always wins; an unknown formula raises `INTEGRITY`, and so does a `fundamentals` family that neither
+  stores `fact_id` nor names its formula.
 - `ds.event_observations(..., with_text=True)` (or `columns` naming `title`, `summary` or `source_url`) adds the
   text of each version from `event_text`: the row of the same `event_uid` with the largest `observation_sequence`
-  at or before the version's. Text columns come last; the panel's projected read never loads text.
+  at or before the version's. Text columns come last; the panel's projected read never loads text. From schema 3
+  each text column is stored or moved to `event_text`; text that is neither, or any other `relocated_columns`
+  entry, raises `INTEGRITY`.
 - A release written with a `profile` (`training`, `full`, `scratch`) lists every family it wrote. Reading any other
-  family, `ds.events()` included, raises `CAPABILITY_MISSING` ("not in profile training"); releases without a
-  profile keep the old behaviour (`ds.events()` returns an empty frame when there are no events).
+  family through `family()`, a family reader or `ds.events()` raises `CAPABILITY_MISSING` ("not in profile
+  training"); releases without a profile keep the old behaviour (`ds.events()` returns an empty frame when there are
+  no events). Feature builders that use a family only when present (extra feature groups, release features) still
+  leave its columns out: they name it in `attrs["extra_missing"]` / `attrs["release_missing"]`, and the panel lists
+  the extra families it found in `provenance.extra.families_present`.
 - `audit()` checks `(fact_id, observation_sequence)` and reads `observation_id` only when present; without it
   `summary["observation_id_unique"]` reports the natural key.
 - A warm derived-state cache (`cache_dir/derived/…`) now returns exactly the frame a cold run computes. Before, its
