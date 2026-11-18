@@ -415,7 +415,8 @@ class BazelCI(unittest.TestCase):
             )
         )
         publisher = workflow_data(ROOT / ".github/workflows/private-release.yml")
-        entry = publisher["jobs"]["release"]["steps"][-1]
+        entry = next(step for step in publisher["jobs"]["release"]["steps"]
+                     if step.get("name") == "Run the pinned private release entry point")
         # Every operation runs the pinned entry point once, passing the operation as an argument and keeping its
         # output in the runner file. The only other Python command is the fixed public projection of that file;
         # exact lines reject extra invocations, inline programs and appended shell commands.
@@ -482,7 +483,8 @@ class BazelCI(unittest.TestCase):
         job = publisher["jobs"]["release"]
         self.assertIn("github.ref == 'refs/heads/main'", job["if"])
         self.assertEqual(job["environment"], "production")
-        environment = job["steps"][-1]["env"]
+        environment = next(step for step in job["steps"]
+                           if step.get("name") == "Run the pinned private release entry point")["env"]
         self.assertEqual(environment["K3S_CLUSTER_CA"], "${{ vars.K3S_CLUSTER_CA }}")
         self.assertNotIn("KUBECONFIG", environment)
         operations = workflow_data(ROOT / ".github/workflows/private-ops.yml")

@@ -13,6 +13,7 @@ from test_private_checkout import run_checkout
 from workflow_sources import workflow_data
 
 ROOT = Path(__file__).absolute().parents[2]
+ENTRY_STEP = "Run the pinned private release entry point"
 
 
 class PrivateReleaseWorkflow(unittest.TestCase):
@@ -166,6 +167,7 @@ class PrivateReleaseWorkflow(unittest.TestCase):
             "runtime-restart",
             "runtime-terminate",
             "quant-v4-gates",
+            "quant-v4-gates-report",
         }
         for operation in (*cluster_only, "release", "publish",
                           "finish-worker", "verify", "infra-plan", "infra-apply", "data-check", "k3s-future"):
@@ -174,9 +176,35 @@ class PrivateReleaseWorkflow(unittest.TestCase):
                 selected = [self.condition("observer-access", step["if"]) if step.get("if") else True
                             for step in setup]
                 self.assertEqual(selected, [operation not in cluster_only] * 3)
-        entry = steps[-1]
+        entry = next(step for step in steps if step.get("name") == ENTRY_STEP)
         self.assertNotIn("if", entry)
         self.assertIn('python3 private/ci/release.py --operation "$PRIVATE_RELEASE_OPERATION"', entry["run"])
+
+    def test_only_the_v4_gate_operations_upload_and_only_their_ciphertext(self):
+        publisher = workflow_data(ROOT / ".github/workflows/private-release.yml")
+        steps = publisher["jobs"]["release"]["steps"]
+        uploads = [step for step in steps if "upload-artifact" in step.get("uses", "")]
+        self.assertEqual(len(uploads), 1)
+        upload = uploads[0]
+        entry = next(step for step in steps if step.get("name") == ENTRY_STEP)
+        # It follows the entry point, which writes the ciphertext; the runner log file is removed before it.
+        self.assertEqual(steps.index(upload), steps.index(entry) + 1)
+        self.assertIn("trap 'rm -f \"$log\"' EXIT", entry["run"])
+        self.assertEqual(upload["uses"], "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a")
+        self.assertEqual(upload["with"], {
+            "name": "quant-v4-gates-report",
+            "path": "${{ runner.temp }}/quant-v4-gates-report.cms",
+            "retention-days": "3",
+            "if-no-files-found": "ignore",
+        })
+        for operation in ("quant-v4-gates", "quant-v4-gates-report", "release", "publish", "finish-worker",
+                          "verify", "data-check", "restore-check", "infra-apply", "k3s-apply", "k3s-future"):
+            self.context["inputs.operation"] = operation
+            for cancelled in (False, True):
+                with self.subTest(operation=operation, cancelled=cancelled):
+                    expected = operation.startswith("quant-v4-gates") and not cancelled
+                    # A failed gate run still uploads the partial report its operation encrypted.
+                    self.assertEqual(self.condition("observer-access", upload["if"], cancelled=cancelled), expected)
 
     def test_branch_and_document_only_changes_do_not_publish(self):
         self.context["github.ref"] = "refs/heads/codex/synthetic-review"
@@ -245,7 +273,8 @@ class PrivateReleaseWorkflow(unittest.TestCase):
         Returns the step's result, whether the entry point's stdout and stderr were the runner file, and whether
         that file is left behind."""
         publisher = workflow_data(ROOT / ".github/workflows/private-release.yml")
-        script = publisher["jobs"]["release"]["steps"][-1]["run"]
+        script = next(step for step in publisher["jobs"]["release"]["steps"]
+                      if step.get("name") == ENTRY_STEP)["run"]
         temporary = Path(directory)
         (temporary / "entry-output").write_text(output)
         python = temporary / "python3"
@@ -290,7 +319,8 @@ class PrivateReleaseWorkflow(unittest.TestCase):
     def test_every_operation_captures_private_output_and_preserves_the_exit_status(self):
         private_output = '{"event":"synthetic","source":"synthetic-private-source"}\n'
         operations = ("release", "publish", "finish-worker", "verify", "data-check", "restore-check",
-                      "runtime-restart", "runtime-terminate", "quant-v4-gates", "infra-plan", "infra-apply", "k3s-check",
+                      "runtime-restart", "runtime-terminate", "quant-v4-gates", "quant-v4-gates-report", "infra-plan",
+                      "infra-apply", "k3s-check",
                       "k3s-plan", "k3s-apply", "not-an-operation")
         with tempfile.TemporaryDirectory() as directory:
             for operation in operations:
