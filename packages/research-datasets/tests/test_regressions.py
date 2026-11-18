@@ -374,9 +374,12 @@ class ContractRegressionTest(unittest.TestCase):
             ("2.3.0", True),
             ("2.3.1rc1", True),
             ("2.3.1", True),
-            ("2.3.2rc1", False),
-            ("2.3.2", False),
-            ("2.4.0", False),
+            ("2.3.2", True),
+            ("2.4.0rc1", True),
+            ("2.4.0", True),
+            ("2.4.1rc1", False),
+            ("2.4.1", False),
+            ("2.5.0", False),
             ("next", False),
         ):
             manifest = {"schema_version": 2, "client_min_version": minimum}
@@ -393,7 +396,7 @@ class ContractRegressionTest(unittest.TestCase):
 
     def test_unknown_family_schema_refused_on_read_only(self) -> None:
         objects, _ = fixture._build_synthetic_bundle(
-            family_updates={"news_versions": {"schema_version": 2}}
+            family_updates={"news_versions": {"schema_version": 3}}
         )
         with (
             fixture.SyntheticDatasetServer(objects) as server,

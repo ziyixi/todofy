@@ -25,6 +25,10 @@ jobs:
     name: Build and test pinned private sources
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    # packages: the storage v4 rollback drill pulls a pinned private image.
+    permissions:
+      contents: read
+      packages: read
     outputs:
       release_required: ${{ steps.plan.outputs.release_required }}
     steps:
@@ -127,6 +131,11 @@ jobs:
             done || true
             exit 1
           fi
+      # Run the pinned private rollback check; its output and configuration stay behind private/ci.
+      - name: Run the pinned rollback drill
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 private/ci/rollback_drill.py
       - name: Select the pinned private release inputs
         id: plan
         env:

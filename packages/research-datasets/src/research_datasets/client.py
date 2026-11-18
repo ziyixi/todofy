@@ -26,6 +26,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.dataset as pads
@@ -35,6 +36,7 @@ from .constants import (
     DATA_FAMILIES,
     DEFAULT_EXTRA_GROUPS,
     DEFAULT_HORIZONS,
+    EVENT_TEXT_COLUMNS,
     FAMILY_SPECS,
     FIELDS,
     MANIFEST_SCHEMA_MAX,
@@ -108,6 +110,7 @@ from .sec_events import (
 from .sec_events import (
     sec_event_specs as _sec_event_specs,
 )
+from .surrogates import FORMULAS, REQUIRED, Formula, derive
 from .valuation import (
     valuation as _valuation,
 )
@@ -148,6 +151,28 @@ def _version_key(value: Any) -> tuple[int, ...] | None:
     )
 
 
+def _column_blocks(blocks: Any, valid: Any) -> bool:
+    """Absent, or ``{family: {name: value}}`` with every value accepted by ``valid``."""
+    return blocks is None or (
+        isinstance(blocks, Mapping)
+        and all(
+            isinstance(block, Mapping)
+            and all(
+                isinstance(name, str) and valid(value) for name, value in block.items()
+            )
+            for block in blocks.values()
+        )
+    )
+
+
+def _is_formula_id(value: Any) -> bool:
+    return isinstance(value, str) and bool(value)
+
+
+def _is_name_list(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
 def check_manifest(manifest: Mapping[str, Any]) -> None:
     """Refuse a manifest layout or client minimum this SDK does not understand."""
     schema = manifest.get("schema_version", 1)
@@ -166,6 +191,13 @@ def check_manifest(manifest: Mapping[str, Any]) -> None:
                 "CLIENT_TOO_OLD",
                 f"这个固定版本要求 SDK {minimum} 或更新，本 SDK 是 {__version__}。",
             )
+    profile = manifest.get("profile")
+    if profile is not None and (not isinstance(profile, str) or not profile):
+        raise DatasetError("INTEGRITY", "manifest 的 profile 字段无效。")
+    if not _column_blocks(manifest.get("derived_columns"), _is_formula_id):
+        raise DatasetError("INTEGRITY", "manifest 的 derived_columns 字段无效。")
+    if not _column_blocks(manifest.get("relocated_columns"), _is_name_list):
+        raise DatasetError("INTEGRITY", "manifest 的 relocated_columns 字段无效。")
     extraction = manifest.get("extraction")
     if extraction is not None:
         if not isinstance(extraction, Mapping):
@@ -642,6 +674,34 @@ def _scan_batches(
     return table if columns is None else table.select(list(columns))
 
 
+def _derived_scan(
+    columns: Sequence[str] | None, derived: Mapping[str, Formula]
+) -> tuple[list[str] | None, dict[str, Formula]]:
+    """The stored columns to scan for ``columns``, and the derived columns among them."""
+    if columns is None:
+        return None, dict(derived)
+    wanted = {name: formula for name, formula in derived.items() if name in columns}
+    stored = [name for name in columns if name not in wanted]
+    inputs = [name for formula in wanted.values() for name in formula.inputs]
+    return list(dict.fromkeys([*stored, *inputs])), wanted
+
+
+def _add_derived(
+    table: pa.Table, derived: Mapping[str, Formula], columns: Sequence[str] | None
+) -> pa.Table:
+    """Recompute each derived column (placed first, where older releases store them),
+    then keep ``columns`` in their order."""
+    for position, (name, formula) in enumerate(derived.items()):
+        try:
+            values = derive(formula, table)
+        except ValueError as error:
+            raise DatasetError(
+                "INTEGRITY", f"{formula.family}.{name} 无法重算：{error}。"
+            ) from None
+        table = table.add_column(position, name, values)
+    return table if columns is None else table.select(list(columns))
+
+
 def _columns(fields: Sequence[str] | None, wide: str | None) -> list[str]:
     columns = list(
         dict.fromkeys(
@@ -912,9 +972,11 @@ class Dataset:
         families = self.manifest.get("data_families")
         info = families.get(family) if isinstance(families, dict) else None
         if not isinstance(info, dict):
+            profile = self.manifest.get("profile")
+            scope = f"（not in profile {profile}）" if profile else ""
             raise DatasetError(
                 "CAPABILITY_MISSING",
-                f"这个固定版本未包含 {family} 数据族。",
+                f"这个固定版本未包含 {family} 数据族{scope}。",
             )
         spec = FAMILY_SPECS.get(family)
         if spec is None:
@@ -927,7 +989,70 @@ class Dataset:
                 "CLIENT_TOO_OLD",
                 f"{family} 数据族的 schema_version {schema} 需要更新的 SDK（本 SDK {__version__}）。",
             )
+        self._relocated(family)  # refuses a move this SDK cannot join back
         return spec
+
+    def _relocated(self, family: str) -> list[str]:
+        """Columns of ``family`` the manifest moved to another family. The one move this
+        SDK joins back is event_observations text to event_text; any other is refused."""
+        moves = (self.manifest.get("relocated_columns") or {}).get(family) or {}
+        names = [name for columns in moves.values() for name in columns]
+        if moves and (
+            family != "event_observations"
+            or set(moves) != {"event_text"}
+            or not set(names) <= set(EVENT_TEXT_COLUMNS)
+        ):
+            raise DatasetError(
+                "INTEGRITY", f"本 SDK 不支持 {family} 的列迁移 {dict(moves)}。"
+            )
+        return names
+
+    def _check_event_text(self, stored: set[str]) -> None:
+        """From schema 3 event_observations stores each text column or moves it to
+        event_text (the freeze keeps text stored when event_text cannot rebuild it)."""
+        info = self.manifest["data_families"]["event_observations"]
+        moved = self._relocated("event_observations")
+        lost = sorted(set(EVENT_TEXT_COLUMNS) - stored - set(moved))
+        if info.get("schema_version", 1) >= 3 and lost:
+            raise DatasetError(
+                "INTEGRITY",
+                f"event_observations 缺少 {lost}，manifest 也未声明它们迁到 event_text。",
+            )
+
+    def _derived(self, family: str, stored: set[str]) -> dict[str, Formula]:
+        """The manifest's derived columns of ``family`` its parts do not store.
+
+        A stored column always wins; a formula this SDK does not know, or one that is
+        not the formula of that column, is refused, and so is a family that neither
+        stores nor derives a column readers key on (``fundamentals.fact_id``).
+        """
+        blocks = self.manifest.get("derived_columns") or {}
+        derived = {}
+        for column, formula_id in (blocks.get(family) or {}).items():
+            if column in stored:
+                continue
+            formula = FORMULAS.get(formula_id)
+            if formula is None or (formula.family, formula.column) != (family, column):
+                raise DatasetError(
+                    "INTEGRITY", f"{family}.{column} 的派生公式 {formula_id} 未知。"
+                )
+            missing = sorted(set(formula.inputs) - stored)
+            if missing:
+                raise DatasetError(
+                    "INTEGRITY", f"{family} 缺少重算 {column} 所需的列：{missing}。"
+                )
+            derived[column] = formula
+        absent = [
+            name
+            for name in REQUIRED.get(family, ())
+            if name not in stored and name not in derived
+        ]
+        if absent:
+            raise DatasetError(
+                "INTEGRITY",
+                f"{family} 既没有存储 {absent}，manifest 也未声明它们的派生公式。",
+            )
+        return derived
 
     def _issuer_ids(
         self, symbols: str | Sequence[str] | None
@@ -1150,13 +1275,18 @@ class Dataset:
         paths = [str(self._client._part(item)) for item in parts]
         ds = pads.dataset(paths, format="parquet")
         names = set(ds.schema.names)
+        if family == "event_observations":
+            self._check_event_text(names)
+        derived = self._derived(family, names)
+        readable = names | set(derived)
         if columns is not None and optional_columns:
-            columns = [name for name in columns if name in names]
-        if columns is not None and not set(columns).issubset(names):
+            columns = [name for name in columns if name in readable]
+        if columns is not None and not set(columns).issubset(readable):
             raise DatasetError(
                 "BAD_REQUEST",
-                f"{family} 没有这些列：{sorted(set(columns) - names)}。",
+                f"{family} 没有这些列：{sorted(set(columns) - readable)}。",
             )
+        scan, derived = _derived_scan(columns, derived)
         time_col = spec.part_clock
         if family == "event_observations" and time_col not in names:
             time_col = "content_first_seen_at"
@@ -1201,8 +1331,9 @@ class Dataset:
             time_col=time_col,
             start=start_s,
             end=end_s,
-            columns=columns,
+            columns=scan,
         )
+        table = _add_derived(table, derived, columns)
         frame = table.to_pandas().reset_index(drop=True)
         self._client._say(
             before,
@@ -1317,7 +1448,10 @@ class Dataset:
     ) -> pd.DataFrame:
         """Events frozen in this version: SEC filings, corporate actions, news metadata and the earnings calendar."""
         families = self.manifest.get("data_families")
-        if isinstance(families, dict) and "events" in families:
+        # A profile release lists every family it wrote: no events family means none.
+        if self.manifest.get("profile") or (
+            isinstance(families, dict) and "events" in families
+        ):
             self._require_family("events")
         before = self._client._mark()
         start_s, end_s = _range(start, end)
@@ -1422,19 +1556,111 @@ class Dataset:
         end: str | date | None = None,
         *,
         columns: Sequence[str] | None = None,
+        with_text: bool = False,
     ) -> pd.DataFrame:
         """Frozen observation versions, including removed links, by observation_recorded_at date.
 
-        ``columns`` keeps only those of the requested columns this version has.
+        ``columns`` keeps only those of the requested columns this version has. Releases
+        that keep ``title``, ``summary`` and ``source_url`` in ``event_text`` return them
+        only with ``with_text=True`` (appended last) or when ``columns`` names them: each
+        version gets the text of its latest text row at or before its sequence.
         """
-        return self._read_family(
+        self._require_family("event_observations")
+        moved = self._relocated("event_observations")
+        text = [
+            name
+            for name in moved
+            if (name in columns if columns is not None else with_text)
+        ]
+        read = columns
+        if text and columns is not None:
+            read = list(dict.fromkeys([*columns, "event_uid", "observation_sequence"]))
+        frame = self._read_family(
             "event_observations",
             symbols=symbols,
             start=start,
             end=end,
-            columns=columns,
+            columns=read,
             optional_columns=True,
         )
+        if not text:
+            return frame
+        attrs = dict(frame.attrs)
+        frame = self._with_event_text(frame, text)
+        if columns is not None:
+            frame = frame[[name for name in columns if name in frame.columns]].copy()
+        frame.attrs.update(attrs)
+        return frame
+
+    def _with_event_text(self, frame: pd.DataFrame, names: list[str]) -> pd.DataFrame:
+        """Add the relocated text columns ``names`` (a stored column wins) as of each
+        version: the ``event_text`` row of the same ``event_uid`` with the largest
+        ``observation_sequence`` not after the version's."""
+        missing = [name for name in names if name not in frame.columns]
+        if not missing or frame.columns.empty:
+            return frame
+        if frame.empty:
+            # No versions: empty text columns, typed as event_text stores them.
+            self._require_family("event_text")
+            parts = self._family_parts("event_text")
+            empty = (
+                pads.dataset([str(self._client._part(parts[0]))], format="parquet")
+                .schema.empty_table()
+                .to_pandas()
+                if parts
+                else pd.DataFrame()
+            )
+            return frame.assign(
+                **{
+                    name: empty[name] if name in empty else pd.Series(dtype=object)
+                    for name in missing
+                }
+            )
+        uids = frame["event_uid"].dropna().unique().tolist()
+        texts = (
+            self._read_family("event_text", event_uids=uids) if uids else pd.DataFrame()
+        )
+        keys = ["event_uid", "observation_sequence"]
+        if (
+            texts.empty
+            or not {*keys, *missing} <= set(texts.columns)
+            or texts.duplicated(keys).any()
+        ):
+            raise DatasetError("INTEGRITY", "event_text 缺失、缺列或主键重复。")
+        versions = pd.DataFrame(
+            {
+                "event_uid": frame["event_uid"].to_numpy(dtype=object),
+                "observation_sequence": frame["observation_sequence"].to_numpy(
+                    dtype=np.int64
+                ),
+                "_row": np.arange(len(frame)),
+            }
+        )
+        rows = pd.DataFrame(
+            {
+                "event_uid": texts["event_uid"].to_numpy(dtype=object),
+                "observation_sequence": texts["observation_sequence"].to_numpy(
+                    dtype=np.int64
+                ),
+                "_text": np.arange(len(texts)),
+            }
+        )
+        matched = pd.merge_asof(
+            versions.sort_values("observation_sequence", kind="stable"),
+            rows.sort_values("observation_sequence", kind="stable"),
+            on="observation_sequence",
+            by="event_uid",
+            direction="backward",
+        ).sort_values("_row")
+        if matched["_text"].isna().any():
+            raise DatasetError(
+                "INTEGRITY",
+                f"{int(matched['_text'].isna().sum())} 个事件版本在 event_text 中没有文本。",
+            )
+        pick = matched["_text"].to_numpy(dtype=np.int64)
+        for name in missing:
+            frame[name] = texts[name].iloc[pick].set_axis(frame.index)
+        return frame
 
     def _earnings_event_observations(self, event_uids: Sequence[str]) -> pd.DataFrame:
         """Load complete link histories for the requested earnings events."""
@@ -1568,6 +1794,9 @@ class Dataset:
         - ``period_kind``: ``"quarter"``, ``"annual"``, ``"instant"``, or sequence of period kinds.
         - ``active_only=True``: filter to ``is_retracted == False``.
         - ``by_asset=True``: expand CIK-keyed facts to ``(asset_id, symbol)`` rows (for dual-class shares).
+
+        Releases that leave ``fact_id`` out name its formula in ``derived_columns``; the
+        reader recomputes it (first column, as older releases store it).
         """
         metric_list: list[str] | None = None
         if metrics is not None:
@@ -1609,7 +1838,8 @@ class Dataset:
         tags: Sequence[str] | None = None,
         columns: Sequence[str] | None = None,
     ) -> Iterator[pd.DataFrame]:
-        """Yield per-part ``fundamentals`` frames with bounded memory."""
+        """Yield per-part ``fundamentals`` frames with bounded memory (``fact_id``
+        recomputed per part when the release derives it)."""
         self._require_family("fundamentals")
         identities: list[str] | None = None
         if ciks is not None:
@@ -1621,16 +1851,23 @@ class Dataset:
             path = str(self._client._part(item))
             ds = pads.dataset([path], format="parquet")
             names = set(ds.schema.names)
+            derived = self._derived("fundamentals", names)
             proj = None
             if columns is not None:
-                proj = [name for name in dict.fromkeys(columns) if name in names]
+                proj = [
+                    name
+                    for name in dict.fromkeys(columns)
+                    if name in names or name in derived
+                ]
+            scan, derived = _derived_scan(proj, derived)
             scalar_filters: list[tuple[str, Sequence[Any]]] = []
             if identities is not None and "cik" in names:
                 scalar_filters.append(("cik", identities))
             if tags is not None and "tag" in names:
                 scalar_filters.append(("tag", list(tags)))
-            table = _scan_batches(ds, scalar_filters=scalar_filters, columns=proj)
+            table = _scan_batches(ds, scalar_filters=scalar_filters, columns=scan)
             if table.num_rows > 0:
+                table = _add_derived(table, derived, proj)
                 yield table.to_pandas().reset_index(drop=True)
 
     def financial_checks(
@@ -2138,13 +2375,19 @@ class Dataset:
                 return False
 
         fact_stats_by_cik: dict[str, dict[str, Any]] = {}
+        has_observation_id = "observation_id" in facts.columns
         obs_unique = True
         no_dup_seq = True
         all_active_finite = True
         if not facts.empty:
-            obs_unique = bool(facts["observation_id"].is_unique)
             no_dup_seq = not bool(
                 facts.duplicated(["fact_id", "observation_sequence"]).any()
+            )
+            # Without observation_id a version is identified by its natural key.
+            obs_unique = (
+                bool(facts["observation_id"].is_unique)
+                if has_observation_id
+                else no_dup_seq
             )
             for cik_val, group in facts.groupby("cik", observed=True):
                 active = group[group["is_retracted"].eq(False)]
@@ -2256,7 +2499,7 @@ class Dataset:
             if not audit_df.empty and not audit_df["verified_issuer"].all():
                 bad = audit_df.loc[~audit_df["verified_issuer"], "symbol"].tolist()
                 problems.append(f"unverified securities: {bad}")
-            if not obs_unique:
+            if has_observation_id and not obs_unique:
                 problems.append("duplicate observation_id in fundamentals")
             if not no_dup_seq:
                 problems.append(

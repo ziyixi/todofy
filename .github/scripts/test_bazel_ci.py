@@ -206,6 +206,22 @@ class BazelCI(unittest.TestCase):
                     (temporary / "private-bazel.log").read_text(),
                 )
 
+    def test_rollback_drill_delegates_to_private_entrypoint(self):
+        """The private check delegates the rollback drill to private/ci/rollback_drill.py
+        without exposing private paths or Bazel targets in public workflow YAML."""
+        workflow = workflow_data(ROOT / ".github/workflows/private-check.yml")
+        job = workflow["jobs"]["check"]
+        self.assertEqual(job["permissions"], {"contents": "read", "packages": "read"})
+        self.assertEqual(
+            self.jobs["private"]["permissions"],
+            {"contents": "read", "packages": "read"},
+        )
+        step = next(
+            s for s in job["steps"] if s.get("name") == "Run the pinned rollback drill"
+        )
+        self.assertEqual(step["env"], {"GH_TOKEN": "${{ github.token }}"})
+        self.assertEqual(step["run"].strip(), "python3 private/ci/rollback_drill.py")
+
     def test_public_planning_skips_private_submodule_initialization(self):
         step = next(
             step for step in self.jobs["changes"]["steps"] if step.get("id") == "plan"

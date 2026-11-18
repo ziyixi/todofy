@@ -24,6 +24,7 @@ py_library(
         "provenance.py",
         "release_features.py",
         "sec_events.py",
+        "surrogates.py",
         "valuation.py",
     ],
     data = ["py.typed"],
