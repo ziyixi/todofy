@@ -131,35 +131,11 @@ jobs:
             done || true
             exit 1
           fi
-      # Storage v4 rollback drill: its output stays on the runner; the private drill checks the pin.
-      - name: Storage v4 rollback drill
+      # Run the pinned private rollback check; its output and configuration stay behind private/ci.
+      - name: Run the pinned rollback drill
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          options=("--repository_cache=$HOME/.cache/personal-cloud-bazel/repository" "--disk_cache=$HOME/.cache/personal-cloud-bazel/actions")
-          log="$RUNNER_TEMP/private-rollback-drill.log"
-          pin=private/quant/deploy/migrate_v4/previous-image.txt
-          arguments=(--work "$RUNNER_TEMP/rollback-drill")
-          if [ -f "$pin" ]; then
-            image=$(head -n 1 "$pin")
-            if ! [[ "$image" =~ ^ghcr\.io/[a-z0-9][a-z0-9./_-]*@sha256:[0-9a-f]{64}$ ]]; then
-              echo "::error::V11_PREVIOUS_IMAGE_INVALID"
-              exit 1
-            fi
-            export DOCKER_CONFIG="$RUNNER_TEMP/docker-drill"
-            trap 'docker logout ghcr.io > /dev/null 2>&1 || true; rm -rf "$DOCKER_CONFIG"' EXIT
-            if ! printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin >> "$log" 2>&1 \
-              || ! docker pull --quiet "$image" >> "$log" 2>&1; then
-              echo "::error::V11_PREVIOUS_IMAGE_UNAVAILABLE"
-              exit 1
-            fi
-            arguments+=(--previous-image "$image")
-          fi
-          if ! bazel run @private//quant/deploy:rb_drill "${options[@]}" -- "${arguments[@]}" >> "$log" 2>&1; then
-            echo "::error::V11_ROLLBACK_DRILL_FAILED"
-            exit 1
-          fi
-          echo "::notice::V11_ROLLBACK_DRILL_PASSED"
+        run: python3 private/ci/rollback_drill.py
       - name: Select the pinned private release inputs
         id: plan
         env:

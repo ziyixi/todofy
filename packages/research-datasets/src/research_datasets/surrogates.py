@@ -6,7 +6,7 @@ its own row. The manifest then names the formula, ``{"fundamentals": {"fact_id":
 it. A stored column always wins. A formula id never changes meaning: a new rule needs a
 new id, and an id this SDK does not know is refused.
 
-``sha256-pipe-v1`` is the collector's surrogate formula F5 (storage design v4); the other
+``sha256-pipe-v1`` joins the listed fields with ``|`` before hashing; the other
 dropped observation ids hash a ``content_hash``, ``inputs_hash`` or full link list that a
 release does not carry either, so no release can name them.
 
@@ -23,7 +23,7 @@ from dataclasses import dataclass
 import pyarrow as pa
 import pyarrow.compute as pc
 
-# fact_id identity fields, in the collector's order (quant_collector/fundamentals.py).
+# fact_id identity fields, in canonical tuple order.
 FACT_ID_FIELDS = (
     "cik",
     "taxonomy",
@@ -33,7 +33,7 @@ FACT_ID_FIELDS = (
     "period_end",
     "accession",
 )
-# news version_id fields (quant_collector/news_metadata.py).
+# news version_id fields, in pipe-join order.
 VERSION_ID_FIELDS = (
     "event_id",
     "provider_updated_at",

@@ -21,6 +21,9 @@ on:
           - runtime-terminate
           - quant-v4-gates
           - quant-v4-gates-report
+          - quant-v4-rehearse
+          - quant-v4-cutover
+          - quant-v4-rollback
           - k3s-check
           - k3s-plan
           - k3s-apply

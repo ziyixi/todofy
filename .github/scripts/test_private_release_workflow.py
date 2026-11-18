@@ -168,9 +168,21 @@ class PrivateReleaseWorkflow(unittest.TestCase):
             "runtime-terminate",
             "quant-v4-gates",
             "quant-v4-gates-report",
+            "quant-v4-rehearse",
         }
-        for operation in (*cluster_only, "release", "publish",
-                          "finish-worker", "verify", "infra-plan", "infra-apply", "data-check", "k3s-future"):
+        for operation in (
+            *cluster_only,
+            "release",
+            "publish",
+            "finish-worker",
+            "verify",
+            "infra-plan",
+            "infra-apply",
+            "data-check",
+            "quant-v4-cutover",
+            "quant-v4-rollback",
+            "k3s-future",
+        ):
             self.context["inputs.operation"] = operation
             with self.subTest(operation=operation):
                 selected = [self.condition("observer-access", step["if"]) if step.get("if") else True
@@ -197,12 +209,26 @@ class PrivateReleaseWorkflow(unittest.TestCase):
             "retention-days": "3",
             "if-no-files-found": "ignore",
         })
-        for operation in ("quant-v4-gates", "quant-v4-gates-report", "release", "publish", "finish-worker",
-                          "verify", "data-check", "restore-check", "infra-apply", "k3s-apply", "k3s-future"):
+        for operation in (
+            "quant-v4-gates",
+            "quant-v4-gates-report",
+            "quant-v4-rehearse",
+            "quant-v4-cutover",
+            "quant-v4-rollback",
+            "release",
+            "publish",
+            "finish-worker",
+            "verify",
+            "data-check",
+            "restore-check",
+            "infra-apply",
+            "k3s-apply",
+            "k3s-future",
+        ):
             self.context["inputs.operation"] = operation
             for cancelled in (False, True):
                 with self.subTest(operation=operation, cancelled=cancelled):
-                    expected = operation.startswith("quant-v4-gates") and not cancelled
+                    expected = operation.startswith("quant-v4-") and not cancelled
                     # A failed gate run still uploads the partial report its operation encrypted.
                     self.assertEqual(self.condition("observer-access", upload["if"], cancelled=cancelled), expected)
 
@@ -318,10 +344,27 @@ class PrivateReleaseWorkflow(unittest.TestCase):
 
     def test_every_operation_captures_private_output_and_preserves_the_exit_status(self):
         private_output = '{"event":"synthetic","source":"synthetic-private-source"}\n'
-        operations = ("release", "publish", "finish-worker", "verify", "data-check", "restore-check",
-                      "runtime-restart", "runtime-terminate", "quant-v4-gates", "quant-v4-gates-report", "infra-plan",
-                      "infra-apply", "k3s-check",
-                      "k3s-plan", "k3s-apply", "not-an-operation")
+        operations = (
+            "release",
+            "publish",
+            "finish-worker",
+            "verify",
+            "data-check",
+            "restore-check",
+            "runtime-restart",
+            "runtime-terminate",
+            "quant-v4-gates",
+            "quant-v4-gates-report",
+            "quant-v4-rehearse",
+            "quant-v4-cutover",
+            "quant-v4-rollback",
+            "infra-plan",
+            "infra-apply",
+            "k3s-check",
+            "k3s-plan",
+            "k3s-apply",
+            "not-an-operation",
+        )
         with tempfile.TemporaryDirectory() as directory:
             for operation in operations:
                 for status in (0, 7):
