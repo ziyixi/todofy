@@ -25,6 +25,10 @@ jobs:
     name: Build and test pinned private sources
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    # packages: the storage v4 rollback drill pulls the pinned previous collector image.
+    permissions:
+      contents: read
+      packages: read
     outputs:
       release_required: ${{ steps.plan.outputs.release_required }}
     steps:
@@ -127,6 +131,38 @@ jobs:
             done || true
             exit 1
           fi
+      # Storage v4 rollback drill (V11 synthetic): R2 of a synthetic library with post-cutover rows,
+      # then the pinned previous collector image finishes it and runs its own checks (warm and cold
+      # start, a commit, the next chain versions, restore-local through a test fake Storage). The
+      # image runs offline. Without a pin this build plays the previous one, which a v4 build refuses.
+      - name: Storage v4 rollback drill
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          options=("--repository_cache=$HOME/.cache/personal-cloud-bazel/repository" "--disk_cache=$HOME/.cache/personal-cloud-bazel/actions")
+          log="$RUNNER_TEMP/private-rollback-drill.log"
+          pin=private/quant/deploy/migrate_v4/previous-image.txt
+          arguments=(--work "$RUNNER_TEMP/rollback-drill")
+          if [ -f "$pin" ]; then
+            image=$(head -n 1 "$pin")
+            if ! [[ "$image" =~ ^ghcr\.io/ziyixi/todofy-quant@sha256:[0-9a-f]{64}$ ]]; then
+              echo "::error::V11_PREVIOUS_IMAGE_INVALID"
+              exit 1
+            fi
+            export DOCKER_CONFIG="$RUNNER_TEMP/docker-drill"
+            trap 'docker logout ghcr.io > /dev/null 2>&1 || true; rm -rf "$DOCKER_CONFIG"' EXIT
+            if ! printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin >> "$log" 2>&1 \
+              || ! docker pull --quiet "$image" >> "$log" 2>&1; then
+              echo "::error::V11_PREVIOUS_IMAGE_UNAVAILABLE"
+              exit 1
+            fi
+            arguments+=(--previous-image "$image")
+          fi
+          if ! bazel run @private//quant/deploy:rb_drill "${options[@]}" -- "${arguments[@]}" >> "$log" 2>&1; then
+            echo "::error::V11_ROLLBACK_DRILL_FAILED"
+            exit 1
+          fi
+          echo "::notice::V11_ROLLBACK_DRILL_PASSED"
       - name: Select the pinned private release inputs
         id: plan
         env:

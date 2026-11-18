@@ -267,6 +267,7 @@ jobs:
       private_ssh_key: ${{ secrets.TODOFY_PRIVATE_SSH_KEY }}
     permissions:
       contents: read
+      packages: read
 
   private-home-artifact:
     name: Build Home artifact for private publication
