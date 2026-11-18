@@ -206,6 +206,81 @@ class BazelCI(unittest.TestCase):
                     (temporary / "private-bazel.log").read_text(),
                 )
 
+    def test_rollback_drill_pulls_only_the_pinned_image_and_logs_privately(self):
+        """The storage v4 rollback drill (V11): the pinned previous image, read-only package
+        access, and only fixed codes on the public log."""
+        workflow = workflow_data(ROOT / ".github/workflows/private-check.yml")
+        job = workflow["jobs"]["check"]
+        self.assertEqual(job["permissions"], {"contents": "read", "packages": "read"})
+        self.assertEqual(
+            self.jobs["private"]["permissions"],
+            {"contents": "read", "packages": "read"},
+        )
+        step = next(
+            s for s in job["steps"] if s.get("name") == "Storage v4 rollback drill"
+        )
+        self.assertEqual(step["env"], {"GH_TOKEN": "${{ github.token }}"})
+        image = "ghcr.io/owner/x@sha256:" + "a" * 64
+        passed = "::notice::V11_ROLLBACK_DRILL_PASSED"
+        # pin, docker fails, drill fails -> exit status, public output, pulled, drill pinned
+        cases = (
+            (None, False, False, 0, passed, False, False),
+            (image, False, False, 0, passed, True, True),
+            ("ghcr.io/x/y:latest", False, False, 1, "::error::V11_PREVIOUS_IMAGE_INVALID", False, False),
+            ("ghcr.io/-x@sha256:" + "a" * 64, False, False, 1, "::error::V11_PREVIOUS_IMAGE_INVALID", False, False),
+            (image, True, False, 1, "::error::V11_PREVIOUS_IMAGE_UNAVAILABLE", False, False),
+            (None, False, True, 1, "::error::V11_ROLLBACK_DRILL_FAILED", False, False),
+        )
+        for pin, docker_fails, drill_fails, code, output, pulled, pinned in cases:
+            with (
+                self.subTest(pin=pin, docker=docker_fails, drill=drill_fails),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                temporary = Path(directory)
+                calls = temporary / "calls"
+                (temporary / "bin").mkdir()
+                for tool, fails in (("bazel", drill_fails), ("docker", docker_fails)):
+                    fake = temporary / "bin" / tool
+                    fake.write_text(
+                        "#!/bin/sh\n"
+                        f'echo "{tool} $*" >> "{calls}"\n'
+                        'echo "synthetic private output"\n'
+                        f'[ "$1" = "logout" ] || [ "{int(fails)}" = 0 ]\n'
+                    )
+                    fake.chmod(0o755)
+                checkout = temporary / "checkout"
+                pins = checkout / "private/quant/deploy/migrate_v4"
+                pins.mkdir(parents=True)
+                if pin is not None:
+                    (pins / "previous-image.txt").write_text(pin + "\n")
+                result = subprocess.run(
+                    ["bash", "-e", "-c", step["run"]],
+                    cwd=checkout,
+                    env={
+                        **os.environ,
+                        "PATH": f"{temporary / 'bin'}{os.pathsep}{os.environ['PATH']}",
+                        "RUNNER_TEMP": str(temporary),
+                        "HOME": str(temporary),
+                        "GH_TOKEN": "synthetic-token",
+                        "GITHUB_ACTOR": "synthetic-actor",
+                    },
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, code)
+                self.assertEqual(result.stdout + result.stderr, output + "\n")
+                called = calls.read_text() if calls.exists() else ""
+                self.assertEqual(f"docker pull --quiet {image}" in called, pulled)
+                self.assertNotIn("synthetic-token", called)
+                drill = [line for line in called.splitlines() if line.startswith("bazel")]
+                if code == 0 or drill_fails:
+                    self.assertEqual(len(drill), 1)
+                    self.assertIn("run @private//quant/deploy:rb_drill", drill[0])
+                    self.assertEqual(f"--previous-image {image}" in drill[0], pinned)
+                else:
+                    self.assertEqual(drill, [])
+
     def test_public_planning_skips_private_submodule_initialization(self):
         step = next(
             step for step in self.jobs["changes"]["steps"] if step.get("id") == "plan"
