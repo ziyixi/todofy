@@ -220,13 +220,14 @@ class BazelCI(unittest.TestCase):
             s for s in job["steps"] if s.get("name") == "Storage v4 rollback drill"
         )
         self.assertEqual(step["env"], {"GH_TOKEN": "${{ github.token }}"})
-        image = "ghcr.io/ziyixi/todofy-quant@sha256:" + "a" * 64
+        image = "ghcr.io/owner/x@sha256:" + "a" * 64
         passed = "::notice::V11_ROLLBACK_DRILL_PASSED"
         # pin, docker fails, drill fails -> exit status, public output, pulled, drill pinned
         cases = (
             (None, False, False, 0, passed, False, False),
             (image, False, False, 0, passed, True, True),
             ("ghcr.io/x/y:latest", False, False, 1, "::error::V11_PREVIOUS_IMAGE_INVALID", False, False),
+            ("ghcr.io/-x@sha256:" + "a" * 64, False, False, 1, "::error::V11_PREVIOUS_IMAGE_INVALID", False, False),
             (image, True, False, 1, "::error::V11_PREVIOUS_IMAGE_UNAVAILABLE", False, False),
             (None, False, True, 1, "::error::V11_ROLLBACK_DRILL_FAILED", False, False),
         )

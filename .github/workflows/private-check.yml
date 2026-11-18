@@ -25,7 +25,7 @@ jobs:
     name: Build and test pinned private sources
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    # packages: the storage v4 rollback drill pulls the pinned previous collector image.
+    # packages: the storage v4 rollback drill pulls a pinned private image.
     permissions:
       contents: read
       packages: read
@@ -131,10 +131,7 @@ jobs:
             done || true
             exit 1
           fi
-      # Storage v4 rollback drill (V11 synthetic): R2 of a synthetic library with post-cutover rows,
-      # then the pinned previous collector image finishes it and runs its own checks (warm and cold
-      # start, a commit, the next chain versions, restore-local through a test fake Storage). The
-      # image runs offline. Without a pin this build plays the previous one, which a v4 build refuses.
+      # Storage v4 rollback drill: its output stays on the runner; the private drill checks the pin.
       - name: Storage v4 rollback drill
         env:
           GH_TOKEN: ${{ github.token }}
@@ -145,7 +142,7 @@ jobs:
           arguments=(--work "$RUNNER_TEMP/rollback-drill")
           if [ -f "$pin" ]; then
             image=$(head -n 1 "$pin")
-            if ! [[ "$image" =~ ^ghcr\.io/ziyixi/todofy-quant@sha256:[0-9a-f]{64}$ ]]; then
+            if ! [[ "$image" =~ ^ghcr\.io/[a-z0-9][a-z0-9./_-]*@sha256:[0-9a-f]{64}$ ]]; then
               echo "::error::V11_PREVIOUS_IMAGE_INVALID"
               exit 1
             fi
