@@ -106,6 +106,37 @@ class PrivateDiagnosticsTests(unittest.TestCase):
         self.assertEqual(self.project(content), diagnostics.observations(event()))
         self.assertFalse(diagnostics.project("/missing/private-canary"))
 
+    def test_runtime_auth_probe_projects_allowlisted_codes_and_drops_secrets(self):
+        probe = {
+            "event": "private_runtime_auth_probe",
+            "phase": "verification",
+            "codes": [
+                "ORIGIN_UNAUTHENTICATED",
+                "TOKEN_COOKIE_PRESENT",
+                "POD_IAT_ERROR",
+                "secret-canary https://private.invalid",
+            ],
+        }
+        self.assertEqual(
+            self.project((json.dumps(probe) + "\n").encode()),
+            {
+                ("VERIFICATION", "AUTH_PROBE", "ORIGIN_UNAUTHENTICATED"),
+                ("VERIFICATION", "AUTH_PROBE", "TOKEN_COOKIE_PRESENT"),
+                ("VERIFICATION", "AUTH_PROBE", "POD_IAT_ERROR"),
+            },
+        )
+        for bad_codes in (
+            [],
+            "ORIGIN_UNAUTHENTICATED",
+            {"code": "ORIGIN_UNAUTHENTICATED"},
+            [1],
+            ["ORIGIN_UNAUTHENTICATED"] * 33,
+        ):
+            with self.subTest(bad_codes=bad_codes):
+                self.assertFalse(
+                    diagnostics.observations({**probe, "codes": bad_codes})
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -20,6 +20,68 @@ CODES = {
     "STORAGE_DENIED": "STORAGE_DENIED",
     "STORAGE_RATE_LIMITED": "STORAGE_RATE_LIMITED",
 }
+AUTH_PROBE_CODES = frozenset(
+    {
+        "ORIGIN_UNAUTHENTICATED",
+        "ORIGIN_OTHER_401",
+        "UPSTREAM_HTML_401",
+        "UPSTREAM_OTHER_401",
+        "HEALTH_200",
+        "HEALTH_NON_200",
+        "TOKEN_COOKIE_PRESENT",
+        "TOKEN_COOKIE_MISSING",
+        "ALG_RS256",
+        "ALG_OTHER",
+        "KID_PRESENT",
+        "KID_MISSING",
+        "ISS_MATCH",
+        "ISS_MISMATCH",
+        "AUD_MATCH",
+        "AUD_MISMATCH",
+        "CLAIM_TYPE_APP",
+        "CLAIM_TYPE_MISSING",
+        "CLAIM_TYPE_OTHER",
+        "CLAIM_SUB_EMPTY",
+        "CLAIM_SUB_MISSING",
+        "CLAIM_SUB_NONEMPTY",
+        "CLAIM_SUB_OTHER",
+        "CLAIM_CN_OK",
+        "CLAIM_CN_MISSING",
+        "CLAIM_CN_EMPTY",
+        "CLAIM_EMAIL_PRESENT",
+        "CLAIM_EMAIL_ABSENT",
+        "CLAIM_STID_PRESENT",
+        "JWKS_KID_OK",
+        "JWKS_KID_MISSING",
+        "JWKS_FETCH_ERROR",
+        "POLICY_OK",
+        "POLICY_MISSING",
+        "POLICY_ISSUER_MISMATCH",
+        "POLICY_AUDIENCE_MISMATCH",
+        "POLICY_INVALID",
+        "CONNECTOR_CONFIG_OK",
+        "CONNECTOR_CONFIG_MISMATCH",
+        "CONNECTOR_NO_TOKEN",
+        "CONNECTOR_WRONG_AUDIENCE",
+        "CONNECTOR_VERIFY_ERROR",
+        "POD_VERIFY_OK",
+        "POD_SIG_ERROR",
+        "POD_EXP_ERROR",
+        "POD_IAT_ERROR",
+        "POD_AUD_ERROR",
+        "POD_ISS_ERROR",
+        "POD_MISSING_CLAIM",
+        "POD_SHAPE_ERROR",
+        "POD_JWKS_KEY_ERROR",
+        "POD_JWKS_CONN_ERROR",
+        "POD_OTHER_ERROR",
+        "POD_EXEC_FAILED",
+        "LOOPBACK_200",
+        "LOOPBACK_401",
+        "LOOPBACK_503",
+        "LOOPBACK_OTHER",
+    }
+)
 
 
 def count(value, maximum):
@@ -33,10 +95,17 @@ def observations(event):
     if not isinstance(phase, str) or phase not in PHASES:
         return set()
     phase = PHASES[phase]
-    if (
-        event.get("event") != "private_ingress_collector_logs_probe"
-        or event.get("available") is not True
-    ):
+    name = event.get("event")
+    if name == "private_runtime_auth_probe":
+        codes = event.get("codes")
+        if (
+            not isinstance(codes, list)
+            or not 0 < len(codes) <= 32
+            or not all(isinstance(code, str) for code in codes)
+        ):
+            return set()
+        return {(phase, "AUTH_PROBE", code) for code in codes if code in AUTH_PROBE_CODES}
+    if name != "private_ingress_collector_logs_probe" or event.get("available") is not True:
         return set()
     result = set()
     for field, tail in (("current", "ACTIVE_LOG"), ("previous", "PRIOR_LOG")):
