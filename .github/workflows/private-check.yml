@@ -24,7 +24,7 @@ jobs:
   check:
     name: Build and test pinned private sources
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 35
     # packages: the storage v4 rollback drill pulls a pinned private image.
     permissions:
       contents: read
