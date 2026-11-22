@@ -85,6 +85,7 @@ from .feature_groups import (
     FEATURE_GROUPS,
     FeatureGroupSpec,
     GroupBuildContext,
+    ensure_builtin_groups_loaded,
     group_columns,
     register_feature_group,
 )
@@ -169,6 +170,9 @@ from .valuation import (
     VALUATION_NAMES,
     valuation,
 )
+
+# Populate FEATURE_GROUPS at package import so callers inspecting FEATURE_GROUPS see built-ins.
+ensure_builtin_groups_loaded()
 
 __all__ = [
     "ALL_METRICS",
@@ -263,6 +267,7 @@ __all__ = [
     "derived_fundamentals",
     "earnings_calendar_asof",
     "earnings_features",
+    "ensure_builtin_groups_loaded",
     "extra_features",
     "factor_matrix",
     "fiscal_quarters",

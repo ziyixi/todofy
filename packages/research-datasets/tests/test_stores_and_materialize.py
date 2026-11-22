@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from datetime import date, datetime, time, timedelta
@@ -890,6 +893,19 @@ class StoresAndMaterializeAdversarialTest(unittest.TestCase):
             self.assertEqual(len(mat.y), len(mat.anchors.frame))
             self.assertIn("pmom_ret_21d", mat.X.columns)
             self.assertNotIn("pmom_ret_252d", mat.X.columns)
+
+    def test_fresh_import_populates_feature_groups(self) -> None:
+        env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
+        output = subprocess.check_output(
+            [
+                sys.executable,
+                "-c",
+                "import research_datasets as rd; print(len(rd.FEATURE_GROUPS))",
+            ],
+            env=env,
+            text=True,
+        ).strip()
+        self.assertGreaterEqual(int(output), 15)
 
 
 if __name__ == "__main__":
