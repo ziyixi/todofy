@@ -1,11 +1,13 @@
 # Handoff
 
-Updated 2026-11-15 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
+Updated 2026-11-22 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
 Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-Private operating follow-ups (including branch `chore/update-console-controls`) are tracked in `private/HANDOFF.md`.
+Private operating follow-ups (including branch `feat/data-pipeline-v2-1` / landed pin `private-v2-1` and earlier `chore/update-console-controls`) are tracked in `private/HANDOFF.md`.
+
+`packages/research-datasets` exposes `README.md` and `pyproject.toml` publicly in `BUILD.bazel` and pins documented install examples to the checked-in `main` SHA (`6ae85640f2f6d166497a51ba467311accc13c609`) cleanly verified in an isolated Python 3.14 environment (`2.4.0`).
 
 Branch `chore/update-console-controls` advances the private application pin for console form, batch-scope, and request-budget UI controls without schema or public service changes; land only after branch `CI gate` passes, then verify private publication and same-SHA reconciliation.
 
