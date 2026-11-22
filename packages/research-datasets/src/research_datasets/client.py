@@ -274,6 +274,135 @@ def connect(
     return Client(key, base_url.rstrip("/"), cache, max_requests, quiet)
 
 
+class LocalClient:
+    """Offline archive reader mirroring ``Client`` without copying local Parquet parts."""
+
+    def __init__(
+        self,
+        archive_dir: str | Path,
+        *,
+        cache_dir: str | Path | None = None,
+        quiet: bool = True,
+    ) -> None:
+        self.archive_dir = Path(archive_dir)
+        self.base_url = self.archive_dir.as_uri()
+        self.cache_dir = (
+            Path(cache_dir) if cache_dir else self.archive_dir / ".materialize-cache"
+        )
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.quiet = quiet
+        self._stats = {"requests": 0, "bytes": 0, "cached_parts": 0}
+        self._verified: set[str] = set()
+        self._versions: dict[str, Dataset] = {}
+
+    def usage(self) -> dict[str, int]:
+        return dict(self._stats)
+
+    def _say(self, before: tuple[int, int, int], label: str) -> None:
+        del before, label
+
+    def _mark(self) -> tuple[int, int, int]:
+        return (
+            self._stats["requests"],
+            self._stats["bytes"],
+            self._stats["cached_parts"],
+        )
+
+    def _resolve_local_key(self, key: str) -> Path:
+        clean = key.lstrip("/")
+        if clean.startswith("control/"):
+            candidate = self.archive_dir / clean
+            if candidate.is_file():
+                return candidate
+        direct = self.archive_dir / clean
+        if direct.is_file():
+            return direct
+        if (self.archive_dir / "datasets").is_dir():
+            rel_datasets = self.archive_dir / clean
+            if rel_datasets.is_file():
+                return rel_datasets
+        raise DatasetError("NOT_FOUND", f"本地归档中缺少文件：{key}")
+
+    def _request(
+        self,
+        path: str,
+        *,
+        body: Any = None,
+        target: str | Path | None = None,
+        attempts: int = 1,
+    ) -> tuple[bytes | None, dict[str, str]]:
+        del body, target, attempts
+        parsed = urllib.parse.urlsplit(path)
+        if parsed.path.lstrip("/") == "artifact":
+            key = urllib.parse.parse_qs(parsed.query).get("key", [""])[0]
+            local = self._resolve_local_key(key)
+            payload = local.read_bytes()
+            self._stats["bytes"] += len(payload)
+            return payload, {}
+        raise DatasetError("NOT_FOUND", f"本地归档不支持请求：{path}")
+
+    def _part(self, item: Mapping[str, Any]) -> Path:
+        sha, size = item.get("sha256"), item.get("size_bytes")
+        if (
+            not isinstance(sha, str)
+            or re.fullmatch(r"[0-9a-f]{64}", sha) is None
+            or type(size) is not int
+            or size < 0
+        ):
+            raise DatasetError("INTEGRITY", "分片的 SHA-256 或大小元数据无效。")
+        local = self._resolve_local_key(str(item["key"]))
+        if sha not in self._verified:
+            if local.stat().st_size != size or _sha256(local) != sha:
+                raise DatasetError(
+                    "INTEGRITY", f"本地分片 {item['key']} 大小或 SHA-256 校验失败。"
+                )
+            self._verified.add(sha)
+        self._stats["cached_parts"] += 1
+        return local
+
+    def version(self, dataset_id: str | None = None) -> Dataset:
+        if dataset_id is None or dataset_id == "latest":
+            ds_root = self.archive_dir / "datasets"
+            candidates = (
+                [
+                    p.name
+                    for p in sorted(ds_root.iterdir())
+                    if p.is_dir() and _UUID.match(p.name)
+                ]
+                if ds_root.is_dir()
+                else []
+            )
+            if len(candidates) == 1:
+                dataset_id = candidates[0]
+            else:
+                raise DatasetError("BAD_REQUEST", "请显式传入 dataset_id。")
+        if dataset_id not in self._versions:
+            raw_manifest, _ = self._request(
+                "artifact?"
+                + urllib.parse.urlencode(
+                    {"key": f"datasets/{dataset_id}/manifest.json"}
+                )
+            )
+            assert raw_manifest is not None
+            manifest = json.loads(raw_manifest)
+            self._versions[dataset_id] = Dataset(
+                self, manifest, hashlib.sha256(raw_manifest).hexdigest()
+            )
+        return self._versions[dataset_id]
+
+
+def load_local(
+    archive_dir: str | Path,
+    dataset_id: str | None = None,
+    *,
+    cache_dir: str | Path | None = None,
+    quiet: bool = True,
+) -> Dataset:
+    """Load an immutable frozen dataset directly from a pulled local archive directory."""
+    client = LocalClient(archive_dir, cache_dir=cache_dir, quiet=quiet)
+    return client.version(dataset_id)
+
+
 def load(
     dataset_id: str = "latest",
     *,
@@ -895,6 +1024,43 @@ class Dataset:
             return payload.decode("utf-8")
         except UnicodeDecodeError:
             raise DatasetError("INTEGRITY", "研究脚本不是有效的 UTF-8 文本。") from None
+
+    def recipe_yaml(self) -> str:
+        """Return verified UTF-8 YAML recipe frozen with this dataset, or package default."""
+        descriptor = (self.manifest.get("research_recipe") or {}).get("config_yaml")
+        if not isinstance(descriptor, dict):
+            from .materialize import DEFAULT_TRAINING_RECIPE_YAML
+
+            return DEFAULT_TRAINING_RECIPE_YAML
+        fields = ("key", "size_bytes", "sha256", "content_type")
+        key = descriptor.get("key")
+        if (
+            not isinstance(key, str)
+            or not key.startswith(f"datasets/{self.id}/")
+            or not all(field in descriptor for field in fields)
+            or not any(
+                all(item.get(field) == descriptor[field] for field in fields)
+                for item in self.manifest.get("files", [])
+            )
+        ):
+            raise DatasetError("INTEGRITY", "recipe.yaml 未按该版本的文件摘要登记。")
+        payload, _ = self._client._request(
+            "artifact?" + urllib.parse.urlencode({"key": key})
+        )
+        assert payload is not None
+        if (
+            len(payload) != descriptor["size_bytes"]
+            or hashlib.sha256(payload).hexdigest() != descriptor["sha256"]
+        ):
+            raise DatasetError(
+                "INTEGRITY", "recipe.yaml 的 SHA-256 或大小与 manifest 不一致。"
+            )
+        try:
+            return payload.decode("utf-8")
+        except UnicodeDecodeError:
+            raise DatasetError(
+                "INTEGRITY", "recipe.yaml 不是有效的 UTF-8 文本。"
+            ) from None
 
     def resolve(self, symbols: str | Sequence[str] | None) -> list[str]:
         """Tickers or asset UUIDs -> asset UUIDs.
@@ -2715,6 +2881,39 @@ class Dataset:
         kwargs.setdefault("dataset_id", self.id)
         return _prepare(self, **kwargs)
 
+    def materialize(
+        self,
+        recipe_yaml: str | Mapping[str, Any] | None = None,
+        *,
+        cache_dir: str | Path | None = None,
+        symbols: str | Sequence[str] | None = None,
+        start: str | date | None = None,
+        end: str | date | None = None,
+        sampling: str | None = None,
+        time_policy: str | None = None,
+        universe: str = "pit",
+        benchmark: str = "SPY",
+        include_stores: bool = True,
+        include_labels: bool = True,
+    ) -> Any:
+        """Materialize untruncated Stores + incrementally cached Feature Groups from YAML recipe."""
+        from .materialize import materialize as _materialize
+
+        return _materialize(
+            self,
+            recipe_yaml=recipe_yaml,
+            cache_dir=cache_dir,
+            symbols=symbols,
+            start=start,
+            end=end,
+            sampling=sampling,
+            time_policy=time_policy,
+            universe=universe,
+            benchmark=benchmark,
+            include_stores=include_stores,
+            include_labels=include_labels,
+        )
+
 
 Version = Dataset
 
@@ -2724,6 +2923,7 @@ __all__ = [
     "Client",
     "Dataset",
     "DatasetError",
+    "LocalClient",
     "Version",
     "__version__",
     "_prepare",
@@ -2732,4 +2932,5 @@ __all__ = [
     "check_manifest",
     "connect",
     "load",
+    "load_local",
 ]

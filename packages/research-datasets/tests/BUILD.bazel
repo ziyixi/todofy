@@ -306,6 +306,24 @@ unittest_test(
     ],
 )
 
+unittest_test(
+    name = "test_stores_and_materialize",
+    size = "medium",
+    srcs = [
+        "test_sdk.py",
+        "test_stores_and_materialize.py",
+    ],
+    imports = [".", "..", "../src"],
+    modules = ["tests.test_stores_and_materialize"],
+    deps = [
+        "//packages/research-datasets/src/research_datasets:library",
+        "@python_deps//numpy",
+        "@python_deps//pandas",
+        "@python_deps//pyarrow",
+        "@python_deps//pyyaml",
+    ],
+)
+
 test_suite(
     name = "tests",
     tests = [
@@ -325,6 +343,7 @@ test_suite(
         ":test_release_v4",
         ":test_sdk",
         ":test_sec_events",
+        ":test_stores_and_materialize",
         ":test_valuation",
     ],
 )

@@ -1,0 +1,54 @@
+schema_version: 1
+name: default-training-recipe
+sampling: weekly
+time_policy: public_reconstructed
+horizons_trading_days: [5, 21, 63, 126]
+purge_days: 5
+embargo_days: 21
+exclude_columns: []
+bridge_columns:
+  - pmom_ret_21d
+  - pvol_rvol_21d
+  - pvol_mkt_beta_63d
+  - val_log_market_cap
+  - earn_sessions_since
+  - ref_vix
+  - news_21d_rank
+feature_groups:
+  price_momentum_reversal:
+    enabled: true
+    windows: [1, 5, 10, 21, 63, 126, 252]
+  price_vol_beta:
+    enabled: true
+    windows: [5, 21, 63]
+  price_range_anchor:
+    enabled: true
+    windows: [21, 63, 200, 252]
+  price_liquidity_shock:
+    enabled: true
+    windows: [5, 21, 63]
+  fundamentals_pit:
+    enabled: true
+    stale_days: 180
+  fundamental_quality:
+    enabled: true
+  valuation_dynamic:
+    enabled: true
+  earnings_pead_sue:
+    enabled: true
+  sec_typed_events:
+    enabled: true
+  news_intensity:
+    enabled: true
+    half_lives_days: [1.0, 5.0, 20.0]
+  macro_regime:
+    enabled: true
+  insider_flow:
+    enabled: true
+  short_interest:
+    enabled: true
+  filing_text_change:
+    enabled: true
+  llm_release_guidance:
+    enabled: true
+    lookback_days: 90

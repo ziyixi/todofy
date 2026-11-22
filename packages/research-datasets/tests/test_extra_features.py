@@ -215,7 +215,7 @@ def _make_candidates(sessions: list[date], asset_ids: list[str]) -> pd.DataFrame
 
 class ExtraFeaturesTest(unittest.TestCase):
     def test_constants_and_version(self) -> None:
-        self.assertEqual(research_datasets.__version__, "2.4.0")
+        self.assertEqual(research_datasets.__version__, "2.5.0")
         self.assertEqual(len(REFERENCE_SERIES), 36)
         self.assertEqual(len(REFERENCE_ETFS), 19)
         self.assertEqual(

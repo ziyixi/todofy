@@ -283,3 +283,17 @@ panel = ds.panel(
   text and date columns came back with Parquet dtypes and `pd.NA` for missing dates, so `fundamental_states()` and
   `derived_fundamentals(..., provenance=True)` differed between a first and a repeated run; values were not
   affected.
+
+### 2.5.0
+
+- Untruncated multi-clock `Stores` (`Anchors`, `PriceStore`, restatement-proof CSR `FundStore`, CSR `EventStore` with
+  `reaction_1d_ready` and `reaction_3d_ready` masks, and `MacroStore`) align each sample `(asset_id, signal_session)`
+  without truncating sequence length or overwriting restated fiscal periods.
+- Pluggable feature registry (`@register_feature_group`, `FEATURE_GROUPS`, `FeatureGroupSpec`, `GroupBuildContext`,
+  `group_columns`) organizes 15 default feature groups across price dynamics, point-in-time fundamentals, valuation,
+  earnings PEAD/SUE, typed SEC events, decaying news intensity, macro regimes, insider flow, short interest, filing text
+  change, and release guidance extractions.
+- Declarative YAML training recipes (`default_training_recipe.yaml`, `validate_recipe`, `audit_features`,
+  `materialize`) compile projected feature matrices (`X`, optional `y`, `Anchors`, `Stores`, `bridge_columns`, and
+  provenance report with `anchor_order_sha256` verification) with incremental per-group Parquet caching (`Dataset.materialize(...)`
+  / `Dataset.recipe_yaml(...)`) and offline archive loading (`load_local`, `LocalClient`).
