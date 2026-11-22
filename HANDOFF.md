@@ -5,7 +5,7 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-Private operating follow-ups (landed `private-v2-1` through `private-v2-4`; current `private-v2-5` console retry and evaluation UI updates) are tracked in `private/HANDOFF.md`.
+Private application follow-ups and release verification are tracked in `private/HANDOFF.md`.
 
 `packages/research-datasets` `2.5.0` (untruncated multi-clock `Stores`, pluggable 15-group feature registry, declarative YAML `materialize`, and `load_local`) is pinned to public `main` (`f7840d90c7cbd104be71901c9406a4b03b54ae43`) and cleanly verified in an isolated Python 3.14 environment (`2.5.0`, 20 registered groups).
 
