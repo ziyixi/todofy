@@ -5,9 +5,9 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-Private operating follow-ups (including branch `feat/data-pipeline-v2-1` / landed pin `private-v2-1` and earlier `chore/update-console-controls`) are tracked in `private/HANDOFF.md`.
+Private operating follow-ups (landed `private-v2-1` and upcoming `private-v2-2` control updates) are tracked in `private/HANDOFF.md`.
 
-`packages/research-datasets` exposes `README.md` and `pyproject.toml` publicly in `BUILD.bazel` and pins documented install examples to the checked-in `main` SHA (`6ae85640f2f6d166497a51ba467311accc13c609`) cleanly verified in an isolated Python 3.14 environment (`2.4.0`).
+`packages/research-datasets` `2.5.0` (untruncated multi-clock `Stores`, pluggable 15-group feature registry, declarative YAML `materialize`, and `load_local`) is pinned to public `main` (`f7840d90c7cbd104be71901c9406a4b03b54ae43`) and cleanly verified in an isolated Python 3.14 environment (`2.5.0`, 20 registered groups).
 
 Branch `chore/update-console-controls` advances the private application pin for console form, batch-scope, and request-budget UI controls without schema or public service changes; land only after branch `CI gate` passes, then verify private publication and same-SHA reconciliation.
 
