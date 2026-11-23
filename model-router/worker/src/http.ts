@@ -7,6 +7,7 @@ import {
 } from '@ziyixi/edge-auth';
 import { statusBody } from '@ziyixi/proto/rpc-status';
 import { Code, RpcError } from './errors.ts';
+import { handlePrivateInference, PRIVATE_INFERENCE_APP } from './engine.ts';
 import type { Env } from './types.ts';
 
 const verifier = createAccessVerifier();
@@ -21,6 +22,9 @@ export async function forward(request: Request, env: Env, app: string, owner = f
     return withPrivateHeaders(
       errorResponse(new RpcError(Code.UNAVAILABLE, 'MODEL_MAINTENANCE', 'Model Router is temporarily under maintenance.')),
     );
+  if (app === PRIVATE_INFERENCE_APP) {
+    return handlePrivateInference(request, env);
+  }
   const headers = new Headers(request.headers);
   headers.set('x-router-app', app);
   headers.set('x-router-owner', String(owner));
