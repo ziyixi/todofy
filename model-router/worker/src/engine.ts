@@ -152,10 +152,26 @@ export class RouterEngine extends DurableObject<Env> {
     allowModel(app, route.provider);
     const started = Date.now();
     const duration = Math.min(budget(req.timeoutMs), context ? context.expireMs - started : 840000);
+    let openaiMonthSuffix: string | null = null;
     if (route.provider === 'openai') {
       const configuredLimit = Number(this.env.OPENAI_MONTHLY_LIMIT_USD ?? 80);
       const limitUsd = Number.isFinite(configuredLimit) && configuredLimit > 0 ? configuredLimit : 80;
-      if (await this.store.openaiMonthlyCost(started) >= limitUsd * 1_000_000)
+      openaiMonthSuffix = new Date(started).toISOString().slice(0, 7);
+      const unrecorded = (await this.ctx.storage.get<number>(`openai_unrecorded:${openaiMonthSuffix}`)) ?? 0;
+      let monthCost: number;
+      if (app === PRIVATE_INFERENCE_APP) {
+        const cacheKey = `openai_monthly:${openaiMonthSuffix}`;
+        const cached = await this.ctx.storage.get<number>(cacheKey);
+        if (cached === undefined) {
+          monthCost = (await this.store.openaiMonthlyCost(started).catch(() => 0)) + unrecorded;
+          await this.ctx.storage.put(cacheKey, monthCost);
+        } else {
+          monthCost = cached;
+        }
+      } else {
+        monthCost = (await this.store.openaiMonthlyCost(started)) + unrecorded;
+      }
+      if (monthCost >= limitUsd * 1_000_000)
         throw new RpcError(Code.RESOURCE_EXHAUSTED, 'MODEL_SPEND_LIMIT', 'The Router monthly estimated OpenAI usage limit has been reached.');
     }
     const timer = setTimeout(() => controller.abort(new DOMException('The model exceeded its time budget.', 'TimeoutError')), duration);
@@ -171,13 +187,15 @@ export class RouterEngine extends DurableObject<Env> {
       state: 'running',
       startedAt: timestamp(started),
       contentExpireTime: timestamp(started + CONTENT_DAYS * DAY),
-      contentAvailable: true,
+      contentAvailable: app !== PRIVATE_INFERENCE_APP,
     });
-    try {
-      await this.store.start(trace, effective);
-    } catch {
-      clearTimeout(timer);
-      throw new RpcError(Code.UNAVAILABLE, 'MODEL_STORAGE_UNAVAILABLE', 'The request could not be registered.');
+    if (app !== PRIVATE_INFERENCE_APP) {
+      try {
+        await this.store.start(trace, effective);
+      } catch {
+        clearTimeout(timer);
+        throw new RpcError(Code.UNAVAILABLE, 'MODEL_STORAGE_UNAVAILABLE', 'The request could not be registered.');
+      }
     }
     try {
       let result: ProviderResult;
@@ -256,7 +274,27 @@ export class RouterEngine extends DurableObject<Env> {
     trace.generation = value;
     trace.completedAt = timestamp(Date.now());
     trace.durationMs = Date.now() - started;
-    await this.store.finish(trace, effective);
+    const cost = openaiMonthSuffix !== null ? (value.usage?.estimatedCostMicrousd ?? 0) : 0;
+    if (app === PRIVATE_INFERENCE_APP) {
+      const recorded = await this.store.finishPrivate(trace);
+      if (openaiMonthSuffix !== null && cost > 0) {
+        const cacheKey = `openai_monthly:${openaiMonthSuffix}`;
+        const prev = (await this.ctx.storage.get<number>(cacheKey)) ?? 0;
+        await this.ctx.storage.put(cacheKey, prev + cost);
+        if (!recorded) {
+          const unrecKey = `openai_unrecorded:${openaiMonthSuffix}`;
+          const prevUnrec = (await this.ctx.storage.get<number>(unrecKey)) ?? 0;
+          await this.ctx.storage.put(unrecKey, prevUnrec + cost);
+        }
+      }
+    } else {
+      await this.store.finish(trace, effective);
+      if (openaiMonthSuffix !== null && cost > 0) {
+        const cacheKey = `openai_monthly:${openaiMonthSuffix}`;
+        const prev = await this.ctx.storage.get<number>(cacheKey);
+        if (prev !== undefined) await this.ctx.storage.put(cacheKey, prev + cost);
+      }
+    }
     return value;
   }
   async createConversation(req: CreateConversationRequest, app: string) {

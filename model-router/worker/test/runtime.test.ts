@@ -121,7 +121,10 @@ describe('Router with native D1, private R2 and SQLite Durable Objects', () => {
 
     const answer = await client.generate(request)
     expect(answer.error).toBeUndefined()
-    expect((await harness.owner.getRequest({ name: answer.name })).app).toBe(app)
+    const trace = await harness.owner.getRequest({ name: answer.name })
+    expect(trace.app).toBe(app)
+    expect(trace.contentAvailable).toBe(false)
+    expect((await harness.bucket.list()).objects).toHaveLength(0)
     expect((await client.generate({ ...request, maxOutputTokens: 8192 })).error).toBeUndefined()
     expect(harness.calls.map((call) => call.body.max_output_tokens)).toEqual([128, 8192])
     const haikuMin = await client.generate({ model: 'claude-haiku-5-5', input: 'Synthetic binding input', maxOutputTokens: 128 })
@@ -661,4 +664,22 @@ it('maintenance returns standard UNAVAILABLE before parsing while history, healt
     expect(await (await ops.fetch(origin)).json()).toMatchObject({ modes: { maintenance: true } })
     expect(harness.calls).toHaveLength(0)
   } finally { await harness.dispose() }
+}, 30000)
+
+it('tolerates D1 write errors on private-app without dropping responses and caches monthly spend in DO', async () => {
+  const harness = await startHarness()
+  try {
+    const client = harness.forCaller('private-app')
+    await harness.db.prepare('ALTER TABLE requests RENAME TO requests_bak').run()
+    try {
+      const resilient = await client.generate({ model: api, input: 'Synthetic private D1 quota test', maxOutputTokens: 128 })
+      expect(resilient.error).toBeUndefined()
+      expect(resilient.output).toBe('{"answer":"synthetic API result"}')
+      expect((await harness.bucket.list()).objects).toHaveLength(0)
+    } finally {
+      await harness.db.prepare('ALTER TABLE requests_bak RENAME TO requests').run()
+    }
+  } finally {
+    await harness.dispose()
+  }
 }, 30000)
