@@ -141,6 +141,32 @@ export class Store {
       console.warn('model_request_finish_unrecorded');
     }
   }
+  async finishPrivate(value: RequestRecord): Promise<boolean> {
+    const generation = value.generation!;
+    const id = generation.name.slice('requests/'.length);
+    const key = `requests/${value.app}/${id}.json`;
+    const stored: RequestRecord = { ...value, contentAvailable: false };
+    try {
+      await this.env.DB.prepare('INSERT INTO requests (id,app,model,state,started_ms,completed_ms,body_key,content_expire_ms,input_hash,generation_json) VALUES (?,?,?,?,?,?,?,?,\'\',?)')
+        .bind(
+          id,
+          stored.app,
+          generation.model,
+          stored.state,
+          millis(stored.startedAt),
+          millis(stored.completedAt),
+          key,
+          millis(stored.contentExpireTime),
+          metadata(stored),
+        )
+        .run();
+      return true;
+    } catch {
+      // Workers Free D1 daily write quota may reject logging; never drop a completed private extraction result.
+      console.warn('private_request_d1_quota');
+      return false;
+    }
+  }
   async detail(id: string): Promise<RequestRecord> {
     const row = await this.env.DB.prepare('SELECT * FROM requests WHERE id = ?').bind(id).first<RequestRow>();
     if (!row) throw new RpcError(Code.NOT_FOUND, 'REQUEST_NOT_FOUND', 'Request metadata is no longer available.');
