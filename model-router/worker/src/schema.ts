@@ -5,17 +5,44 @@ import { routeFor } from './catalog.ts';
 const encoder = new TextEncoder();
 export const MAX_INPUT_BYTES = 2 * 1024 * 1024;
 
+interface CompiledSchema {
+  readonly isArray: boolean;
+  readonly providerSchema: string;
+  readonly validator: Validator;
+  readonly badPattern: string | undefined;
+}
+const compiledSchemas = new Map<string, CompiledSchema>();
+const MAX_COMPILED_SCHEMAS = 16;
+
+function compiledSchema(schemaJson: string): CompiledSchema {
+  const cached = compiledSchemas.get(schemaJson);
+  if (cached) return cached;
+  const schema = JSON.parse(schemaJson) as ConstructorParameters<typeof Validator>[0] & { type?: string };
+  const isArray = schema.type === 'array';
+  const entry: CompiledSchema = {
+    isArray,
+    providerSchema: isArray
+      ? JSON.stringify({ type: 'object', properties: { result: schema }, required: ['result'], additionalProperties: false })
+      : schemaJson,
+    validator: new Validator(schema),
+    badPattern: uncompiledPattern(schema),
+  };
+  if (compiledSchemas.size >= MAX_COMPILED_SCHEMAS) {
+    const oldest = compiledSchemas.keys().next().value;
+    if (oldest !== undefined) compiledSchemas.delete(oldest);
+  }
+  compiledSchemas.set(schemaJson, entry);
+  return entry;
+}
+
 /** Providers require an object root; Todofy's existing recommendation contract is an array. */
 export function providerOutputSchema(schemaJson: string): string {
-  if (!schemaJson) return schemaJson;
-  const schema = JSON.parse(schemaJson) as { type?: string };
-  if (schema.type !== 'array') return schemaJson;
-  return JSON.stringify({ type: 'object', properties: { result: schema }, required: ['result'], additionalProperties: false });
+  return schemaJson ? compiledSchema(schemaJson).providerSchema : schemaJson;
 }
 
 /** Keep the provider's envelope private and validate the caller's original format afterward. */
 export function callerOutput(schemaJson: string, output: string): string {
-  if (!schemaJson || (JSON.parse(schemaJson) as { type?: string }).type !== 'array') return output;
+  if (!schemaJson || !compiledSchema(schemaJson).isArray) return output;
   try {
     const value = JSON.parse(output) as Record<string, unknown> | null;
     return value && typeof value === 'object' && !Array.isArray(value) && 'result' in value
@@ -79,25 +106,21 @@ export function validateConfig(config: GenerateRequest): void {
   if (config.outputSchemaJson) {
     if (encoder.encode(config.outputSchemaJson).length > 128 * 1024)
       invalid('SCHEMA_TOO_LARGE', 'Output schema exceeds 128 KiB.');
-    let schema: unknown;
+    let compiled: CompiledSchema;
     try {
-      schema = JSON.parse(config.outputSchemaJson);
-      new Validator(schema as ConstructorParameters<typeof Validator>[0]);
+      compiled = compiledSchema(config.outputSchemaJson);
     } catch {
       invalid('INVALID_SCHEMA', 'Use a valid standard JSON Schema.');
     }
-    const pointer = uncompiledPattern(schema);
-    if (pointer !== undefined)
-      invalid('INVALID_SCHEMA', `Output schema pattern at ${pointer} is not a valid Unicode (u flag) regular expression.`);
+    if (compiled.badPattern !== undefined)
+      invalid('INVALID_SCHEMA', `Output schema pattern at ${compiled.badPattern} is not a valid Unicode (u flag) regular expression.`);
   }
 }
 export function validateOutput(config: GenerateRequest, output: string): boolean {
   if (encoder.encode(output).length > 2 * 1024 * 1024) return false;
   if (!config.outputSchemaJson) return !!output.trim();
   try {
-    const schema = JSON.parse(config.outputSchemaJson) as ConstructorParameters<typeof Validator>[0];
-    const validator = new Validator(schema);
-    return validator.validate(JSON.parse(output)).valid;
+    return compiledSchema(config.outputSchemaJson).validator.validate(JSON.parse(output)).valid;
   } catch {
     return false;
   }

@@ -5,6 +5,7 @@ import {
   GenerateRequestSchema,
   GenerationSchema,
   ObservationsSchema,
+  UsageSchema,
   type GenerateRequest,
 } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb';
 import {
@@ -82,6 +83,41 @@ function record(row: RequestRow): RequestRecord {
     contentAvailable: raw.content_unavailable !== true,
   });
 }
+const HOUR_MS = 3_600_000;
+const PRIVATE_DIRECT_LIMIT = 8;
+const PRIVATE_ROLLUP_BATCH = 20;
+const PRIVATE_ROLLUP_INTERVAL_MS = 10_000;
+
+interface RollupEntry {
+  readonly id: string;
+  readonly app: string;
+  readonly model: string;
+  readonly state: string;
+  readonly month: string;
+  readonly hourMs: number;
+  readonly expireMs: number;
+  maxCompletedMs: number;
+  pendingCalls: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteTokens: number;
+  costMicrousd: number;
+  lastFlushMs: number;
+}
+
+const privateRollups = new Map<string, RollupEntry>();
+let privateCallCount = 0;
+
+/** Unflushed in-memory OpenAI microusd buffered for private-app hourly D1 rollups in the active UTC month. */
+export function pendingPrivateOpenAICost(monthSuffix: string): number {
+  let sum = 0;
+  for (const entry of privateRollups.values()) {
+    if (entry.month === monthSuffix && entry.model.startsWith('openai/')) sum += entry.costMicrousd;
+  }
+  return sum;
+}
+
 export class Store {
   readonly env: Env;
   constructor(env: Env) {
@@ -146,18 +182,110 @@ export class Store {
     const id = generation.name.slice('requests/'.length);
     const key = `requests/${value.app}/${id}.json`;
     const stored: RequestRecord = { ...value, contentAvailable: false };
+    const startedMs = millis(stored.startedAt);
+    const completedMs = millis(stored.completedAt) || Date.now();
+    privateCallCount += 1;
+    if (privateCallCount <= PRIVATE_DIRECT_LIMIT) {
+      try {
+        await this.env.DB.prepare('INSERT INTO requests (id,app,model,state,started_ms,completed_ms,body_key,content_expire_ms,input_hash,generation_json) VALUES (?,?,?,?,?,?,?,?,\'\',?)')
+          .bind(id, stored.app, generation.model, stored.state, startedMs, completedMs, key, millis(stored.contentExpireTime), metadata(stored))
+          .run();
+        return true;
+      } catch {
+        console.warn('private_request_d1_quota');
+        return false;
+      }
+    }
+
+    const hourMs = Math.floor(startedMs / HOUR_MS) * HOUR_MS;
+    const bucketKey = `${hourMs}:${generation.model}:${stored.state}`;
+    const now = Date.now();
+    const usage = generation.usage;
+    let entry = privateRollups.get(bucketKey);
+    if (!entry) {
+      entry = {
+        id: `private-rollup-${hourMs}-${generation.model.replaceAll('/', '_')}-${stored.state}`,
+        app: stored.app,
+        model: generation.model,
+        state: stored.state,
+        month: new Date(hourMs).toISOString().slice(0, 7),
+        hourMs,
+        expireMs: millis(stored.contentExpireTime),
+        maxCompletedMs: completedMs,
+        pendingCalls: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedInputTokens: 0,
+        cacheWriteTokens: 0,
+        costMicrousd: 0,
+        lastFlushMs: now,
+      };
+      privateRollups.set(bucketKey, entry);
+    }
+    entry.maxCompletedMs = Math.max(entry.maxCompletedMs, completedMs);
+    entry.pendingCalls += 1;
+    entry.inputTokens += usage?.inputTokens ?? 0;
+    entry.outputTokens += usage?.outputTokens ?? 0;
+    entry.cachedInputTokens += usage?.cachedInputTokens ?? 0;
+    entry.cacheWriteTokens += usage?.cacheWriteTokens ?? 0;
+    entry.costMicrousd += usage?.estimatedCostMicrousd ?? 0;
+
+    if (entry.pendingCalls < PRIVATE_ROLLUP_BATCH && now - entry.lastFlushMs < PRIVATE_ROLLUP_INTERVAL_MS) {
+      return true;
+    }
+
+    const seed = metadata(create(RequestRecordSchema, {
+      ...stored,
+      startedAt: timestamp(entry.hourMs),
+      completedAt: timestamp(entry.maxCompletedMs),
+      generation: {
+        ...generation,
+        name: `requests/${entry.id}`,
+        output: '',
+        usage: create(UsageSchema, {
+          available: usage?.available ?? true,
+          billingKind: usage?.billingKind ?? 'api',
+          inputTokens: entry.inputTokens,
+          outputTokens: entry.outputTokens,
+          cachedInputTokens: entry.cachedInputTokens,
+          cacheWriteTokens: entry.cacheWriteTokens,
+          estimatedCostMicrousd: entry.costMicrousd,
+        }),
+      },
+    }));
+    const dInput = entry.inputTokens;
+    const dOutput = entry.outputTokens;
+    const dCached = entry.cachedInputTokens;
+    const dCacheWrite = entry.cacheWriteTokens;
+    const dCost = entry.costMicrousd;
+    const dCompleted = entry.maxCompletedMs;
+    const rollupId = entry.id;
+    privateRollups.delete(bucketKey);
+
     try {
-      await this.env.DB.prepare('INSERT INTO requests (id,app,model,state,started_ms,completed_ms,body_key,content_expire_ms,input_hash,generation_json) VALUES (?,?,?,?,?,?,?,?,\'\',?)')
+      await this.env.DB.prepare(
+        `INSERT INTO requests (id,app,model,state,started_ms,completed_ms,body_key,content_expire_ms,input_hash,generation_json)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'',?9)
+         ON CONFLICT(id) DO UPDATE SET
+           completed_ms = MAX(COALESCE(requests.completed_ms, 0), excluded.completed_ms),
+           generation_json = json_set(
+             requests.generation_json,
+             '$.generation.usage.input_tokens',
+             COALESCE(json_extract(requests.generation_json, '$.generation.usage.input_tokens'), 0) + ?10,
+             '$.generation.usage.output_tokens',
+             COALESCE(json_extract(requests.generation_json, '$.generation.usage.output_tokens'), 0) + ?11,
+             '$.generation.usage.cached_input_tokens',
+             COALESCE(json_extract(requests.generation_json, '$.generation.usage.cached_input_tokens'), 0) + ?12,
+             '$.generation.usage.cache_write_tokens',
+             COALESCE(json_extract(requests.generation_json, '$.generation.usage.cache_write_tokens'), 0) + ?13,
+             '$.generation.usage.estimated_cost_microusd',
+             COALESCE(json_extract(requests.generation_json, '$.generation.usage.estimated_cost_microusd'), 0) + ?14
+           )`,
+      )
         .bind(
-          id,
-          stored.app,
-          generation.model,
-          stored.state,
-          millis(stored.startedAt),
-          millis(stored.completedAt),
-          key,
-          millis(stored.contentExpireTime),
-          metadata(stored),
+          rollupId, stored.app, generation.model, stored.state, hourMs, dCompleted,
+          `requests/${stored.app}/${rollupId}.json`, entry.expireMs, seed,
+          dInput, dOutput, dCached, dCacheWrite, dCost,
         )
         .run();
       return true;

@@ -19,7 +19,7 @@ import {
   type EmbedRequest,
 } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb';
 import { ConsoleService, RequestRecordSchema } from '@ziyixi/proto/modelrouter/inference/v1/console_pb';
-import { Store, DAY, CONTENT_DAYS, timestamp } from './store.ts';
+import { Store, DAY, CONTENT_DAYS, pendingPrivateOpenAICost, timestamp } from './store.ts';
 import { validateConfig, validateOutput, providerOutputSchema, callerOutput, budget, MAX_INPUT_BYTES } from './schema.ts';
 import { modelCatalog, providerFor, routeFor } from './catalog.ts';
 import { executorClient } from './executor.ts';
@@ -65,7 +65,7 @@ interface OpenAISpendHooks {
 }
 
 let privateOpenAICache: { month: string; costMicrousd: number; syncedAt: number; unrecorded: number } | null = null;
-const PRIVATE_CACHE_SYNC_MS = 30_000;
+const PRIVATE_CACHE_SYNC_MS = 300_000;
 
 function validateStandaloneGenerate(req: GenerateRequest, app: string): void {
   if (app === PRIVATE_INFERENCE_APP) {
@@ -230,7 +230,7 @@ export async function handlePrivateInference(request: Request, env: Env): Promis
         const prevCost = privateOpenAICache?.month === monthSuffix ? privateOpenAICache.costMicrousd : 0;
         privateOpenAICache = {
           month: monthSuffix,
-          costMicrousd: Math.max(prevCost, d1Cost + unrecorded),
+          costMicrousd: Math.max(prevCost, d1Cost + pendingPrivateOpenAICost(monthSuffix) + unrecorded),
           syncedAt: now,
           unrecorded,
         };

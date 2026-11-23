@@ -666,12 +666,21 @@ it('maintenance returns standard UNAVAILABLE before parsing while history, healt
   } finally { await harness.dispose() }
 }, 30000)
 
-it('tolerates D1 write errors on private-app without dropping responses and bypasses RouterEngine DO', async () => {
+it('tolerates D1 write errors on private-app without dropping responses and rolls up bulk calls', async () => {
   const harness = await startHarness()
   try {
     const client = harness.forCaller('private-app')
     const catalog = await client.listModels({})
     expect(catalog.models.some((m) => m.id === 'openai/gpt-6-luna')).toBe(true)
+    for (let i = 0; i < 28; i += 1) {
+      const ok = await client.generate({ model: api, input: `Synthetic bulk private call ${i}`, maxOutputTokens: 128, outputSchemaJson: schema })
+      expect(ok.error).toBeUndefined()
+    }
+    const rowCount = await harness.db.prepare('SELECT count(*) AS n FROM requests').first<number>('n')
+    const d1Total = await harness.db.prepare("SELECT COALESCE(sum(json_extract(generation_json,'$.generation.usage.estimated_cost_microusd')),0) AS c FROM requests").first<number>('c')
+    expect(rowCount).toBeLessThanOrEqual(9)
+    expect(d1Total).toBe(28 * 662)
+
     await harness.db.prepare('ALTER TABLE requests RENAME TO requests_bak').run()
     try {
       const resilient = await client.generate({ model: api, input: 'Synthetic private D1 quota test', maxOutputTokens: 128 })
