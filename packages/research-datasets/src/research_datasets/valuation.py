@@ -76,6 +76,30 @@ _DEBT_HISTORY_VIEWS: tuple[str, ...] = (
 
 _USABLE_VAL_STATUSES = frozenset({"ok", "approximate", "split_unverified"})
 
+_NON_COMMON_NAME_TOKENS = (
+    " ETN",
+    " ETF",
+    "NOTES DUE",
+    "PREFERRED",
+    "WARRANT",
+    "DEPOSITARY",
+    " PFD",
+    " TRUST",
+    " FUND",
+)
+_COMMON_SECURITY_TYPES = frozenset(
+    {"common", "common_presumed", "common_stock", "cs", "adr", "adrc", "nyrs"}
+)
+
+
+def _is_common_equity(row: Mapping[str, Any]) -> bool:
+    """Return True when universe row represents common equity rather than ETN/ETF/preferred."""
+    st = str(row.get("security_type") or "").strip().lower()
+    if st:
+        return st in _COMMON_SECURITY_TYPES
+    name = str(row.get("name") or "").upper()
+    return not (name and any(tok in name for tok in _NON_COMMON_NAME_TOKENS))
+
 
 def _parse_date(val: Any) -> date | None:
     if isinstance(val, pd.Timestamp):
@@ -884,6 +908,12 @@ def valuation(
             if isinstance(raw_sh, pd.DataFrame)
             else list(raw_sh or [])
         )
+        raw_ih = version_or_material.get("issuer_history")
+        ih_records = (
+            raw_ih.to_dict("records")
+            if isinstance(raw_ih, pd.DataFrame)
+            else list(raw_ih or [])
+        )
         cal_raw = version_or_material.get("calendar") or manifest.get("calendar") or []
     else:
         manifest = version_or_material.manifest
@@ -892,6 +922,11 @@ def valuation(
         sh_records = (
             version_or_material.family("symbol_history").to_dict("records")
             if isinstance(families, Mapping) and "symbol_history" in families
+            else []
+        )
+        ih_records = (
+            version_or_material.family("issuer_history").to_dict("records")
+            if isinstance(families, Mapping) and "issuer_history" in families
             else []
         )
         cal_raw = manifest.get("calendar") or []
@@ -903,11 +938,16 @@ def valuation(
     decision_ns = clocks.instants(samples["decision_at"].to_numpy(dtype=object))
     sample_ciks = cik_at(version_or_material, asset_list, signal_days).tolist()
     mapped_ciks = sorted({c for c in sample_ciks if c})
+    mapped_cik_set = set(mapped_ciks)
 
-    # Find all securities belonging to mapped_ciks so dual-class share sums have all sibling prices
+    # Find common-equity securities belonging to mapped_ciks (excluding ETNs, preferreds, etc.)
     sibling_assets_by_cik: dict[str, list[str]] = {}
     symbol_by_asset: dict[str, str] = {}
+    is_common_by_asset: dict[str, bool] = {}
     sh_windows_by_asset: dict[str, list[tuple[date | None, date | None]]] = {}
+    ih_windows_by_asset_cik: dict[
+        tuple[str, str], list[tuple[date | None, date | None]]
+    ] = {}
     for row in sh_records:
         aid = str(row.get("asset_id") or "")
         if aid:
@@ -920,17 +960,40 @@ def valuation(
         if not aid:
             continue
         symbol_by_asset[aid] = str(row.get("symbol") or "")
+        is_common = _is_common_equity(row)
+        is_common_by_asset[aid] = is_common
         cik_raw = str(row.get("cik") or "").strip()
         if (
-            row.get("issuer_mapping_status") == "verified"
+            is_common
+            and row.get("issuer_mapping_status") == "verified"
             and cik_raw.isdigit()
-            and cik_raw.zfill(10) in set(mapped_ciks)
+            and cik_raw.zfill(10) in mapped_cik_set
         ):
             sibling_assets_by_cik.setdefault(cik_raw.zfill(10), []).append(aid)
 
-    # Also include any sample asset mapped via issuer_history
+    for row in ih_records:
+        aid = str(row.get("asset_id") or "")
+        cik_raw = str(row.get("cik") or "").strip()
+        if (
+            not aid
+            or not cik_raw.isdigit()
+            or str(row.get("status") or "") != "verified"
+        ):
+            continue
+        cik_pad = cik_raw.zfill(10)
+        if cik_pad not in mapped_cik_set:
+            continue
+        ih_windows_by_asset_cik.setdefault((aid, cik_pad), []).append(
+            (_parse_date(row.get("valid_from")), _parse_date(row.get("valid_to")))
+        )
+        if is_common_by_asset.get(aid, True):
+            existing = sibling_assets_by_cik.setdefault(cik_pad, [])
+            if aid not in existing:
+                existing.append(aid)
+
+    # Also include any common sample asset mapped via issuer_history
     for aid, c in zip(asset_list, sample_ciks):
-        if c:
+        if c and is_common_by_asset.get(aid, True):
             existing = sibling_assets_by_cik.setdefault(c, [])
             if aid not in existing:
                 existing.append(aid)
@@ -1074,16 +1137,27 @@ def valuation(
 
     def _active_siblings(cik: str, session: date) -> list[str]:
         aids = sibling_assets_by_cik.get(cik, [])
-        if len(aids) <= 1:
+        if not aids:
             return aids
         active: list[str] = []
+        used_ih = False
         for a in aids:
+            ih_wins = ih_windows_by_asset_cik.get((a, cik))
+            if ih_wins:
+                used_ih = True
+                if not any(
+                    (vf is None or vf <= session) and (vt is None or vt >= session)
+                    for vf, vt in ih_wins
+                ):
+                    continue
             wins = sh_windows_by_asset.get(a)
             if not wins or any(
                 (vf is None or vf <= session) and (vt is None or vt >= session)
                 for vf, vt in wins
             ):
                 active.append(a)
+        if used_ih:
+            return active
         return active if active else aids
 
     # Arrays for all outputs
@@ -1185,8 +1259,12 @@ def valuation(
             unlisted = [cr for cr, c_aid in mapped_classes if c_aid is None]
 
             if not listed:
-                # Fallback to primary active security if only one listed security exists
-                prim_aid = active_sibs[0] if active_sibs else aid
+                # Prefer sample row's own close when common equity; else primary active sibling
+                prim_aid = (
+                    aid
+                    if is_common_by_asset.get(aid, True)
+                    else (active_sibs[0] if active_sibs else aid)
+                )
                 px_p, _ = price_book.raw_close_at(prim_aid, sig)
                 if px_p is None:
                     mcap_iss_st = "price_unavailable"
@@ -1311,7 +1389,11 @@ def valuation(
                         )
         else:
             # No share_classes rows -> use shares_outstanding_i, else shares_weighted_basic_q (approximate)
-            prim_aid = active_sibs[0] if active_sibs else aid
+            prim_aid = (
+                aid
+                if is_common_by_asset.get(aid, True)
+                else (active_sibs[0] if active_sibs else aid)
+            )
             px_iss, _ = price_book.raw_close_at(prim_aid, sig)
             if px_iss is None or px_self is None:
                 mcap_iss_st = (

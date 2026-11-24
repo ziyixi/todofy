@@ -1085,6 +1085,195 @@ class ValuationTest(unittest.TestCase):
         self.assertEqual(res.loc[0, "market_cap_issuer_status"], "split_unverified")
         self.assertEqual(res.loc[0, "valuation_split_basis"], "vendor_bars")
 
+    def test_etn_sibling_excluded_from_siblings_and_mcap_security(self) -> None:
+        cal = _business_days("2025-04-01", "2025-05-30")
+        asset_etn = "00000000-0000-4000-8000-000000000004"
+        asset_common = ASSET_A
+        facts = [
+            _fact(
+                "sh_c",
+                "EntityCommonStockSharesOutstanding",
+                "1000",
+                None,
+                "2025-04-20",
+                cik=CIK_DUAL,
+                taxonomy="dei",
+                unit="shares",
+                currency="",
+                period_kind="instant",
+            ),
+            _fact(
+                "eq_c",
+                "StockholdersEquity",
+                "50000",
+                None,
+                "2025-03-31",
+                cik=CIK_DUAL,
+                period_kind="instant",
+            ),
+        ]
+        # Alphabetically earlier ETN ("AAETN" < "SYNJ") must not poison valuation or trigger multi-security missingness
+        material = {
+            "manifest": {
+                "calendar": cal,
+                "source_timezones": {"sec": "America/New_York"},
+            },
+            "universe": pd.DataFrame(
+                [
+                    {
+                        "asset_id": asset_etn,
+                        "symbol": "AAETN",
+                        "cik": CIK_DUAL,
+                        "issuer_mapping_status": "verified",
+                        "security_type": "etf",
+                        "name": "Inverse ETN Notes due 2045",
+                    },
+                    {
+                        "asset_id": asset_common,
+                        "symbol": "SYNJ",
+                        "cik": CIK_DUAL,
+                        "issuer_mapping_status": "verified",
+                        "security_type": "common",
+                        "name": "Synthetic Bank Common",
+                    },
+                ]
+            ),
+            "fundamentals": pd.DataFrame(facts),
+            "raw": pd.DataFrame(
+                [
+                    {"asset_id": asset_etn, "date": "2025-05-05", "close": 25.0},
+                    {"asset_id": asset_common, "date": "2025-05-05", "close": 200.0},
+                ]
+            ),
+        }
+        samples = _sample_rows([(asset_common, "2025-05-05", "2025-05-06T10:00:00Z")])
+        res = valuation(material, samples, time_policy="public_reconstructed")
+        self.assertAlmostEqual(res.loc[0, "market_cap_issuer_value"], 200_000.0)
+        self.assertAlmostEqual(res.loc[0, "market_cap_security_value"], 200_000.0)
+        self.assertEqual(res.loc[0, "market_cap_security_status"], "ok")
+        self.assertAlmostEqual(res.loc[0, "book_to_market_value"], 50_000.0 / 200_000.0)
+
+    def test_dual_class_unlabeled_cover_uses_own_close(self) -> None:
+        cal = _business_days("2025-04-01", "2025-05-30")
+        share_classes = pd.DataFrame(
+            [
+                _cover_class(
+                    "c_unlabeled",
+                    cik=CIK_DUAL,
+                    class_member="",
+                    trading_symbol="",
+                    value="1000",
+                )
+            ]
+        )
+        material = {
+            "manifest": {
+                "calendar": cal,
+                "source_timezones": {"sec": "America/New_York"},
+            },
+            "universe": pd.DataFrame(
+                [
+                    {
+                        "asset_id": ASSET_A,
+                        "symbol": "SYNA",
+                        "cik": CIK_DUAL,
+                        "issuer_mapping_status": "verified",
+                        "security_type": "common_presumed",
+                    },
+                    {
+                        "asset_id": ASSET_B,
+                        "symbol": "SYNB",
+                        "cik": CIK_DUAL,
+                        "issuer_mapping_status": "verified",
+                        "security_type": "common_presumed",
+                    },
+                ]
+            ),
+            "fundamentals": pd.DataFrame(),
+            "share_classes": share_classes,
+            "raw": pd.DataFrame(
+                [
+                    {"asset_id": ASSET_A, "date": "2025-05-05", "close": 100.0},
+                    {"asset_id": ASSET_B, "date": "2025-05-05", "close": 80.0},
+                ]
+            ),
+        }
+        samples = _sample_rows([(ASSET_B, "2025-05-05", "2025-05-06T10:00:00Z")])
+        res = valuation(material, samples, time_policy="public_reconstructed")
+        # Row for SYNB must use SYNB's own close (80.0 -> 80,000), not alphabetically-first SYNA (100.0)
+        self.assertAlmostEqual(res.loc[0, "market_cap_issuer_value"], 80_000.0)
+
+    def test_expired_issuer_history_sibling_excluded(self) -> None:
+        cal = _business_days("2025-04-01", "2025-05-30")
+        facts = [
+            _fact(
+                "sh_1",
+                "EntityCommonStockSharesOutstanding",
+                "1000",
+                None,
+                "2025-04-20",
+                cik=CIK_DUAL,
+                taxonomy="dei",
+                unit="shares",
+                currency="",
+                period_kind="instant",
+            )
+        ]
+        material = {
+            "manifest": {
+                "calendar": cal,
+                "source_timezones": {"sec": "America/New_York"},
+            },
+            "universe": pd.DataFrame(
+                [
+                    {
+                        "asset_id": ASSET_A,
+                        "symbol": "OLDS",
+                        "cik": "",
+                        "issuer_mapping_status": "missing",
+                        "security_type": "common",
+                    },
+                    {
+                        "asset_id": ASSET_B,
+                        "symbol": "CURR",
+                        "cik": CIK_DUAL,
+                        "issuer_mapping_status": "verified",
+                        "security_type": "common",
+                    },
+                ]
+            ),
+            "issuer_history": pd.DataFrame(
+                [
+                    {
+                        "asset_id": ASSET_A,
+                        "cik": CIK_DUAL,
+                        "valid_from": "2025-04-01",
+                        "valid_to": "2025-04-30",
+                        "status": "verified",
+                    },
+                    {
+                        "asset_id": ASSET_B,
+                        "cik": CIK_DUAL,
+                        "valid_from": "2025-04-01",
+                        "valid_to": "",
+                        "status": "verified",
+                    },
+                ]
+            ),
+            "fundamentals": pd.DataFrame(facts),
+            "raw": pd.DataFrame(
+                [
+                    {"asset_id": ASSET_A, "date": "2025-05-05", "close": 50.0},
+                    {"asset_id": ASSET_B, "date": "2025-05-05", "close": 90.0},
+                ]
+            ),
+        }
+        samples = _sample_rows([(ASSET_B, "2025-05-05", "2025-05-06T10:00:00Z")])
+        res = valuation(material, samples, time_policy="public_reconstructed")
+        # OLDS expired 2025-04-30, so CURR is sole active sibling on 2025-05-05 -> market_cap_security is ok
+        self.assertEqual(res.loc[0, "market_cap_security_status"], "ok")
+        self.assertAlmostEqual(res.loc[0, "market_cap_security_value"], 90_000.0)
+
 
 if __name__ == "__main__":
     unittest.main()
