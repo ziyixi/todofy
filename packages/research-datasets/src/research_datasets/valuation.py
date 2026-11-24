@@ -1122,7 +1122,7 @@ def valuation(
     eq_v, eq_s, _, eq_c, _, _ = _col_values("equity_i")
     ni_v, ni_s, _, ni_c, _, _ = _col_values("net_income_ttm")
     rev_v, rev_s, rev_pe, rev_c, _, _ = _col_values("revenue_ttm")
-    ocf_v, ocf_s, _, ocf_c, _, _ = _col_values("operating_cash_flow_ttm")
+    ocf_v, ocf_s, ocf_pe, ocf_c, _, _ = _col_values("operating_cash_flow_ttm")
     fcf_v, fcf_s, _, fcf_c, _, _ = _col_values("fcf_ttm")
     div_v, div_s, div_pe, div_c, _, _ = _col_values("dividends_paid_ttm")
     rep_v, rep_s, rep_pe, rep_c, _, _ = _col_values("repurchases_ttm")
@@ -1528,10 +1528,29 @@ def valuation(
                 (float(rep_v[i]), rep_s[i], rep_pe[i], rep_c[i], 1.0),
                 (float(iss_v[i]), iss_s[i], iss_pe[i], iss_c[i], -1.0),
             ]
+            fresh_cf_pes = [
+                p
+                for p in (
+                    ocf_pe[i] if ocf_s[i] in {"ok", "approximate"} else None,
+                    *(leg[2] for leg in legs if leg[1] in {"ok", "approximate"}),
+                )
+                if p is not None
+            ]
+            latest_cf_pe = max(fresh_cf_pes) if fresh_cf_pes else None
+
+            def _is_superseded_stale(
+                st_l: str, pe_l: date | None, ref_pe: date | None = latest_cf_pe
+            ) -> bool:
+                return (
+                    st_l == "stale"
+                    and ref_pe is not None
+                    and (pe_l is None or pe_l < ref_pe)
+                )
+
             bad_leg = next(
                 (
                     st_l
-                    for _, st_l, _, _, _ in legs
+                    for _, st_l, pe_l, _, _ in legs
                     if st_l
                     not in {
                         "ok",
@@ -1539,14 +1558,24 @@ def valuation(
                         "metric_missing",
                         "not_captured",
                     }
+                    and not _is_superseded_stale(st_l, pe_l)
                 ),
                 None,
+            )
+            any_superseded = any(
+                _is_superseded_stale(st_l, pe_l) for _, st_l, pe_l, _, _ in legs
             )
             present_legs = [leg for leg in legs if leg[1] in {"ok", "approximate"}]
             if bad_leg is not None:
                 out_sts["net_payout_yield"].append(bad_leg)
             elif not present_legs:
-                out_sts["net_payout_yield"].append(div_s[i])
+                if any_superseded and mcap_iss > 0.0:
+                    out_vals["net_payout_yield"][i] = 0.0
+                    out_sts["net_payout_yield"].append(
+                        _combine_status(mcap_iss_st, "approximate")
+                    )
+                else:
+                    out_sts["net_payout_yield"].append(div_s[i])
             else:
                 pes_present = [leg[2] for leg in present_legs if leg[2] is not None]
                 if (
@@ -1569,8 +1598,10 @@ def valuation(
                         out_sts["net_payout_yield"].append("invalid_value")
                     else:
                         npy = payout_usd / mcap_iss
-                        leg_approx = len(present_legs) < 3 or any(
-                            leg[1] == "approximate" for leg in present_legs
+                        leg_approx = (
+                            len(present_legs) < 3
+                            or any_superseded
+                            or any(leg[1] == "approximate" for leg in present_legs)
                         )
                         out_vals["net_payout_yield"][i] = npy
                         out_sts["net_payout_yield"].append(
@@ -1652,6 +1683,11 @@ def valuation(
                         opt_sum += oc
                         opt_approx = opt_approx or (ost == "approximate")
                     elif ost in {"metric_missing", "not_captured", "not_yet_available"}:
+                        continue
+                    elif ost == "stale" and (
+                        opt_pe_arr[i] is None or opt_pe_arr[i] < cash_pe_i
+                    ):
+                        opt_approx = True
                         continue
                     else:
                         debt_err = ost
