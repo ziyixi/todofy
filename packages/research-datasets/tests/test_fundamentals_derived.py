@@ -157,12 +157,54 @@ class ConceptCatalogueTest(unittest.TestCase):
 class DerivedQuartersTest(unittest.TestCase):
     def test_direct_quarter_start_range_keeps_boundary_and_period_order(self) -> None:
         facts = [
-            make_fact("q1", "Revenues", "50", "2025-01-01", "2025-03-31"),
-            make_fact("q2", "Revenues", "100", "2025-04-01", "2025-06-19"),
-            make_fact("q3", "Revenues", "125", "2025-06-20", "2025-09-08"),
-            make_fact("q4", "Revenues", "150", "2025-09-04", "2025-12-05"),
-            make_fact("slot-q4", "Revenues", "175", "2025-09-14", "2025-12-04"),
-            make_fact("early-q4", "Revenues", "200", "2025-09-03", "2025-12-07"),
+            make_fact(
+                "q1",
+                "Revenues",
+                "50",
+                "2025-01-01",
+                "2025-03-31",
+                public_at="2026-01-15T12:00:00Z",
+            ),
+            make_fact(
+                "q2",
+                "Revenues",
+                "100",
+                "2025-04-01",
+                "2025-06-19",
+                public_at="2026-01-15T12:00:00Z",
+            ),
+            make_fact(
+                "q3",
+                "Revenues",
+                "125",
+                "2025-06-20",
+                "2025-09-08",
+                public_at="2026-01-15T12:00:00Z",
+            ),
+            make_fact(
+                "q4",
+                "Revenues",
+                "150",
+                "2025-09-04",
+                "2025-12-05",
+                public_at="2026-01-15T12:00:00Z",
+            ),
+            make_fact(
+                "slot-q4",
+                "Revenues",
+                "175",
+                "2025-09-14",
+                "2025-12-04",
+                public_at="2026-01-15T12:00:00Z",
+            ),
+            make_fact(
+                "early-q4",
+                "Revenues",
+                "200",
+                "2025-09-03",
+                "2025-12-07",
+                public_at="2026-01-15T12:00:00Z",
+            ),
         ]
         ledger = fiscal_quarters(
             make_material(facts),
@@ -1107,6 +1149,7 @@ class TrailingAndFiscalQuartersTest(unittest.TestCase):
                 str(start),
                 str(start + timedelta(days=days - 1)),
                 form=form,
+                public_at="2026-01-01T12:00:00Z",
             )
             for days, form, value in (
                 (84, "10-Q", 10),
@@ -2338,6 +2381,122 @@ class TrailingAndFiscalQuartersTest(unittest.TestCase):
         self.assertAlmostEqual(
             float(res.loc[1, "shares_outstanding_i_yoy_value"]), 0.0, places=5
         )
+
+    def test_sanitizes_filer_unit_scales_expenditure_signs_and_future_dates(
+        self,
+    ) -> None:
+        rows = [
+            # Shares reported in millions (715 vs 715_000_000 cover)
+            make_fact(
+                "cov-1",
+                "EntityCommonStockSharesOutstanding",
+                "715000000",
+                None,
+                "2025-03-31",
+                taxonomy="dei",
+                unit="shares",
+                currency="",
+                period_kind="instant",
+                filed="2025-05-01",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            make_fact(
+                "shw-bad",
+                "WeightedAverageNumberOfDilutedSharesOutstanding",
+                "715",
+                "2025-01-01",
+                "2025-03-31",
+                unit="shares",
+                currency="",
+                filed="2025-05-01",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            # Net income 400M + EPS multiplied by 1e6 -> EPS=800000 -> rescaled to 0.8
+            make_fact(
+                "ni-scale",
+                "NetIncomeLoss",
+                "572000000",
+                "2025-01-01",
+                "2025-03-31",
+                filed="2025-05-01",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            make_fact(
+                "eps-bad",
+                "EarningsPerShareDiluted",
+                "800000",
+                "2025-01-01",
+                "2025-03-31",
+                unit="USD/shares",
+                filed="2025-05-01",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            # Negative dividend payment normalized to positive
+            make_fact(
+                "div-neg",
+                "PaymentsOfDividends",
+                "-50000000",
+                "2025-01-01",
+                "2025-03-31",
+                filed="2025-05-01",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            # Future period_end typo (+1yr after filed) must be dropped while dps_declared (+60d) stays
+            make_fact(
+                "sh-future",
+                "EntityCommonStockSharesOutstanding",
+                "999000000",
+                None,
+                "2026-05-01",
+                taxonomy="dei",
+                unit="shares",
+                currency="",
+                period_kind="instant",
+                filed="2025-05-01",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            make_fact(
+                "dps-decl",
+                "CommonStockDividendsPerShareDeclared",
+                "0.50",
+                "2025-04-01",
+                "2025-06-30",
+                unit="USD/shares",
+                filed="2025-05-01",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+        ]
+        samples = pd.DataFrame(
+            {
+                "asset_id": [ASSET_A],
+                "signal_session": ["2025-05-02"],
+                "decision_at": ["2025-05-05T10:00:00Z"],
+            }
+        )
+        res = derived_fundamentals(
+            make_material(rows),
+            samples,
+            time_policy="public_reconstructed",
+            views=(
+                "shares_weighted_diluted_q",
+                "eps_diluted_q",
+                "dividends_paid_q",
+                "shares_outstanding_i",
+                "dps_declared_q",
+            ),
+        )
+        self.assertAlmostEqual(
+            float(res.loc[0, "shares_weighted_diluted_q_value"]), 715_000_000.0
+        )
+        self.assertEqual(res.loc[0, "shares_weighted_diluted_q_status"], "approximate")
+        self.assertAlmostEqual(float(res.loc[0, "eps_diluted_q_value"]), 0.8)
+        self.assertEqual(res.loc[0, "eps_diluted_q_status"], "approximate")
+        self.assertAlmostEqual(
+            float(res.loc[0, "dividends_paid_q_value"]), 50_000_000.0
+        )
+        # Future cover date dropped -> retains valid 2025-03-31 date with non-negative age
+        self.assertGreaterEqual(float(res.loc[0, "shares_outstanding_i_age_days"]), 0.0)
+        self.assertAlmostEqual(float(res.loc[0, "dps_declared_q_value"]), 0.50)
 
 
 if __name__ == "__main__":

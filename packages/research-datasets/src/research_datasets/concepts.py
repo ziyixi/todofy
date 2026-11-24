@@ -988,6 +988,33 @@ _FALLBACK_INPUTS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "minority_interest",
         ),
         "cash": ("cash_incl_restricted",),
+        "shares_weighted_basic": (
+            "shares_outstanding_cover",
+            "shares_outstanding_bs",
+            "shares_weighted_diluted",
+        ),
+        "shares_weighted_diluted": (
+            "shares_outstanding_cover",
+            "shares_outstanding_bs",
+            "shares_weighted_basic",
+        ),
+        "eps_diluted": (
+            "net_income_parent",
+            "net_income_total",
+            "net_income_common",
+            "shares_weighted_diluted",
+            "shares_weighted_basic",
+            "shares_outstanding_cover",
+            "shares_outstanding_bs",
+        ),
+        "eps_basic": (
+            "net_income_parent",
+            "net_income_total",
+            "net_income_common",
+            "shares_weighted_basic",
+            "shares_outstanding_cover",
+            "shares_outstanding_bs",
+        ),
     }
 )
 

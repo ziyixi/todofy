@@ -429,6 +429,18 @@ def normalize_facts(
                 .tz_convert(clocks.NEW_YORK)
                 .date()
             )
+        if not retracted and p_end is not None and filed_d is not None:
+            max_future = 100 if concept.name == "dps_declared" else 7
+            if (p_end - filed_d).days > max_future:
+                continue
+        if (
+            not retracted
+            and concept.name in {"dividends_paid", "repurchases", "capex"}
+            and dec_val is not None
+            and dec_val < 0
+        ):
+            dec_val = abs(dec_val)
+            raw_str = _format_decimal(dec_val)
         effective_end = p_end if p_end is not None else date(1970, 1, 1)
         if concept.name != "shares_outstanding_cover" and concept.unit_kind in {
             "shares",
@@ -602,6 +614,164 @@ def _fill_derived_fallbacks(
     for c_name in ("gross_profit", "total_liabilities", "cash"):
         if not concept_periods[c_name]:
             concept_periods.pop(c_name, None)
+
+
+def _rescale_period_value(pv: PeriodValue, mult: Decimal, suffix: str) -> PeriodValue:
+    assert pv.decimal_value is not None
+    scaled = pv.decimal_value * mult
+    return PeriodValue(
+        status="approximate" if pv.usable else pv.status,
+        decimal_value=scaled,
+        raw_value=_format_decimal(scaled),
+        available_ns=pv.available_ns,
+        period_start=pv.period_start,
+        period_end=pv.period_end,
+        basis=f"{pv.basis}_{suffix}" if pv.basis else suffix,
+        accessions=pv.accessions,
+        tag=pv.tag,
+        currency=pv.currency,
+        reference_date=pv.reference_date,
+    )
+
+
+def _sanitize_unit_scales(
+    concept_periods: dict[str, dict[tuple[date | None, date], PeriodValue]],
+    split_factor_fn: Callable[[date | None, date | None], float] | None = None,
+) -> None:
+    """Correct 1e3 / 1e6 filer unit errors on shares and EPS values."""
+    share_concepts = (
+        "shares_outstanding_cover",
+        "shares_outstanding_bs",
+        "shares_weighted_diluted",
+        "shares_weighted_basic",
+    )
+    large_share_refs: list[tuple[date, Decimal, date]] = []
+    for c_name in share_concepts:
+        for pv in concept_periods.get(c_name, {}).values():
+            if (
+                pv.usable
+                and pv.decimal_value is not None
+                and pv.decimal_value >= Decimal(100000)
+            ):
+                large_share_refs.append(
+                    (pv.period_end, pv.decimal_value, pv.reference_date)
+                )
+
+    for c_name in share_concepts:
+        p_map = concept_periods.get(c_name)
+        if not p_map:
+            continue
+        for key, pv in list(p_map.items()):
+            if not (
+                pv.usable and pv.decimal_value is not None and pv.decimal_value > 0
+            ):
+                continue
+            ref_val: float | None = None
+            best_dist = 9999
+            for r_pe, r_dec, r_ref in large_share_refs:
+                dist = abs((r_pe - pv.period_end).days)
+                if dist <= 400 and dist < best_dist:
+                    f = (
+                        split_factor_fn(r_ref, pv.reference_date)
+                        if split_factor_fn is not None
+                        else 1.0
+                    )
+                    if f <= 0 or not math.isfinite(f):
+                        f = 1.0
+                    cand = float(r_dec) * f
+                    if cand >= 100_000.0:
+                        best_dist = dist
+                        ref_val = cand
+            val_f = float(pv.decimal_value)
+            if ref_val is None and 0.0 < val_f < 50_000.0:
+                ni_pv = concept_periods.get("net_income", {}).get(key)
+                eps_pv = concept_periods.get("eps_diluted", {}).get(
+                    key
+                ) or concept_periods.get("eps_basic", {}).get(key)
+                if (
+                    ni_pv is not None
+                    and eps_pv is not None
+                    and ni_pv.usable
+                    and eps_pv.usable
+                    and ni_pv.decimal_value
+                    and eps_pv.decimal_value
+                ):
+                    ref_val = abs(
+                        float(ni_pv.decimal_value) / float(eps_pv.decimal_value)
+                    )
+            if ref_val is None or ref_val <= 0.0 or val_f <= 0.0:
+                continue
+            ratio = ref_val / val_f
+            if 500.0 <= ratio <= 2000.0:
+                p_map[key] = _rescale_period_value(pv, Decimal(1000), "scaled_1e3")
+            elif 500_000.0 <= ratio <= 2_000_000.0:
+                p_map[key] = _rescale_period_value(pv, Decimal(1000000), "scaled_1e6")
+
+    # Rescale shares_outstanding composite too if cover/bs changed
+    cov_map = concept_periods.get("shares_outstanding_cover", {})
+    bs_map = concept_periods.get("shares_outstanding_bs", {})
+    so_map = concept_periods.get("shares_outstanding")
+    if so_map is not None:
+        for key in list(so_map):
+            cov = cov_map.get(key)
+            bs = bs_map.get(key)
+            if cov is not None:
+                so_map[key] = _relabel_period(cov, "cover")
+            elif bs is not None:
+                so_map[key] = _relabel_period(bs, "balance_sheet")
+
+    # Rescale EPS when eps * shares / net_income is off by ~1e3 or ~1e6
+    ni_map = concept_periods.get("net_income", {})
+    for eps_name, sh_pref in (
+        ("eps_diluted", "shares_weighted_diluted"),
+        ("eps_basic", "shares_weighted_basic"),
+    ):
+        eps_map = concept_periods.get(eps_name)
+        if not eps_map or not ni_map:
+            continue
+        for key, pv in list(eps_map.items()):
+            if not (
+                pv.usable and pv.decimal_value is not None and pv.decimal_value != 0
+            ):
+                continue
+            ni_pv = ni_map.get(key)
+            if not (
+                ni_pv is not None
+                and ni_pv.usable
+                and ni_pv.decimal_value
+                and ni_pv.decimal_value != 0
+            ):
+                continue
+            sh_pv = (
+                concept_periods.get(sh_pref, {}).get(key)
+                or concept_periods.get("shares_weighted_basic", {}).get(key)
+                or concept_periods.get("shares_outstanding", {}).get((None, key[1]))
+            )
+            if (
+                sh_pv is None
+                or not sh_pv.usable
+                or not sh_pv.decimal_value
+                or sh_pv.decimal_value <= 0
+            ):
+                continue
+            sh_f = float(sh_pv.decimal_value)
+            if split_factor_fn is not None:
+                f = split_factor_fn(sh_pv.reference_date, pv.reference_date)
+                if f > 0 and math.isfinite(f):
+                    sh_f *= f
+            ratio = abs(float(pv.decimal_value) * sh_f / float(ni_pv.decimal_value))
+            if 500.0 <= ratio <= 2000.0:
+                eps_map[key] = _rescale_period_value(
+                    pv, Decimal("0.001"), "scaled_1e-3"
+                )
+            elif 500_000.0 <= ratio <= 2_000_000.0:
+                eps_map[key] = _rescale_period_value(
+                    pv, Decimal("0.000001"), "scaled_1e-6"
+                )
+            elif 5e-4 <= ratio <= 2e-3:
+                eps_map[key] = _rescale_period_value(pv, Decimal(1000), "scaled_1e3")
+            elif 5e-7 <= ratio <= 2e-6:
+                eps_map[key] = _rescale_period_value(pv, Decimal(1000000), "scaled_1e6")
 
 
 def _scale_decimal_to_ref(
@@ -1992,6 +2162,7 @@ class IssuerStateMachine:
         _fill_derived_fallbacks(
             concept_periods, all_duration_keys, all_instant_keys, has_nci
         )
+        _sanitize_unit_scales(concept_periods, self._split_factor_fn)
 
         slots_list, fy_periods = (
             self._build_fiscal_calendar()
