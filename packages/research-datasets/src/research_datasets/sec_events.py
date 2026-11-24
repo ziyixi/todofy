@@ -1841,7 +1841,7 @@ def _build_sue_steps(
                         np.std(np.array(valid_priors, dtype=np.float64), ddof=1)
                     )
                     if np.isfinite(disp) and disp > 0:
-                        sue_eps = cur_sc / disp
+                        sue_eps = float(np.clip(cur_sc / disp, -10.0, 10.0))
 
         sue_rev = float("nan")
         rev_anchor: _QuarterPoint | None = None
@@ -1857,11 +1857,13 @@ def _build_sue_steps(
                 ][-8:]
                 valid_rev_priors = [d for d in prior_rev_window if np.isfinite(d)]
                 if len(valid_rev_priors) >= 6:
-                    disp_r = float(
-                        np.std(np.array(valid_rev_priors, dtype=np.float64), ddof=1)
-                    )
+                    prior_arr = np.array(valid_rev_priors, dtype=np.float64)
+                    drift_r = float(np.mean(prior_arr))
+                    disp_r = float(np.std(prior_arr, ddof=1))
                     if np.isfinite(disp_r) and disp_r > 0:
-                        sue_rev = cur_d / disp_r
+                        sue_rev = float(
+                            np.clip((cur_d - drift_r) / disp_r, -10.0, 10.0)
+                        )
 
         anchor = eps_anchor if eps_anchor is not None else rev_anchor
         steps.append(

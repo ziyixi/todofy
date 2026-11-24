@@ -1401,6 +1401,165 @@ class StoresAndMaterializeAdversarialTest(unittest.TestCase):
         self.assertEqual(int(fstore.snap_post_1d_ready_ns[0]), int(cal.closes[26]))
         self.assertAlmostEqual(float(fstore.snap_post_1d_ret[0]), 0.20, places=4)
 
+    def test_build_earnings_pead_sue_masks_stale_and_old_sue(self) -> None:
+        from unittest.mock import patch
+
+        from research_datasets.feature_groups import GroupBuildContext
+        from research_datasets.groups.domain import build_earnings_pead_sue
+        from research_datasets.stores import (
+            PRICE_CHANNELS,
+            Anchors,
+            EventStore,
+            PriceStore,
+            Stores,
+        )
+
+        sessions = _nyse_sessions(date(2025, 1, 2), 10)
+        cal = clocks.Calendar(sessions)
+        tensor = np.full(
+            (1, len(sessions), len(PRICE_CHANNELS)), np.nan, dtype=np.float32
+        )
+        tensor[0, :, 3] = 100.0
+        tensor[0, :, 4] = 1000.0
+        tensor[0, :, 7] = 100.0
+        pstore = PriceStore(
+            tensor, assets=(ASSET_1,), sessions=sessions, benchmark_idx=-1
+        )
+        estore = EventStore(
+            assets=(ASSET_1,),
+            asset_offsets=np.array([0, 0], dtype=np.int64),
+            public_at_ns=np.empty(0, dtype=np.int64),
+            available_at_ns=np.empty(0, dtype=np.int64),
+            source_id=np.empty(0, dtype=np.uint8),
+            kind_code=np.empty(0, dtype=np.int32),
+            kinds=(),
+            numeric_value=np.empty(0, dtype=np.float32),
+            pre_ret_21d=np.empty(0, dtype=np.float32),
+            post_1d_ret=np.empty(0, dtype=np.float32),
+            post_3d_ret=np.empty(0, dtype=np.float32),
+            post_1d_ready_ns=np.empty(0, dtype=np.int64),
+            post_3d_ready_ns=np.empty(0, dtype=np.int64),
+            time_policy="public_reconstructed",
+        )
+        anc_df = pd.DataFrame(
+            {
+                "row_id": [0, 1, 2],
+                "asset_id": [ASSET_1, ASSET_1, ASSET_1],
+                "signal_session": [
+                    sessions[2].isoformat(),
+                    sessions[5].isoformat(),
+                    sessions[8].isoformat(),
+                ],
+                "entry_session": [
+                    sessions[3].isoformat(),
+                    sessions[6].isoformat(),
+                    sessions[9].isoformat(),
+                ],
+                "decision_at": [
+                    pd.Timestamp(cal.decisions[2], unit="ns", tz="UTC"),
+                    pd.Timestamp(cal.decisions[5], unit="ns", tz="UTC"),
+                    pd.Timestamp(cal.decisions[8], unit="ns", tz="UTC"),
+                ],
+                "in_universe": [True, True, True],
+                "is_benchmark": [False, False, False],
+                "asset_idx": [0, 0, 0],
+                "session_idx": [2, 5, 8],
+                "fund_snap_id": [-1, -1, -1],
+                "event_start_cursor": [0, 0, 0],
+                "event_end_cursor": [0, 0, 0],
+            }
+        )
+        anchors = Anchors(
+            frame=anc_df,
+            order_sha256="test-b11",
+            assets=(ASSET_1,),
+            sessions=tuple(sessions),
+            time_policy="public_reconstructed",
+            sampling="weekly",
+        )
+        stores = Stores(
+            anchors=anchors, prices=pstore, fundamentals=None, events=estore, macro=None
+        )
+        ver = _SyntheticVersion(
+            calendar=sessions,
+            universe=[
+                {
+                    "asset_id": ASSET_1,
+                    "symbol": "SUE1",
+                    "cik": CIK_1,
+                    "issuer_mapping_status": "verified",
+                }
+            ],
+            families={
+                "fundamentals": pd.DataFrame(),
+                "earnings_announcements": pd.DataFrame(),
+            },
+            prices_adj=pd.DataFrame(
+                [
+                    {"asset_id": ASSET_1, "date": d.isoformat(), "close": 100.0}
+                    for d in sessions
+                ]
+            ),
+            prices_raw=pd.DataFrame(
+                [
+                    {"asset_id": ASSET_1, "date": d.isoformat(), "close": 100.0}
+                    for d in sessions
+                ]
+            ),
+        )
+        ctx = GroupBuildContext(
+            version=ver, stores=stores, time_policy="public_reconstructed"
+        )
+        fake_earn = pd.DataFrame(
+            {
+                "earn_days_since": [10.0, 20.0, 30.0],
+                "earn_next_within_5s": [0, 0, 0],
+                "earn_pre_ret_5d": [0.01, 0.02, 0.03],
+                "earn_pre_ret_21d": [0.02, 0.03, 0.04],
+                "earn_ear": [0.01, 0.02, 0.03],
+                "earn_car_5d": [0.01, 0.02, 0.03],
+                "earn_car_21d": [0.02, 0.03, 0.04],
+                "earn_volume_ratio": [1.5, 1.5, 1.5],
+                "earn_reaction_known": [1, 1, 1],
+            }
+        )
+        fake_earn.attrs["primary_period_end"] = [
+            "2024-12-31",
+            "2024-12-31",
+            "2024-12-31",
+        ]
+        fake_sue = pd.DataFrame(
+            {
+                "earn_sue_eps": [1.5, 2.5, 3.5],
+                "earn_sue_eps_price": [0.01, 0.02, 0.03],
+                "earn_sue_revenue": [0.5, 1.0, 1.5],
+                "earn_sue_age_days": [50.0, 205.0, 60.0],
+                "earn_sue_stale": [False, False, True],
+            }
+        )
+        with (
+            patch(
+                "research_datasets.groups.domain._sec_events.earnings_features",
+                return_value=fake_earn,
+            ),
+            patch(
+                "research_datasets.groups.domain._sec_events.sue_features",
+                return_value=fake_sue,
+            ),
+        ):
+            out = build_earnings_pead_sue(ctx, {})
+        # Row 0: fresh & non-stale -> preserved
+        self.assertAlmostEqual(float(out.loc[0, "earn_sue_eps"]), 1.5)
+        self.assertAlmostEqual(float(out.loc[0, "earn_sue_revenue"]), 0.5)
+        # Row 1: age_days > 200 -> masked
+        self.assertTrue(np.isnan(out.loc[1, "earn_sue_eps"]))
+        self.assertTrue(np.isnan(out.loc[1, "earn_sue_eps_price"]))
+        self.assertTrue(np.isnan(out.loc[1, "earn_sue_revenue"]))
+        # Row 2: earn_sue_stale == True -> masked
+        self.assertTrue(np.isnan(out.loc[2, "earn_sue_eps"]))
+        self.assertTrue(np.isnan(out.loc[2, "earn_sue_eps_price"]))
+        self.assertTrue(np.isnan(out.loc[2, "earn_sue_revenue"]))
+
     def test_fresh_import_populates_feature_groups(self) -> None:
         env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
         output = subprocess.check_output(
