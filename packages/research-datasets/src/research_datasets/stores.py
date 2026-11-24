@@ -41,7 +41,21 @@ PRICE_CHANNELS: tuple[str, ...] = (
     "ret_1d",
     "overnight_ret",
     "intraday_ret",
+    "tr_suspect",
+    "split_index",
 )
+
+
+def _has_adjustment_suspect(val: Any) -> bool:
+    if val is None or (isinstance(val, float) and math.isnan(val)):
+        return False
+    if isinstance(val, str):
+        return "adjustment_suspect" in val
+    try:
+        return "adjustment_suspect" in list(val)
+    except TypeError:
+        return False
+
 
 FUND_CHANNELS: tuple[str, ...] = (
     "revenue",
@@ -222,7 +236,11 @@ class PriceStore:
 
     def channel(self, name: str) -> np.ndarray:
         """Return ``[N_assets, T_sessions]`` float32 view for ``name``."""
-        return self.data[:, :, self._channel_pos[name]]
+        if name in self._channel_pos:
+            return self.data[:, :, self._channel_pos[name]]
+        if name in PRICE_CHANNELS:
+            return np.full(self.data.shape[:2], np.nan, dtype=np.float32)
+        raise KeyError(name)
 
     def slice_asset(self, asset_idx: int, end_session_idx: int) -> np.ndarray:
         """Full untruncated history ``[0 : end_session_idx + 1, C_price]``."""
@@ -383,27 +401,56 @@ def build_price_store(
         del adj_df
 
     if "daily_returns" in _candidates.families(version):
-        dr_df = version.family(
-            "daily_returns",
-            asset_list,
-            columns=["asset_id", "date", "row_kind", "tr_index"],
-        )
+        wanted_dr = ["asset_id", "date", "row_kind", "tr_index", "split_index", "flags"]
+        if hasattr(version, "_read_family"):
+            dr_df = version._read_family(
+                "daily_returns",
+                symbols=asset_list,
+                columns=wanted_dr,
+                optional_columns=True,
+            )
+        else:
+            from .client import DatasetError
+
+            try:
+                dr_df = version.family("daily_returns", asset_list, columns=wanted_dr)
+            except (DatasetError, KeyError, ValueError):
+                dr_df = version.family(
+                    "daily_returns",
+                    asset_list,
+                    columns=["asset_id", "date", "row_kind", "tr_index"],
+                )
         if dr_df is not None and not dr_df.empty:
             if "row_kind" in dr_df.columns:
                 dr_df = dr_df[dr_df["row_kind"].astype(str).isin({"first", "session"})]
+            dr_fields = {"tr_index": 8}
+            if "split_index" in dr_df.columns:
+                dr_fields["split_index"] = 13
+            _fill_price_channels(tensor, dr_df, asset_pos, day_pos, fields=dr_fields)
+            work_dr = dr_df[["asset_id", "date"]].copy()
+            if "flags" in dr_df.columns:
+                work_dr["_tr_suspect"] = (
+                    dr_df["flags"].map(_has_adjustment_suspect).astype(np.float32)
+                )
+            else:
+                work_dr["_tr_suspect"] = np.float32(0.0)
             _fill_price_channels(
-                tensor, dr_df, asset_pos, day_pos, fields={"tr_index": 8}
+                tensor, work_dr, asset_pos, day_pos, fields={"_tr_suspect": 12}
             )
         del dr_df
 
-    # Derive causal daily total return + intraday/overnight decomposition
+    # Derive causal daily total return + intraday/overnight decomposition.
+    # Never mix dollar `close_adj` with `tr_index` inside one asset.
     tr_lvl = tensor[:, :, 8].astype(np.float64)
     adj_close = tensor[:, :, 7].astype(np.float64)
-    base_lvl = np.where(np.isfinite(tr_lvl) & (tr_lvl > 0), tr_lvl, adj_close)
+    has_tr = np.any(np.isfinite(tr_lvl) & (tr_lvl > 0), axis=1, keepdims=True)
+    base_lvl = np.where(has_tr, tr_lvl, adj_close)
+    tr_suspect = tensor[:, :, 12].astype(np.float64)
+    suspect_mask = np.isfinite(tr_suspect) & (tr_suspect > 0.5)
     ret_1d = np.full((n_assets, n_sessions), np.nan, dtype=np.float64)
     valid_prev = (base_lvl[:, :-1] > 0) & np.isfinite(base_lvl[:, :-1])
     valid_curr = (base_lvl[:, 1:] > 0) & np.isfinite(base_lvl[:, 1:])
-    ok_ret = valid_prev & valid_curr
+    ok_ret = valid_prev & valid_curr & ~suspect_mask[:, 1:]
     ret_1d[:, 1:][ok_ret] = base_lvl[:, 1:][ok_ret] / base_lvl[:, :-1][ok_ret] - 1.0
     tensor[:, :, 9] = ret_1d.astype(np.float32)
 
@@ -596,7 +643,8 @@ def _reaction_window_metrics(
         return (float("nan"), float("nan"), float("nan"), NEVER, NEVER)
     close_adj = price_store.channel("close_adj")[asset_idx]
     tr_lvl = price_store.channel("tr_index")[asset_idx]
-    lvl = np.where(np.isfinite(tr_lvl) & (tr_lvl > 0), tr_lvl, close_adj)
+    has_tr = bool(np.any(np.isfinite(tr_lvl) & (tr_lvl > 0)))
+    lvl = tr_lvl if has_tr else close_adj
     r0_idx = int(np.searchsorted(cal.closes, int(public_ns), side="right"))
     pre_idx = r0_idx - 1
     while pre_idx >= 0 and not (np.isfinite(lvl[pre_idx]) and lvl[pre_idx] > 0):
