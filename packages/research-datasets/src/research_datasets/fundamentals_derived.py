@@ -2316,11 +2316,20 @@ def _iter_fact_frames(
     # Duck-typed version fallback via fundamentals()
     if wanted_ciks is not None:
         wanted_set = set(wanted_ciks)
-        symbols = [
-            str(row["asset_id"])
+        symbol_set: dict[str, None] = {
+            str(row["asset_id"]): None
             for row in universe
             if (_valid_cik(str(row.get("cik") or "")) in wanted_set)
-        ]
+        }
+        ih_df = _optional_family(version_or_material, "issuer_history")
+        if ih_df is not None and not ih_df.empty:
+            for row in ih_df.to_dict("records"):
+                if str(row.get("status") or "") == "verified":
+                    cik_v = _valid_cik(str(row.get("cik") or ""))
+                    aid = str(row.get("asset_id") or "")
+                    if cik_v in wanted_set and aid:
+                        symbol_set[aid] = None
+        symbols = list(symbol_set)
         frame = version_or_material.fundamentals(symbols) if symbols else pd.DataFrame()
     else:
         frame = version_or_material.fundamentals()
