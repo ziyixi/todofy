@@ -61,6 +61,7 @@ import "dashboard/ui/v1/guard.proto";
 import "dashboard/ui/v1/home_view.proto";
 import "dashboard/ui/v1/ops_view.proto";
 import "dashboard/ui/v1/registry.proto";
+import "dashboard/ui/v1/usage.proto";
 import "google/api/annotations.proto";
 import "google/api/client.proto";
 import "google/api/field_behavior.proto";
@@ -223,6 +224,17 @@ service DashboardUiService {
     };
     option (google.api.method_signature) = "name,etag,request_id";
   }
+
+  // Switches the active Cloudflare quota plan and re-evaluates alerts and the shed guard.
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  // buf:lint:ignore RPC_REQUEST_RESPONSE_UNIQUE
+  rpc SwitchQuotaPlan(SwitchQuotaPlanRequest) returns (CloudflareView) {
+    option (google.api.http) = {
+      post: "/api/v1/{name=cloudflareView}:switchQuotaPlan"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name,plan";
+  }
 }
 
 // Input of RequestWebsiteSync; one UUID per owner action, retained across transport retries.
@@ -371,6 +383,25 @@ message OverrideGuardRequest {
   ];
   // shed: force a shed for 24 hours; normal: clear it and suppress the automatic shed until 00:00 UTC.
   ops.v1.GuardLevel level = 2 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
+  // The idempotency key (AIP-155); see DashboardUiService.
+  string request_id = 3 [
+    (google.api.field_info).format = UUID4,
+    (google.api.field_behavior) = OPTIONAL
+  ];
+}
+
+// Input of SwitchQuotaPlan.
+message SwitchQuotaPlanRequest {
+  // `cloudflareView`.
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference).type = "home.ziyixi.science/CloudflareView"
+  ];
+  // Billing plan to make active for allowances, alerts, and guard checks.
+  QuotaPlan plan = 2 [
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).non_null = true
   ];

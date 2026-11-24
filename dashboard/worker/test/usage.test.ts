@@ -50,6 +50,7 @@ describe('the usage query', () => {
       start: '2026-09-29T00:00:00Z',
       end: '2026-09-29T12:34:56Z',
       month: '2026-09-01',
+      monthStart: '2026-09-01T00:00:00Z',
     });
   });
 
@@ -411,5 +412,37 @@ describe('fetchUsage', () => {
       expect(result).toEqual({ ok: false, code, http_status: status });
       expect(JSON.stringify(result)).not.toContain('secret-text');
     }
+  });
+
+  it('builds paid_rows with monthly allowances and 10 GB D1 per-database limit', () => {
+    const data = parseUsage(graphqlBody({ ...REALISTIC_USAGE, monthFactor: 10 }), NOW);
+    expect(data).not.toBeNull();
+    if (data === null) return;
+    expect(row(data.paid_rows, 'workers_requests')).toMatchObject({ period: 'monthly', used: 7120, limit: 10_000_000 });
+    expect(row(data.paid_rows, 'd1_rows_read')).toMatchObject({ period: 'monthly', used: 71_420, limit: 25_000_000_000 });
+    expect(row(data.paid_rows, 'd1_rows_written')).toMatchObject({ period: 'monthly', used: 4860, limit: 50_000_000 });
+    expect(row(data.paid_rows, 'do_requests')).toMatchObject({ period: 'monthly', used: 13_800, limit: 1_000_000 });
+    expect(row(data.paid_rows, 'do_duration')).toMatchObject({ period: 'monthly', limit: 400_000 });
+    expect(row(data.paid_rows, 'do_rows_read')).toMatchObject({ period: 'monthly', used: 214_000, limit: 25_000_000_000 });
+    expect(row(data.paid_rows, 'do_rows_written')).toMatchObject({ period: 'monthly', used: 19_200, limit: 50_000_000 });
+    expect(row(data.paid_rows, 'd1_database_max')).toMatchObject({ period: 'storage', limit: 10_000_000_000 });
+    expect(row(data.paid_rows, 'ai_neurons')).toMatchObject({ period: 'daily', limit: 10_000 });
+  });
+
+  it('treats absent monthly datasets as null used values without failing Free rows', () => {
+    const body = graphqlBody(REALISTIC_USAGE) as { data: { viewer: { accounts: Record<string, unknown>[] } } };
+    const account = body.data.viewer.accounts[0];
+    expect(account).toBeDefined();
+    if (account === undefined) return;
+    delete account.workersMonth;
+    delete account.d1Month;
+    delete account.doInvMonth;
+    delete account.doPerMonth;
+    const data = parseUsage(body, NOW);
+    expect(data).not.toBeNull();
+    if (data === null) return;
+    expect(row(data.rows, 'workers_requests').used).toBe(712);
+    expect(row(data.paid_rows, 'workers_requests').used).toBeNull();
+    expect(row(data.paid_rows, 'do_duration').used).toBeNull();
   });
 });

@@ -8,6 +8,11 @@ documentation and the code together; this page is not a live billing or account 
 
 ## 1. Configured quota rows
 
+The Cloudflare view previews both Workers Free and Workers Paid allowances and lets the owner switch which plan drives
+alerts and the automatic shed guard via `SwitchQuotaPlan`.
+
+### 1.1 Workers Free
+
 | Resource id | Period | Allowance | `limits.ts` value | Guard trigger | Source |
 | --- | --- | --- | --- | --- | --- |
 | `workers_requests` | day | 100,000 requests | 100000 | yes | [Workers limits](https://developers.cloudflare.com/workers/platform/limits/#daily-requests) |
@@ -23,6 +28,25 @@ documentation and the code together; this page is not a live billing or account 
 | `d1_storage` | total | 5 GB per account | 5000000000 | no | [D1 limits](https://developers.cloudflare.com/d1/platform/limits/) |
 | `d1_database_max` | per database | 500 MB (the largest database is shown) | 500000000 | no | [D1 limits](https://developers.cloudflare.com/d1/platform/limits/) |
 | `do_storage` | total | 5 GB (SQLite-backed objects) | 5000000000 | no | [DO limits](https://developers.cloudflare.com/durable-objects/platform/limits/) |
+| `r2_storage` | total (GB-month) | 10 GB-month (Standard storage only) | 10000000000 | no | [R2 pricing](https://developers.cloudflare.com/r2/pricing/) |
+
+### 1.2 Workers Paid
+
+| Resource id | Period | Allowance | `limits.ts` value | Guard trigger | Source |
+| --- | --- | --- | --- | --- | --- |
+| `workers_requests` | month | 10,000,000 requests included | 10000000 | yes | [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/) |
+| `d1_rows_read` | month | 25,000,000,000 rows included | 25000000000 | yes | [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/) |
+| `d1_rows_written` | month | 50,000,000 rows included | 50000000 | yes | [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/) |
+| `do_requests` | month | 1,000,000 requests included | 1000000 | yes | [DO pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/) |
+| `do_duration` | month | 400,000 GB-s included | 400000 | yes | [DO pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/) |
+| `do_rows_read` | month | 25,000,000,000 rows included | 25000000000 | yes | [DO pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/) |
+| `do_rows_written` | month | 50,000,000 rows included | 50000000 | yes | [DO pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/) |
+| `ai_neurons` | day | 10,000 Neurons (Workers AI, all models) | 10000 | no | [Workers AI pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/) |
+| `r2_class_a` | month | 1,000,000 operations | 1000000 | yes | [R2 pricing](https://developers.cloudflare.com/r2/pricing/) |
+| `r2_class_b` | month | 10,000,000 operations | 10000000 | yes | [R2 pricing](https://developers.cloudflare.com/r2/pricing/) |
+| `d1_storage` | total | 5 GB included per account | 5000000000 | no | [D1 limits](https://developers.cloudflare.com/d1/platform/limits/) |
+| `d1_database_max` | per database | 10 GB (the largest database is shown) | 10000000000 | no | [D1 limits](https://developers.cloudflare.com/d1/platform/limits/) |
+| `do_storage` | total | 5 GB included (SQLite-backed objects) | 5000000000 | no | [DO limits](https://developers.cloudflare.com/durable-objects/platform/limits/) |
 | `r2_storage` | total (GB-month) | 10 GB-month (Standard storage only) | 10000000000 | no | [R2 pricing](https://developers.cloudflare.com/r2/pricing/) |
 
 The dashboard uses decimal GB (10⁹ bytes). Usage/storage samples and their freshness come from their respective

@@ -345,4 +345,28 @@ describe("the day's task", () => {
     const doc = afterCall(claimDay(yesterday, listed(), NOW, URL_, REQUEST_ID), { ok: false, code: 'invalid_input' }, NOW);
     expect(doc).toMatchObject({ state: 'failed', attempts: 1 });
   });
+
+  it('evaluates do_namespace_duration_high against each row limit (Free vs Paid)', () => {
+    const baseRow = {
+      id: 'do_duration' as const,
+      unit: 'gb_seconds' as const,
+      used: 2_500,
+      percent: 19.2,
+      projected: null,
+      projected_percent: null,
+      guard_trigger: true,
+      truncated: false,
+      breakdown: [{ name: 'ns-a', value: 2_500 }],
+      source: 'https://developers.cloudflare.com/durable-objects/platform/pricing/',
+    };
+    const freeRow = { ...baseRow, period: 'daily' as const, limit: 13_000 };
+    const paidRow = { ...baseRow, period: 'monthly' as const, limit: 400_000, percent: 0.6 };
+    const underFree = candidates(input({ usage: { configured: true, fresh: true, rows: [freeRow], fetched_at: NOW, consecutive_failures: 0, last_http_status: 200 } }));
+    expect(underFree.find((item) => item.code === 'do_namespace_duration_high')).toMatchObject({
+      severity: 'warning',
+      metrics: { used: 2_500, percent: 19.2, limit: 1_950, namespaces: 1 },
+    });
+    const underPaid = candidates(input({ usage: { configured: true, fresh: true, rows: [paidRow], fetched_at: NOW, consecutive_failures: 0, last_http_status: 200 } }));
+    expect(underPaid.find((item) => item.code === 'do_namespace_duration_high')).toBeUndefined();
+  });
 });

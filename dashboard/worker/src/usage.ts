@@ -9,7 +9,7 @@
 import { BREAKDOWN_UNCLASSIFIED, type QuotaResource, type QuotaRow } from './api-types.ts';
 import { WORKERS_QUERY_LIMIT, type StorageKind } from './api-types.ts';
 import { QUOTA_BREAKDOWN_MAX } from './idl.ts';
-import { ALLOWANCES, DO_DURATION_GB } from './limits.ts';
+import { ALLOWANCES, DO_DURATION_GB, PAID_ALLOWANCES } from './limits.ts';
 import { DAY_MS, HOUR_MS, daysInUtcMonth, isoSeconds, round1, startOfUtcDay, startOfUtcMonth, utcDay, utcMonthStart } from './time.ts';
 
 export const GRAPHQL_URL = 'https://api.cloudflare.com/client/v4/graphql';
@@ -28,12 +28,16 @@ export const GRAPHQL_MAX_BYTES = 1_000_000;
  * included); those values are not yet verified on the live account. No `orderBy` was added, as none was
  * checked there: rows stay unordered, and a dataset that fills its cap is still marked truncated.
  */
-export const USAGE_QUERY = `query($a: string!, $day: Date!, $start: Time!, $end: Time!, $month: Date!) { viewer { accounts(filter: {accountTag: $a}) {
+export const USAGE_QUERY = `query($a: string!, $day: Date!, $start: Time!, $end: Time!, $month: Date!, $monthStart: Time!) { viewer { accounts(filter: {accountTag: $a}) {
   workers: workersInvocationsAdaptive(limit: 50, filter: {datetime_geq: $start, datetime_leq: $end}) { sum { requests errors subrequests } dimensions { scriptName } quantiles { cpuTimeP50 cpuTimeP99 } }
+  workersMonth: workersInvocationsAdaptive(limit: 50, filter: {datetime_geq: $monthStart, datetime_leq: $end}) { sum { requests } dimensions { scriptName } }
   d1: d1AnalyticsAdaptiveGroups(limit: 10, filter: {date: $day}) { sum { rowsRead rowsWritten readQueries writeQueries } dimensions { databaseId } }
+  d1Month: d1AnalyticsAdaptiveGroups(limit: 10, filter: {date_geq: $month, date_leq: $day}) { sum { rowsRead rowsWritten } dimensions { databaseId } }
   d1s: d1StorageAdaptiveGroups(limit: 10, filter: {date: $day}) { max { databaseSizeBytes } dimensions { databaseId } }
   doInv: durableObjectsInvocationsAdaptiveGroups(limit: 25, filter: {date: $day}) { sum { requests errors } dimensions { scriptName } }
+  doInvMonth: durableObjectsInvocationsAdaptiveGroups(limit: 25, filter: {date_geq: $month, date_leq: $day}) { sum { requests } dimensions { scriptName } }
   doPer: durableObjectsPeriodicGroups(limit: 25, filter: {date: $day}) { sum { activeTime rowsRead rowsWritten cpuTime storageDeletes storageReadUnits storageWriteUnits } dimensions { namespaceId } }
+  doPerMonth: durableObjectsPeriodicGroups(limit: 25, filter: {date_geq: $month, date_leq: $day}) { sum { activeTime rowsRead rowsWritten } dimensions { namespaceId } }
   doSto: durableObjectsStorageGroups(limit: 5, filter: {date: $day}) { max { storedBytes } }
   r2ops: r2OperationsAdaptiveGroups(limit: 250, filter: {date_geq: $month, date_leq: $day}) { sum { requests } dimensions { actionType bucketName } }
   r2sto: r2StorageAdaptiveGroups(limit: 25, filter: {date: $day}) { max { payloadSize metadataSize objectCount } dimensions { bucketName } }
@@ -41,14 +45,28 @@ export const USAGE_QUERY = `query($a: string!, $day: Date!, $start: Time!, $end:
 } } }`;
 
 /** The `limit` of each dataset in USAGE_QUERY: a dataset returning this many rows is truncated. */
-export const DATASET_LIMITS = { workers: WORKERS_QUERY_LIMIT, d1: 10, d1s: 10, doInv: 25, doPer: 25, doSto: 5, r2ops: 250, r2sto: 25, ai: 20 } as const;
+export const DATASET_LIMITS = {
+  workers: WORKERS_QUERY_LIMIT,
+  d1: 10,
+  d1s: 10,
+  doInv: 25,
+  doPer: 25,
+  doSto: 5,
+  r2ops: 250,
+  r2sto: 25,
+  ai: 20,
+  workersMonth: WORKERS_QUERY_LIMIT,
+  d1Month: 10,
+  doInvMonth: 25,
+  doPerMonth: 25,
+} as const;
 type Dataset = keyof typeof DATASET_LIMITS;
 /**
  * Datasets whose absence (not an array), or whose own GraphQL error (an `errors` entry whose path is
  * that dataset, see withoutFailedOptionalDatasets), leaves only their own rows without data instead of
- * refusing the whole answer: Workers AI does not gate the guard, so it must never cost the other rows.
+ * refusing the whole answer: Workers AI and monthly Paid datasets never gate the Free rows.
  */
-const OPTIONAL_DATASETS: ReadonlySet<Dataset> = new Set<Dataset>(['ai']);
+const OPTIONAL_DATASETS: ReadonlySet<Dataset> = new Set<Dataset>(['ai', 'workersMonth', 'd1Month', 'doInvMonth', 'doPerMonth']);
 
 /** R2 operation classes (R2 pricing). Any other actionType counts as Class A (cautious). */
 export const R2_CLASS_A: ReadonlySet<string> = new Set([
@@ -94,6 +112,7 @@ export interface ResourceUsage {
 
 export interface UsageData {
   readonly rows: QuotaRow[];
+  readonly paid_rows: QuotaRow[];
   readonly unclassified_r2_operations: number;
   /** Scripts of `workers` or `doInv`, most requests first (at most WORKERS_QUERY_LIMIT + doInv's 25). */
   readonly scripts: ScriptUsage[];
@@ -111,7 +130,8 @@ export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 /** GraphQL variables for a query at `now`: the UTC day so far and the UTC month to date. */
 export function usageVariables(accountId: string, now: number): Record<string, string> {
   const day = utcDay(now);
-  return { a: accountId, day, start: `${day}T00:00:00Z`, end: isoSeconds(now), month: utcMonthStart(now) };
+  const month = utcMonthStart(now);
+  return { a: accountId, day, start: `${day}T00:00:00Z`, end: isoSeconds(now), month, monthStart: `${month}T00:00:00Z` };
 }
 
 /** One GraphQL request; never throws. */
@@ -275,8 +295,7 @@ export function projection(period: QuotaRow['period'], used: number | null, now:
   return null;
 }
 
-function quotaRow(id: QuotaResource, measured: Measured, now: number): QuotaRow {
-  const allowance = ALLOWANCES[id];
+function quotaRow(id: QuotaResource, measured: Measured, now: number, allowance = ALLOWANCES[id]): QuotaRow {
   const used = measured.used === null ? null : round1(measured.used);
   const projected = projection(allowance.period, used, now);
   const percentOf = (value: number | null): number | null => (value === null ? null : round1((value / allowance.limit) * 100));
@@ -384,8 +403,36 @@ export function parseUsage(body: unknown, now: number): UsageData | null {
     const m = measured.get(id);
     return quotaRow(id, m ?? { used: null, truncated: false, breakdown: new Map() }, now);
   });
+  const missingMeasured = (): Measured => ({ used: null, truncated: false, breakdown: new Map() });
+  const paidMeasured = new Map<QuotaResource, Measured>(measured);
+  paidMeasured.set(
+    'workers_requests',
+    missing.has('workersMonth') ? missingMeasured() : sumBy(sets.workersMonth, 'workersMonth', (r) => field(r, 'sum', 'requests'), script),
+  );
+  if (missing.has('d1Month')) {
+    paidMeasured.set('d1_rows_read', missingMeasured());
+    paidMeasured.set('d1_rows_written', missingMeasured());
+  } else {
+    paidMeasured.set('d1_rows_read', sumBy(sets.d1Month, 'd1Month', (r) => field(r, 'sum', 'rowsRead'), database));
+    paidMeasured.set('d1_rows_written', sumBy(sets.d1Month, 'd1Month', (r) => field(r, 'sum', 'rowsWritten'), database));
+  }
+  paidMeasured.set(
+    'do_requests',
+    missing.has('doInvMonth') ? missingMeasured() : sumBy(sets.doInvMonth, 'doInvMonth', (r) => field(r, 'sum', 'requests'), script),
+  );
+  if (missing.has('doPerMonth')) {
+    paidMeasured.set('do_duration', missingMeasured());
+    paidMeasured.set('do_rows_read', missingMeasured());
+    paidMeasured.set('do_rows_written', missingMeasured());
+  } else {
+    paidMeasured.set('do_duration', sumBy(sets.doPerMonth, 'doPerMonth', (r) => (field(r, 'sum', 'activeTime') / 1e6) * DO_DURATION_GB, namespace));
+    paidMeasured.set('do_rows_read', sumBy(sets.doPerMonth, 'doPerMonth', (r) => field(r, 'sum', 'rowsRead'), namespace));
+    paidMeasured.set('do_rows_written', sumBy(sets.doPerMonth, 'doPerMonth', (r) => field(r, 'sum', 'rowsWritten'), namespace));
+  }
+  const paid_rows = order.map((id) => quotaRow(id, paidMeasured.get(id) ?? missingMeasured(), now, PAID_ALLOWANCES[id]));
   return {
     rows,
+    paid_rows,
     unclassified_r2_operations: round1(unclassified),
     scripts: parseScripts(sets.workers, sets.doInv),
     workers_truncated: sets.workers.length >= DATASET_LIMITS.workers,

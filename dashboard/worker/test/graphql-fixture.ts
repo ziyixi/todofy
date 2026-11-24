@@ -43,6 +43,8 @@ export interface SyntheticUsage {
   readonly aiModels?: readonly { readonly model: string; readonly neurons: number }[];
   /** Leave `ai` out of the answer (a dataset the response did not carry). */
   readonly omitAi?: boolean;
+  /** Scale factor applied to monthly datasets (`workersMonth`, `d1Month`, `doInvMonth`, `doPerMonth`). Defaults to 1. */
+  readonly monthFactor?: number;
 }
 
 /** `aiModels` whose neurons sum to `percent` % of the Free 10,000 a day, split 3:1 over two public model IDs. */
@@ -119,52 +121,71 @@ export function graphqlBody(usage: SyntheticUsage = {}): unknown {
   const workers = usage.workersRequests ?? 1200;
   const d1Read = usage.d1RowsRead ?? 40_000;
   const d1Written = usage.d1RowsWritten ?? 900;
+  const factor = usage.monthFactor ?? 1;
+  const workerRows = usage.scripts
+    ? usage.scripts.map((s) => ({
+        sum: { requests: s.requests, errors: s.errors, subrequests: s.subrequests },
+        dimensions: { scriptName: s.script },
+        quantiles: { cpuTimeP50: s.cpuP50 ?? 800, cpuTimeP99: s.cpuP99 ?? 3000 },
+      }))
+    : [
+        { sum: { requests: Math.round(workers * 0.75), errors: 1, subrequests: 30 }, dimensions: { scriptName: 'mail-hero' }, quantiles: { cpuTimeP50: 900, cpuTimeP99: 4100 } },
+        { sum: { requests: workers - Math.round(workers * 0.75), errors: 0, subrequests: 12 }, dimensions: { scriptName: 'todofy' }, quantiles: { cpuTimeP50: 700, cpuTimeP99: 2500 } },
+      ];
+  const d1Rows = (usage.d1Databases ?? [{ id: 'db-synthetic-1', rowsRead: d1Read, rowsWritten: d1Written }]).map((db) => ({
+    sum: { rowsRead: db.rowsRead, rowsWritten: db.rowsWritten, readQueries: 300, writeQueries: 40 },
+    dimensions: { databaseId: db.id },
+  }));
+  const doInvRows = (usage.doScripts ?? [{ script: 'mail-hero', requests: usage.doRequests ?? 800, errors: 0 }]).map((d) => ({
+    sum: { requests: d.requests, errors: d.errors },
+    dimensions: { scriptName: d.script },
+  }));
+  const doPerRows = usage.doNamespaces
+    ? usage.doNamespaces.map((ns) => ({
+        sum: { activeTime: ns.activeTimeUs, rowsRead: ns.rowsRead, rowsWritten: ns.rowsWritten, cpuTime: 1_000_000, storageDeletes: 0, storageReadUnits: 10, storageWriteUnits: 10 },
+        dimensions: { namespaceId: ns.id },
+      }))
+    : [
+        {
+          sum: {
+            activeTime: usage.doActiveTimeUs ?? 2_000_000_000,
+            rowsRead: usage.doRowsRead ?? 20_000,
+            rowsWritten: usage.doRowsWritten ?? 3_000,
+            cpuTime: 1_000_000,
+            storageDeletes: 0,
+            storageReadUnits: 10,
+            storageWriteUnits: 10,
+          },
+          dimensions: { namespaceId: 'ns-synthetic-1' },
+        },
+      ];
   return {
     data: {
       viewer: {
         accounts: [
           {
-            workers: usage.scripts
-              ? usage.scripts.map((s) => ({
-                  sum: { requests: s.requests, errors: s.errors, subrequests: s.subrequests },
-                  dimensions: { scriptName: s.script },
-                  quantiles: { cpuTimeP50: s.cpuP50 ?? 800, cpuTimeP99: s.cpuP99 ?? 3000 },
-                }))
-              : [
-                  { sum: { requests: Math.round(workers * 0.75), errors: 1, subrequests: 30 }, dimensions: { scriptName: 'mail-hero' }, quantiles: { cpuTimeP50: 900, cpuTimeP99: 4100 } },
-                  { sum: { requests: workers - Math.round(workers * 0.75), errors: 0, subrequests: 12 }, dimensions: { scriptName: 'todofy' }, quantiles: { cpuTimeP50: 700, cpuTimeP99: 2500 } },
-                ],
-            d1: (usage.d1Databases ?? [{ id: 'db-synthetic-1', rowsRead: d1Read, rowsWritten: d1Written }]).map((db) => ({
-              sum: { rowsRead: db.rowsRead, rowsWritten: db.rowsWritten, readQueries: 300, writeQueries: 40 },
-              dimensions: { databaseId: db.id },
+            workers: workerRows,
+            workersMonth: workerRows.map((row) => ({ sum: { requests: Math.round(row.sum.requests * factor) }, dimensions: row.dimensions })),
+            d1: d1Rows,
+            d1Month: d1Rows.map((row) => ({
+              sum: { rowsRead: Math.round(row.sum.rowsRead * factor), rowsWritten: Math.round(row.sum.rowsWritten * factor) },
+              dimensions: row.dimensions,
             })),
             d1s: (usage.d1Sizes ?? [120_000_000, 40_000_000]).map((size, i) => ({
               max: { databaseSizeBytes: size },
               dimensions: { databaseId: usage.d1Databases?.[i]?.id ?? `db-synthetic-${String(i + 1)}` },
             })),
-            doInv: (usage.doScripts ?? [{ script: 'mail-hero', requests: usage.doRequests ?? 800, errors: 0 }]).map((d) => ({
-              sum: { requests: d.requests, errors: d.errors },
-              dimensions: { scriptName: d.script },
-            })),
-            doPer: usage.doNamespaces
-              ? usage.doNamespaces.map((ns) => ({
-                  sum: { activeTime: ns.activeTimeUs, rowsRead: ns.rowsRead, rowsWritten: ns.rowsWritten, cpuTime: 1_000_000, storageDeletes: 0, storageReadUnits: 10, storageWriteUnits: 10 },
-                  dimensions: { namespaceId: ns.id },
-                }))
-              : [
-              {
-                sum: {
-                  activeTime: usage.doActiveTimeUs ?? 2_000_000_000,
-                  rowsRead: usage.doRowsRead ?? 20_000,
-                  rowsWritten: usage.doRowsWritten ?? 3_000,
-                  cpuTime: 1_000_000,
-                  storageDeletes: 0,
-                  storageReadUnits: 10,
-                  storageWriteUnits: 10,
-                },
-                dimensions: { namespaceId: 'ns-synthetic-1' },
+            doInv: doInvRows,
+            doInvMonth: doInvRows.map((row) => ({ sum: { requests: Math.round(row.sum.requests * factor) }, dimensions: row.dimensions })),
+            doPer: doPerRows,
+            doPerMonth: doPerRows.map((row) => ({
+              sum: {
+                activeTime: Math.round(row.sum.activeTime * factor),
+                rowsRead: Math.round(row.sum.rowsRead * factor),
+                rowsWritten: Math.round(row.sum.rowsWritten * factor),
               },
-              ],
+              dimensions: row.dimensions,
+            })),
             doSto: (usage.doStoredBytes ?? []).map((bytes) => ({ max: { storedBytes: bytes } })),
             r2ops: (
               usage.r2Ops ?? [

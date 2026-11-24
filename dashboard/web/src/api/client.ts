@@ -22,6 +22,7 @@ import { FlowsViewSchema } from '@ziyixi/proto/dashboard/ui/v1/flows_view_pb'
 import { HomeViewSchema } from '@ziyixi/proto/dashboard/ui/v1/home_view_pb'
 import { OpsViewSchema } from '@ziyixi/proto/dashboard/ui/v1/ops_view_pb'
 import { RegistrySchema } from '@ziyixi/proto/dashboard/ui/v1/registry_pb'
+import { QuotaPlan as QuotaPlanValue } from '@ziyixi/proto/dashboard/ui/v1/usage_pb'
 import { createHttpClient, HttpEncodeError, HttpResponseError, RpcStatusError, type HttpCall } from '@ziyixi/proto/http-client'
 import { GuardLevel as GuardLevelValue } from '@ziyixi/proto/ops/v1/ops_pb'
 import type { DescMessage, MessageShape } from '@ziyixi/proto/protobuf'
@@ -33,6 +34,7 @@ import type {
   GuardLevel,
   HomeView,
   OpsView,
+  QuotaPlan,
   OverrideGuardResponse,
   Registry,
   RunCanaryResponse,
@@ -147,6 +149,7 @@ async function wire<D extends DescMessage>(schema: D, run: () => Promise<Message
 }
 
 const GUARD_LEVELS: Readonly<Record<GuardLevel, GuardLevelValue>> = { normal: GuardLevelValue.NORMAL, shed: GuardLevelValue.SHED }
+const QUOTA_PLANS: Readonly<Record<QuotaPlan, QuotaPlanValue>> = { free: QuotaPlanValue.FREE, paid: QuotaPlanValue.PAID }
 
 /** A request_id (AIP-155) for one user action: a repeat of the same request is answered with the first answer. */
 export function newRequestId(): string {
@@ -164,6 +167,9 @@ export const api = {
   refreshHome: (): Promise<HomeView> => wire(HomeViewSchema, () => client.refreshHomeView({ name: 'homeView' })),
   /** Reads the GraphQL usage again (at most once a minute), then answers the Cloudflare view. */
   refreshCloudflare: (): Promise<CloudflareView> => wire(CloudflareViewSchema, () => client.refreshCloudflareView({ name: 'cloudflareView' })),
+  /** Switches the active Cloudflare billing plan and returns the updated Cloudflare view. */
+  switchQuotaPlan: (plan: QuotaPlan, requestId: string = newRequestId()): Promise<CloudflareView> =>
+    wire(CloudflareViewSchema, () => client.switchQuotaPlan({ name: 'cloudflareView', plan: QUOTA_PLANS[plan], requestId })),
   startCanary: (canaryId: string, requestId: string = newRequestId()): Promise<RunCanaryResponse> =>
     wire(RunCanaryResponseSchema, () => client.runCanary({ name: `canaries/${canaryId}`, requestId })),
   setGuard: (level: GuardLevel, app: string, requestId: string = newRequestId()): Promise<OverrideGuardResponse> =>

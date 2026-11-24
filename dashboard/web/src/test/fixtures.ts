@@ -254,6 +254,16 @@ export function quotaRows(overrides: Partial<Record<QuotaRow['id'], Partial<Quot
 }
 
 function usage(patch: Partial<Usage> = {}): Usage {
+  const paidRows = quotaRows({
+    workers_requests: { period: 'monthly', limit: 10_000_000, used: 712, percent: 0, source: 'https://developers.cloudflare.com/workers/platform/pricing/' },
+    d1_rows_read: { period: 'monthly', limit: 25_000_000_000, used: 7_142, percent: 0 },
+    d1_rows_written: { period: 'monthly', limit: 50_000_000, used: 486, percent: 0 },
+    do_requests: { period: 'monthly', limit: 1_000_000, used: 1_380, percent: 0.1 },
+    do_duration: { period: 'monthly', limit: 400_000, used: 212, percent: 0.1 },
+    do_rows_read: { period: 'monthly', limit: 25_000_000_000, used: 21_400, percent: 0 },
+    do_rows_written: { period: 'monthly', limit: 50_000_000, used: 1_920, percent: 0 },
+    d1_database_max: { limit: 10_000_000_000, used: 38_900_000, percent: 0.4 },
+  })
   return {
     status: 'ok',
     fetched_at: '2026-09-29T16:30:02.000Z',
@@ -264,6 +274,8 @@ function usage(patch: Partial<Usage> = {}): Usage {
     consecutive_failures: 0,
     rows: quotaRows(),
     unclassified_r2_operations: 0,
+    plan: 'free',
+    alternate_rows: paidRows,
     ...patch,
   }
 }

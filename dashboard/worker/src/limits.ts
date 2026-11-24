@@ -1,10 +1,10 @@
 /**
- * Workers Free allowances the dashboard measures (docs/limits.md, checked 2026-09-29 against the
- * linked Cloudflare pages, Workers AI on 2026-09-30; test/limits.test.ts keeps that table and these
- * values equal). They are account-wide: other Workers, databases, buckets and AI models count too.
- * "GB" is taken as 10^9 bytes (the docs do not say; decimal is the smaller, more cautious limit).
+ * Workers Free & Paid allowances the dashboard measures (docs/limits.md, checked 2026-09-29 and
+ * Paid updated 2026-11-24 against the linked Cloudflare pages; test/limits.test.ts keeps that table
+ * and these values equal). They are account-wide: other Workers, databases, buckets and AI models
+ * count too. "GB" is taken as 10^9 bytes (the docs do not say; decimal is the smaller, more cautious limit).
  */
-import type { QuotaPeriod, QuotaResource, QuotaUnit } from './api-types.ts';
+import type { QuotaPeriod, QuotaPlan, QuotaResource, QuotaUnit } from './api-types.ts';
 
 export interface Allowance {
   readonly period: QuotaPeriod;
@@ -20,6 +20,7 @@ export interface Allowance {
 }
 
 const WORKERS_LIMITS = 'https://developers.cloudflare.com/workers/platform/limits/#daily-requests';
+const WORKERS_PRICING = 'https://developers.cloudflare.com/workers/platform/pricing/';
 const D1_PRICING = 'https://developers.cloudflare.com/d1/platform/pricing/';
 const D1_LIMITS = 'https://developers.cloudflare.com/d1/platform/limits/';
 const DO_PRICING = 'https://developers.cloudflare.com/durable-objects/platform/pricing/';
@@ -45,6 +46,28 @@ export const ALLOWANCES: Readonly<Record<QuotaResource, Allowance>> = {
   do_storage: { period: 'storage', unit: 'bytes', limit: 5 * GB, guardTrigger: false, source: DO_LIMITS },
   r2_storage: { period: 'storage', unit: 'bytes', limit: 10 * GB, guardTrigger: false, source: R2_PRICING },
 };
+
+/** Cloudflare Workers Paid ($5/month) included allowances: monthly compute/D1/DO caps and 10 GB per-database D1 cap. */
+export const PAID_ALLOWANCES: Readonly<Record<QuotaResource, Allowance>> = {
+  workers_requests: { period: 'monthly', unit: 'requests', limit: 10_000_000, guardTrigger: true, source: WORKERS_PRICING },
+  d1_rows_read: { period: 'monthly', unit: 'rows', limit: 25_000_000_000, guardTrigger: true, source: D1_PRICING },
+  d1_rows_written: { period: 'monthly', unit: 'rows', limit: 50_000_000, guardTrigger: true, source: D1_PRICING },
+  do_requests: { period: 'monthly', unit: 'requests', limit: 1_000_000, guardTrigger: true, source: DO_PRICING },
+  do_duration: { period: 'monthly', unit: 'gb_seconds', limit: 400_000, guardTrigger: true, source: DO_PRICING },
+  do_rows_read: { period: 'monthly', unit: 'rows', limit: 25_000_000_000, guardTrigger: true, source: DO_PRICING },
+  do_rows_written: { period: 'monthly', unit: 'rows', limit: 50_000_000, guardTrigger: true, source: DO_PRICING },
+  ai_neurons: ALLOWANCES.ai_neurons,
+  r2_class_a: ALLOWANCES.r2_class_a,
+  r2_class_b: ALLOWANCES.r2_class_b,
+  d1_storage: ALLOWANCES.d1_storage,
+  d1_database_max: { period: 'storage', unit: 'bytes', limit: 10 * GB, guardTrigger: false, source: D1_LIMITS },
+  do_storage: ALLOWANCES.do_storage,
+  r2_storage: ALLOWANCES.r2_storage,
+};
+
+export function allowancesFor(plan: QuotaPlan): Readonly<Record<QuotaResource, Allowance>> {
+  return plan === 'paid' ? PAID_ALLOWANCES : ALLOWANCES;
+}
 
 /**
  * Memory of a Durable Object for duration billing. DO pricing's worked examples compute

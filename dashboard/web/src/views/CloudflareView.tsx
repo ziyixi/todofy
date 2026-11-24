@@ -10,13 +10,14 @@ import {
   WORKERS_QUERY_LIMIT,
   type CloudflareView as CloudflareViewData,
   type Drift,
+  type QuotaPlan,
   type ResourceRow,
   type WorkerRow,
 } from '../../../worker/src/api-types.ts'
 import { DriftCategory, DriftCategorySchema } from '@ziyixi/proto/dashboard/ui/v1/cloudflare_view_pb'
 import { wireEnum } from '@ziyixi/proto/wire-json'
 import { ApiError } from '../api/client'
-import { useRefreshCloudflare } from '../api/queries'
+import { useRefreshCloudflare, useSwitchQuotaPlan } from '../api/queries'
 import { QuotaGroups } from '../components/QuotaBars'
 import { LevelMark } from '../components/status'
 import { Button, Notice, Time } from '../components/ui'
@@ -127,8 +128,20 @@ function errorCell(row: WorkerRow): { text: string; note: string | null } {
   return { text, note: null }
 }
 
-function CpuCell({ row }: { row: WorkerRow }) {
+function CpuCell({ row, plan }: { row: WorkerRow; plan: QuotaPlan }) {
   if (row.cpu_p99_us === null) return <span className="muted">—</span>
+  if (plan === 'paid') {
+    return (
+      <span className="cpu">
+        <span className="cpu-text">
+          p50 {row.cpu_p50_us === null ? '—' : formatCpu(row.cpu_p50_us)} / p99 {formatCpu(row.cpu_p99_us)}
+        </span>
+        <span className="cpu-short" aria-hidden="true">
+          p99 {formatCpu(row.cpu_p99_us)}
+        </span>
+      </span>
+    )
+  }
   const width = Math.min(100, (row.cpu_p99_us / CPU_LIMIT_US) * 100)
   const near = row.cpu_p99_us > CPU_HINT_US
   return (
@@ -203,7 +216,7 @@ function SortHeader({
   )
 }
 
-function WorkersTable({ reg, data, focus, now }: { reg: Reg; data: CloudflareViewData; focus?: string; now: Date }) {
+function WorkersTable({ reg, data, focus, now, plan }: { reg: Reg; data: CloudflareViewData; focus?: string; now: Date; plan: QuotaPlan }) {
   const [sort, setSort] = useState<{ key: SortKey; descending: boolean }>({ key: 'errors', descending: true })
   const onSort = (key: SortKey) => setSort((current) => (current.key === key ? { key, descending: !current.descending } : { key, descending: true }))
   const rows = sortWorkers(data.workers, sort.key, sort.descending)
@@ -256,7 +269,7 @@ function WorkersTable({ reg, data, focus, now }: { reg: Reg; data: CloudflareVie
                 <th role="columnheader" scope="col">所属应用 / 流程</th>
                 <SortHeader label="今日请求" column="requests" sort={sort} onSort={onSort} className="num" />
                 <SortHeader label="错误" column="errors" sort={sort} onSort={onSort} />
-                <SortHeader label="CPU p50 / p99（上限 10 ms）" column="cpu" sort={sort} onSort={onSort} />
+                <SortHeader label={plan === 'paid' ? 'CPU p50 / p99' : 'CPU p50 / p99（上限 10 ms）'} column="cpu" sort={sort} onSort={onSort} />
                 <SortHeader label="子请求" column="subrequests" sort={sort} onSort={onSort} className="num" />
                 <th role="columnheader" scope="col" className="num">DO 请求</th>
                 <th role="columnheader" scope="col">最近有请求</th>
@@ -309,7 +322,7 @@ function WorkersTable({ reg, data, focus, now }: { reg: Reg; data: CloudflareVie
                       {errors.note ? <span className="small muted cell-note">{errors.note}</span> : null}
                     </td>
                     <td role="cell" data-label="CPU">
-                      <CpuCell row={row} />
+                      <CpuCell row={row} plan={plan} />
                     </td>
                     <td role="cell" data-label="子请求" className="num">
                       {formatNumber(row.subrequests)}
@@ -379,7 +392,8 @@ function WorkersTable({ reg, data, focus, now }: { reg: Reg; data: CloudflareVie
       )}
       <p className="small muted">
         错误率在今日请求 ≥ {ERROR_RATE_MIN_REQUESTS} 时判定：≥ {ERROR_RATE_WARN_PERCENT}% 需关注，≥ {ERROR_RATE_CRITICAL_PERCENT}%
-        故障。CPU 条满格为 Free 的 10 ms，刻度线为 8 ms。实际资源清单包含没有请求的 Worker；未写进注册表的当前资源标为“未登记”。
+        故障。{plan === 'free' ? 'CPU 条满格为 Free 的 10 ms，刻度线为 8 ms。' : '当前为 Workers Paid，默认单次 CPU 上限为 30 s（不按 Free 10 ms 标注）。'}
+        实际资源清单包含没有请求的 Worker；未写进注册表的当前资源标为“未登记”。
       </p>
     </section>
   )
@@ -627,6 +641,12 @@ function GuardLine({ reg, data }: { reg: Reg; data: CloudflareViewData }) {
 /** Cloudflare 监控 `#/cloudflare[/worker/<script>]`: allowances, Workers, resources, the guard. */
 export function CloudflareView({ registry, cloudflare, focus, now }: { registry: Reg; cloudflare: CloudflareViewData; focus?: string; now: Date }) {
   const usage = cloudflare.usage
+  const activePlan: QuotaPlan = usage.plan ?? 'free'
+  const [previewPlan, setPreviewPlan] = useState<QuotaPlan | null>(null)
+  const [planMessage, setPlanMessage] = useState<string | null>(null)
+  const switchPlan = useSwitchQuotaPlan()
+  const viewingPlan: QuotaPlan = previewPlan ?? activePlan
+  const displayedRows = viewingPlan === activePlan ? usage.rows : (usage.alternate_rows ?? usage.rows)
   const status = USAGE_STATUS[usage.status]
   const statusLevel = usage.status === 'ok' ? 'ok' : usage.status === 'stale' || usage.status === 'not_configured' ? 'warning' : 'critical'
   return (
@@ -655,15 +675,75 @@ export function CloudflareView({ registry, cloudflare, focus, now }: { registry:
 
       <section className="cf-section" aria-labelledby="quota-title">
         <h2 id="quota-title">账户额度</h2>
+        <div className="quota-plan-bar">
+          <div className="quota-plan-controls">
+            <div className="segmented" role="group" aria-label="配额视图">
+              <button
+                type="button"
+                className={`seg-btn${viewingPlan === 'paid' ? ' is-active' : ''}`}
+                aria-pressed={viewingPlan === 'paid'}
+                onClick={() => {
+                  setPlanMessage(null)
+                  setPreviewPlan('paid')
+                }}
+              >
+                Workers Paid（月度含额）
+              </button>
+              <button
+                type="button"
+                className={`seg-btn${viewingPlan === 'free' ? ' is-active' : ''}`}
+                aria-pressed={viewingPlan === 'free'}
+                onClick={() => {
+                  setPlanMessage(null)
+                  setPreviewPlan('free')
+                }}
+              >
+                Workers Free（每日限额）
+              </button>
+            </div>
+            <span className="small muted">
+              当前生效：<strong>{activePlan === 'paid' ? 'Workers Paid（月度含额）' : 'Workers Free（每日限额）'}</strong>
+              {viewingPlan !== activePlan ? '（正在预览另一视图，告警与自动降载仍按生效套餐计算）' : '（告警与自动降载按此计算）'}
+            </span>
+          </div>
+          {viewingPlan !== activePlan ? (
+            <Button
+              onClick={() => {
+                setPlanMessage(null)
+                switchPlan.mutate(viewingPlan, {
+                  onSuccess: (fresh) => {
+                    setPreviewPlan(null)
+                    const next = fresh.usage.plan ?? viewingPlan
+                    setPlanMessage(`已将生效套餐切换为 ${next === 'paid' ? 'Workers Paid（月度含额）' : 'Workers Free（每日限额）'}，告警与自动降载已重新计算。`)
+                  },
+                  onError: (error) => setPlanMessage(`切换套餐失败：${errorText(error)}`),
+                })
+              }}
+              disabled={switchPlan.isPending}
+              className="btn-outline-accent"
+            >
+              {switchPlan.isPending ? '正在切换…' : '设为生效套餐'}
+            </Button>
+          ) : null}
+        </div>
+        {planMessage ? (
+          <p className="small refresh-message" role="status" aria-live="polite">
+            {planMessage}
+          </p>
+        ) : null}
         <p className="small muted">
-          达到 80% 的每日项目或每月 R2 操作会让应用自动降载；Workers AI neurons 除外：超出免费额度只会让 AI
-          调用失败到 00:00 UTC，降载也减少不了它，所以只提醒并显示剩余量。“按当前速度线性估算”只是把已用量按已过时间等比放大，不是预测：本 UTC
-          日开头的一次集中任务会让估算偏高，每日项目在 00:00 UTC 后 3 小时内不估算。
+          达到 80% 的计费周期配额（Free 为每日项目与每月 R2，Paid 为每月含额）会让应用自动降载；Workers AI neurons 除外：超出每日免费额度只会让 AI
+          调用失败到 00:00 UTC，降载也减少不了它，所以只提醒并显示剩余量。“按当前速度线性估算”只是把已用量按已过时间等比放大，不是预测：每日项目在 00:00 UTC
+          后 3 小时内、每月项目在每月第 1 个 UTC 日内不估算。
         </p>
-        {usage.rows.length > 0 ? <QuotaGroups rows={usage.rows} reg={registry} /> : <p className="empty">还没有用量数据。</p>}
+        {displayedRows.length > 0 ? (
+          <QuotaGroups rows={displayedRows} reg={registry} plan={viewingPlan} />
+        ) : (
+          <p className="empty">还没有用量数据。</p>
+        )}
       </section>
 
-      <WorkersTable reg={registry} data={cloudflare} focus={focus} now={now} />
+      <WorkersTable reg={registry} data={cloudflare} focus={focus} now={now} plan={activePlan} />
 
       {cloudflare.historical_workers?.length ? <section className="cf-section" aria-label="历史 Worker 用量"><h2>历史 Worker 用量</h2><p className="small muted">以下统计名称没有对应的当前账户资源；保留历史用量，不计入当前 Worker 数量。</p><ul>{cloudflare.historical_workers.map((worker) => <li key={worker.script}><code>{worker.script}</code> · 当前无对应资源 · 今日请求 {worker.requests}</li>)}</ul></section> : null}
 

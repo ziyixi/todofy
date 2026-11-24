@@ -68,6 +68,10 @@ message Usage {
   repeated QuotaRow rows = 8 [(google.api.field_behavior) = REQUIRED];
   // R2 operations whose actionType is in neither documented class; counted as Class A.
   double unclassified_r2_operations = 9 [(google.api.field_behavior) = REQUIRED];
+  // Active Cloudflare billing plan applied to `rows`.
+  QuotaPlan plan = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Comparison rows evaluated against the other plan's allowances.
+  repeated QuotaRow alternate_rows = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
 
   // What the read of the usage achieved.
   enum State {
@@ -214,4 +218,14 @@ enum StorageKind {
   STORAGE_KIND_DO = 2;
   // An R2 bucket (`bucketName`).
   STORAGE_KIND_R2 = 3;
+}
+
+// A Cloudflare Workers billing plan whose allowances bound Usage rows and guard thresholds.
+enum QuotaPlan {
+  // Never sent.
+  QUOTA_PLAN_UNSPECIFIED = 0;
+  // Workers Free: daily compute and D1/DO allowances, 500 MB per-database D1 cap.
+  QUOTA_PLAN_FREE = 1;
+  // Workers Paid: monthly included compute and D1/DO allowances, 10 GB per-database D1 cap.
+  QUOTA_PLAN_PAID = 2;
 }

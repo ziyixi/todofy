@@ -5,6 +5,8 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
+Branch `feat/home-quota-plan` adds dual Cloudflare Workers Free (daily) and Workers Paid (monthly included) quota views plus `SwitchQuotaPlan` persistence on Home so alerts and guard thresholds follow the active plan while both plan views stay inspectable. Land only after branch `CI gate` passes, then verify live Workers Paid selection, monthly usage refresh, and false-alert clearance together with `main` deployment and same-SHA reconciliation.
+
 Private application follow-ups and release verification are tracked in `private/HANDOFF.md`.
 
 `packages/research-datasets` `2.5.0` (untruncated multi-clock `Stores`, pluggable 15-group feature registry, declarative YAML `materialize`, and `load_local`) is pinned to public `main` (`f7840d90c7cbd104be71901c9406a4b03b54ae43`) and cleanly verified in an isolated Python 3.14 environment (`2.5.0`, 20 registered groups).

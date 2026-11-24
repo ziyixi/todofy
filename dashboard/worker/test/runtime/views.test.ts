@@ -416,6 +416,40 @@ describe('GetFlowsView, GetOpsView and the mutations', () => {
     const active = await view<OpsView>(h, 'ops');
     expect(active.canary.manual_today).toBe(1);
   });
+
+  it('switches between Free and Paid quota plans, clears Free alerts and shed, and preserves idempotency', async () => {
+    h = await startFlows({
+      usage: { ...REALISTIC_USAGE, doNamespaces: [{ id: SYNTHETIC_NS[0], activeTimeUs: 90_000_000_000, rowsRead: 12_100, rowsWritten: 1040 }], monthFactor: 2 },
+      bindings: { CANARY_UTC_HOUR: '23' },
+    });
+    answerProbes(h);
+    await h.tick(NOW - 31 * MIN);
+
+    const freeCf = await view<CloudflareView>(h, 'cloudflare');
+    expect(freeCf.usage.plan).toBe('free');
+    expect(freeCf.usage.rows.find((r) => r.id === 'do_duration')?.limit).toBe(13_000);
+    expect(freeCf.usage.alternate_rows?.find((r) => r.id === 'do_duration')?.limit).toBe(400_000);
+    expect(freeCf.guard.desired.level).toBe('shed');
+    expect(freeCf.attention.items.some((item) => item.code === 'do_namespace_duration_high')).toBe(true);
+
+    const requestId = '7c1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f';
+    const switched = await h.post('/api/v1/cloudflareView:switchQuotaPlan', { plan: 'paid', request_id: requestId });
+    expect(switched.status).toBe(200);
+    const paidView = (await switched.json()) as CloudflareView;
+    expect(paidView.usage.plan).toBe('paid');
+    expect(paidView.usage.rows.find((r) => r.id === 'do_duration')).toMatchObject({ period: 'monthly', limit: 400_000 });
+    expect(paidView.usage.alternate_rows?.find((r) => r.id === 'do_duration')).toMatchObject({ period: 'daily', limit: 13_000 });
+    expect(paidView.guard.desired.level).toBe('normal');
+    expect(paidView.attention.items.some((item) => item.code === 'do_namespace_duration_high')).toBe(false);
+
+    // Same request_id replays cleanly; different plan or reused ID is rejected; HomeView follows active plan.
+    const replay = await h.post('/api/v1/cloudflareView:switchQuotaPlan', { plan: 'paid', request_id: requestId });
+    expect(replay.status).toBe(200);
+    expect((await h.post('/api/v1/cloudflareView:switchQuotaPlan', { plan: 'free', request_id: requestId })).status).toBe(400);
+    const home = await view<HomeView>(h, 'home');
+    expect(home.cloudflare.guard_level).toBe('normal');
+    expect(home.cloudflare.quota.find((r) => r.id === 'workers_requests')).toMatchObject({ period: 'monthly', limit: 10_000_000 });
+  });
 });
 
 describe('budgets of a view', () => {

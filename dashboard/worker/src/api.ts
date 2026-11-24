@@ -15,6 +15,7 @@ import type { CommonReason } from '@ziyixi/proto/common/errors/v1/errors_pb';
 import { OverrideGuardResponseSchema, RequestWebsiteSyncResponseSchema, RunCanaryResponseSchema, type DashboardUiService } from '@ziyixi/proto/dashboard/ui/v1/dashboard_ui_service_pb';
 import type { ErrorReason } from '@ziyixi/proto/dashboard/ui/v1/errors_pb';
 import { AttentionItemSchema } from '@ziyixi/proto/dashboard/ui/v1/attention_pb';
+import { QuotaPlan, QuotaPlanSchema } from '@ziyixi/proto/dashboard/ui/v1/usage_pb';
 import { PreEncoded, type ServiceHandlers, type ShapeOf } from '@ziyixi/proto/http-transcoder';
 import { GuardLevel, GuardLevelSchema } from '@ziyixi/proto/ops/v1/ops_pb';
 import { Code, RpcError } from '@ziyixi/proto/rpc-status';
@@ -26,7 +27,7 @@ import type { Env } from './env.ts';
 import { registryBody } from './registry.ts';
 import { homeCatalog } from './private-catalog.ts';
 import { fnv1a } from './views.ts';
-import { HOME_OBJECT, type AttentionMutationOutcome, type GuardOverrideOutcome, type HomeState, type StartCanaryOutcome, type WebsiteSyncOutcome } from './state.ts';
+import { HOME_OBJECT, type AttentionMutationOutcome, type GuardOverrideOutcome, type HomeState, type StartCanaryOutcome, type SwitchQuotaPlanOutcome, type WebsiteSyncOutcome } from './state.ts';
 import { etagMatches, type ViewBody } from './view-body.ts';
 
 /** What every handler gets: src/http.ts authenticated the owner before routing. */
@@ -78,6 +79,7 @@ export function isReason(value: string): value is Reason {
 export const CANARY_NAMES: readonly string[] = ['canaries/mail-todofy'];
 
 const GUARD_LEVELS = wireEnum(GuardLevelSchema, GuardLevel);
+const QUOTA_PLANS = wireEnum(QuotaPlanSchema, QuotaPlan);
 
 function home(env: Env): DurableObjectStub<HomeState> {
   return env.HOME.get(env.HOME.idFromName(HOME_OBJECT));
@@ -159,6 +161,17 @@ export const handlers: ServiceHandlers<ShapeOf<typeof DashboardUiService>, ApiCo
     );
     if (!result.ok) throw dashboardError(result.code === 'guard_unavailable' ? 'UNAVAILABLE' : 'BAD_REQUEST');
     return ownAnswer(OverrideGuardResponseSchema, { guard: result.guard });
+  },
+
+  async switchQuotaPlan(request, ctx) {
+    if (request.name !== 'cloudflareView') throw dashboardError('NOT_FOUND');
+    const plan = QUOTA_PLANS.name(request.plan);
+    if (plan === null) throw dashboardError('BAD_REQUEST');
+    const result = await callHome(
+      () => home(ctx.env).switchQuotaPlan(plan, ctx.at, requestIdOf(request.requestId)) as unknown as Promise<SwitchQuotaPlanOutcome>,
+    );
+    if (!result.ok) throw dashboardError('BAD_REQUEST');
+    return new PreEncoded(result.body, { etag: result.etag });
   },
 
   async runCanary(request, ctx) {

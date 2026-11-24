@@ -1,5 +1,5 @@
 import { QueryClient, useMutation, useQuery, useQueryClient, type Query } from '@tanstack/react-query'
-import type { AttentionItem, CloudflareView, FlowsView, GuardLevel, HomeView, OpsView, ShellFields, ViewId } from '../../../worker/src/api-types.ts'
+import type { AttentionItem, CloudflareView, FlowsView, GuardLevel, HomeView, OpsView, QuotaPlan, ShellFields, ViewId } from '../../../worker/src/api-types.ts'
 import { ApiError, api } from './client'
 import { applyAttentionResult } from './attention-cache'
 
@@ -81,6 +81,17 @@ export function useRefreshCloudflare() {
   const client = useQueryClient()
   return useMutation({
     mutationFn: () => api.refreshCloudflare(),
+    onSuccess: (cloudflare) => {
+      client.setQueryData(viewKey('cloudflare'), cloudflare)
+      void client.invalidateQueries({ predicate: otherViews('cloudflare') })
+    },
+  })
+}
+
+export function useSwitchQuotaPlan() {
+  const client = useQueryClient()
+  return useMutation({
+    mutationFn: (plan: QuotaPlan) => api.switchQuotaPlan(plan),
     onSuccess: (cloudflare) => {
       client.setQueryData(viewKey('cloudflare'), cloudflare)
       void client.invalidateQueries({ predicate: otherViews('cloudflare') })

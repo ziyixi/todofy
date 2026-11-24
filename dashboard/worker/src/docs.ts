@@ -23,12 +23,14 @@ export interface StatusDoc {
   readonly website_sync?: WebsiteSyncStatus;
 }
 
-/** `usage`: the last GraphQL answer (quota rows and, since v2, the per-resource rows). */
+/** `usage`: the last GraphQL answer (quota rows, optional Paid monthly rows, and the per-resource rows). */
 export interface UsageDoc {
   readonly fetched_at: number | null;
   readonly day: string | null;
   readonly month: string | null;
   readonly rows: QuotaRow[];
+  /** Present when fetched after dual-plan support; absent in earlier stored documents. */
+  readonly paid_rows?: QuotaRow[];
   readonly unclassified_r2_operations: number;
   /** Absent in documents written before v2. */
   readonly resources?: ResourceUsage;
@@ -77,6 +79,8 @@ export interface MetaDoc {
   /** v2 refresh scopes (docs/design-v2.md §5): statuses + probes, and GraphQL. */
   readonly last_refresh_home_at?: number | null;
   readonly last_refresh_cloudflare_at?: number | null;
+  /** Active billing plan ('free' when absent). */
+  readonly quota_plan?: 'free' | 'paid';
 }
 
 /** `probe:<entry>`: the last public_http probe of an entry (status code, outcome and latency only). */

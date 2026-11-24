@@ -531,4 +531,35 @@ describe('Cloudflare 监控', () => {
     await showCloudflare(healthy(), '#/cloudflare/worker/old-worker')
     expect(screen.getByText(/没有 Worker/)).toHaveTextContent('没有 Worker old-worker 的数据：它最近 30 天没有请求，或还没有被发现。')
   })
+
+  it('previews Workers Paid monthly allowances and switches the active plan', async () => {
+    const base = healthy()
+    const calls = await showCloudflare((call) => {
+      if (call.path === '/api/v1/cloudflareView:switchQuotaPlan') {
+        const paidRows = base.cloudflare.usage.alternate_rows ?? base.cloudflare.usage.rows
+        return {
+          ...base,
+          cloudflare: {
+            ...base.cloudflare,
+            usage: {
+              ...base.cloudflare.usage,
+              plan: 'paid',
+              rows: paidRows,
+              alternate_rows: base.cloudflare.usage.rows,
+            },
+          },
+        }
+      }
+      return base
+    })
+    const quota = section('账户额度')
+    const user = userEvent.setup()
+    await user.click(within(quota).getByRole('button', { name: 'Workers Paid（月度含额）' }))
+    expect(within(quota).getByText('每月含额（Workers Paid 与 R2）')).toBeInTheDocument()
+    expect(within(quota).getByRole('meter', { name: 'Workers 请求' })).toHaveAttribute('aria-valuetext', '已用 712 次，上限 10,000,000 次，0%')
+    const activate = within(quota).getByRole('button', { name: '设为生效套餐' })
+    await user.click(activate)
+    await waitFor(() => expect(screen.getByText(/已将生效套餐切换为 Workers Paid/)).toBeInTheDocument())
+    expect(calls.filter((call) => call.path === '/api/v1/cloudflareView:switchQuotaPlan')).toHaveLength(1)
+  })
 })

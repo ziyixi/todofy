@@ -51,6 +51,7 @@ export const PATHS = {
   ops: '/api/v1/opsView',
   refreshHome: '/api/v1/homeView:refresh',
   refreshCloudflare: '/api/v1/cloudflareView:refresh',
+  switchQuotaPlan: '/api/v1/cloudflareView:switchQuotaPlan',
   guard: '/api/v1/guard:override',
   canary: '/api/v1/canaries/mail-todofy:run',
 } as const
@@ -109,6 +110,7 @@ export function serve(
     // The refreshes answer their view (a test that checks the refresh itself serves it through `other`).
     if (call.method === 'POST' && path === PATHS.refreshHome) return json(current.home)
     if (call.method === 'POST' && path === PATHS.refreshCloudflare) return json(current.cloudflare)
+    if (call.method === 'POST' && path === PATHS.switchQuotaPlan) return json(current.cloudflare)
     return other(call)
   })
 }

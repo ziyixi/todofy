@@ -10,7 +10,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { GuardLevel, GuardState, OpsReportItem, OpsStatus, SetGuardInput } from '@ziyixi/proto/ops/v1/ops_wire';
 import { OPS_LIMITS } from '../../../contracts/ops-v1/ops-v1.ts';
-import { CANARY_MANUAL_PER_DAY, GUARD_CLEAR_PERCENT, GUARD_SHED_PERCENT, REFRESH_MIN_INTERVAL_SECONDS, type AppErrorCode, type CanaryRun, type OpsApp, type CanaryState, type Digest, type GuardAppView, type GuardView, type Usage } from './api-types.ts';
+import { CANARY_MANUAL_PER_DAY, GUARD_CLEAR_PERCENT, GUARD_SHED_PERCENT, REFRESH_MIN_INTERVAL_SECONDS, type AppErrorCode, type CanaryRun, type CloudflareView, type OpsApp, type CanaryState, type Digest, type GuardAppView, type GuardView, type QuotaPlan, type QuotaRow, type Usage } from './api-types.ts';
 import { CLOUDFLARE_REFRESH_MIN_SECONDS, PROBE_MIN_INTERVAL_SECONDS, VIEW_BODY_BUDGET, type ShellFields, type ViewId } from './api-types.ts';
 import { CANARY_RECENT_RUNS } from './idl.ts';
 import {
@@ -218,12 +218,13 @@ export type StartCanaryOutcome =
   | { readonly ok: true; readonly run: CanaryRun }
   | { readonly ok: false; readonly code: 'canary_disabled' | 'canary_active' | 'canary_limit' | 'request_id_reused' };
 export type GuardOverrideOutcome = { readonly ok: true; readonly guard: GuardView } | { readonly ok: false; readonly code: 'request_id_reused' | 'guard_unavailable' };
+export type SwitchQuotaPlanOutcome = { readonly ok: true; readonly body: string; readonly etag: string } | { readonly ok: false; readonly code: 'request_id_reused' };
 export type WebsiteSyncOutcome = { readonly ok: true; readonly request: WebsiteSyncRequestResult } | { readonly ok: false; readonly code: 'request_id_reused' };
 export type AttentionMutationOutcome = { readonly ok: true; readonly item: AttentionItem }
   | { readonly ok: false; readonly code: 'request_id_reused' | 'attention_changed' };
 
 /**
- * AIP-155: the answers of the owner's mutations by request_id (RunCanary, OverrideGuard), so a repeated request
+ * AIP-155: the answers of the owner's mutations by request_id (RunCanary, OverrideGuard, SwitchQuotaPlan), so a repeated request
  * (the UI retries a lost response with the same ID) answers the first response and changes nothing. Kept 24 hours,
  * at most REQUEST_LOG_MAX entries (a few hundred bytes each), in one `state` document. Only a success is kept: a
  * refused request changed nothing, so its repeat is decided again. Website dispatch receipts use a separate
@@ -232,7 +233,7 @@ export type AttentionMutationOutcome = { readonly ok: true; readonly item: Atten
 export const REQUEST_LOG_KEY = 'request_log';
 export const REQUEST_LOG_MAX = 16;
 export const REQUEST_LOG_TTL_MS = 24 * 60 * MINUTE_MS;
-type RequestMethod = 'run_canary' | 'override_guard' | 'dismiss_attention' | 'restore_attention' | 'website_sync';
+type RequestMethod = 'run_canary' | 'override_guard' | 'switch_quota_plan' | 'dismiss_attention' | 'restore_attention' | 'website_sync';
 interface RequestLogEntry {
   readonly id: string;
   readonly method: RequestMethod;
@@ -472,6 +473,30 @@ export class HomeState extends DurableObject<Env> {
     });
   }
 
+  /**
+   * SwitchQuotaPlan: persists the active billing plan (`free` or `paid`), re-evaluates automatic guard & digest
+   * against the selected plan's allowances, and answers the updated serialized CloudflareView.
+   */
+  switchQuotaPlan(plan: QuotaPlan, at: number | null = null, requestId: string | null = null): Promise<SwitchQuotaPlanOutcome> {
+    return this.serialize(async (): Promise<SwitchQuotaPlanOutcome> => {
+      const now = at ?? Date.now();
+      const inputKey = JSON.stringify([plan]);
+      const replay = this.replay(requestId, 'switch_quota_plan', now, inputKey);
+      if (replay === 'reused') return { ok: false, code: 'request_id_reused' };
+      if (replay !== null) return { ok: true, ...(replay as { body: string; etag: string }) };
+      const meta = this.doc<MetaDoc>('meta') ?? NO_META;
+      this.putDoc('meta', { ...meta, quota_plan: plan, rev: (meta.rev ?? 0) + 1 }, now);
+      const guard = await this.runGuard(now, perApp((app) => this.statusDoc(app).status));
+      await this.runDigest(now, false, meta.last_tick_at);
+      console.log(JSON.stringify({ event: 'quota_plan', plan, guard: guard.desired.level, guard_calls: guard.calls }));
+      const view = this.buildView('cloudflare', now, false) as CloudflareView;
+      const serialized = serializeView(view, null);
+      const answer = { body: serialized.body ?? JSON.stringify(view), etag: serialized.etag };
+      this.remember(requestId, 'switch_quota_plan', answer, now, inputKey);
+      return { ok: true, ...answer };
+    });
+  }
+
   /** Website receipts persist across all retries; other mutation answers expire after 24 h. */
   private replay(requestId: string | null, method: RequestMethod, now: number, inputKey?: string): unknown {
     if (requestId === null) return null;
@@ -573,6 +598,7 @@ export class HomeState extends DurableObject<Env> {
         day: utcDay(now),
         month: utcMonthStart(now),
         rows: result.data.rows,
+        paid_rows: result.data.paid_rows,
         unclassified_r2_operations: result.data.unclassified_r2_operations,
         resources: result.data.resources,
         last_error: null,
@@ -683,8 +709,22 @@ export class HomeState extends DurableObject<Env> {
     return desiredGuard(now, this.doc<AutoGuard>('guard'), this.doc<GuardOverrideDoc>(`guard_override:${app}`));
   }
 
+  private activePlan(): QuotaPlan {
+    return (this.doc<MetaDoc>('meta') ?? NO_META).quota_plan ?? 'free';
+  }
+
+  private activeRows(usage: UsageDoc): QuotaRow[] {
+    return this.activePlan() === 'paid' && usage.paid_rows !== undefined ? usage.paid_rows : usage.rows;
+  }
+
+  private activeUsage(usage: UsageDoc): UsageDoc {
+    const rows = this.activeRows(usage);
+    return rows === usage.rows ? usage : { ...usage, rows };
+  }
+
   private async runGuard(now: number, observed: Record<OpsApp, OpsStatus | null>): Promise<{ desired: DesiredGuard; calls: number }> {
-    const auto = evaluateAuto(now, this.doc<UsageDoc>('usage'), this.doc<AutoGuard>('guard'));
+    const usage = this.doc<UsageDoc>('usage');
+    const auto = evaluateAuto(now, usage === null ? null : this.activeUsage(usage), this.doc<AutoGuard>('guard'));
     this.putDoc('guard', auto, now);
     const calls = await this.applyGuard(now, perApp((app) => observed[app]?.guard ?? null));
     return { desired: this.autoDesired(now), calls };
@@ -769,7 +809,7 @@ export class HomeState extends DurableObject<Env> {
       usage: {
         configured: analyticsConfigured(this.env),
         fresh: usageFresh(usage, now),
-        rows: usage.rows,
+        rows: this.activeRows(usage),
         fetched_at: usage.fetched_at,
         consecutive_failures: usage.consecutive_failures,
         last_http_status: usage.last_http_status,
@@ -1040,6 +1080,9 @@ export class HomeState extends DurableObject<Env> {
 
   private usageView(now: number): Usage {
     const usage = this.doc<UsageDoc>('usage') ?? NO_USAGE;
+    const plan = this.activePlan();
+    const rows = this.activeRows(usage);
+    const alternateRows = plan === 'paid' ? usage.rows : (usage.paid_rows ?? []);
     const status: Usage['status'] = !analyticsConfigured(this.env)
       ? 'not_configured'
       : usage.fetched_at === null
@@ -1055,8 +1098,10 @@ export class HomeState extends DurableObject<Env> {
       last_error: usage.last_error,
       last_error_at: isoOrNull(usage.last_error_at),
       consecutive_failures: usage.consecutive_failures,
-      rows: usage.rows,
+      rows,
       unclassified_r2_operations: usage.unclassified_r2_operations,
+      plan,
+      ...(alternateRows.length > 0 ? { alternate_rows: alternateRows } : {}),
     };
   }
 

@@ -149,7 +149,11 @@ export function cloudflareResponse(
     name: VIEW_NAMES.cloudflare,
     ...base,
     drift,
-    usage: { ...usage, rows: withBreakdownResources(usage.rows, registry) },
+    usage: {
+      ...usage,
+      rows: withBreakdownResources(usage.rows, registry),
+      ...(usage.alternate_rows === undefined ? {} : { alternate_rows: withBreakdownResources(usage.alternate_rows, registry) }),
+    },
     workers: listed.rows,
     workers_omitted: listed.omitted,
     workers_truncated: scripts?.truncated ?? false,

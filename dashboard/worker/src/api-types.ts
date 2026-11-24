@@ -67,7 +67,7 @@ import type {
   ResourceRow,
   WorkerRow,
 } from '@ziyixi/proto/dashboard/ui/v1/cloudflare_view_wire';
-import type { OverrideGuardRequest, OverrideGuardResponse, RequestWebsiteSyncResponse, RunCanaryRequest, RunCanaryResponse } from '@ziyixi/proto/dashboard/ui/v1/dashboard_ui_service_wire';
+import type { OverrideGuardRequest, OverrideGuardResponse, RequestWebsiteSyncResponse, RunCanaryRequest, RunCanaryResponse, SwitchQuotaPlanRequest } from '@ziyixi/proto/dashboard/ui/v1/dashboard_ui_service_wire';
 import type {
   CanaryBadge,
   FlowState,
@@ -107,7 +107,7 @@ import type {
   TileMetricDef,
   TileMetricKind,
 } from '@ziyixi/proto/dashboard/ui/v1/registry_wire';
-import type { QuotaBreakdownItem, QuotaPeriod, QuotaResource, QuotaRow, QuotaUnit, StorageKind, Usage, Usage_State } from '@ziyixi/proto/dashboard/ui/v1/usage_wire';
+import type { QuotaBreakdownItem, QuotaPeriod, QuotaPlan, QuotaResource, QuotaRow, QuotaUnit, StorageKind, Usage, Usage_State } from '@ziyixi/proto/dashboard/ui/v1/usage_wire';
 import type { GuardLevel, GuardState, OpsReportItem, OpsReportReceipt, OpsStatus, Severity, Signal } from '@ziyixi/proto/ops/v1/ops_wire';
 import type { WebsiteSyncRequestResult, WebsiteSyncStatus } from '@ziyixi/proto/website/sync/v1/sync_wire';
 
@@ -162,6 +162,7 @@ export type {
   OverrideGuardResponse,
   QuotaBreakdownItem,
   QuotaPeriod,
+  QuotaPlan,
   QuotaResource,
   QuotaRow,
   QuotaUnit,
@@ -181,6 +182,7 @@ export type {
   StageSignal,
   StageState,
   StorageKind,
+  SwitchQuotaPlanRequest,
   Target,
   TileMetric,
   TileMetricDef,

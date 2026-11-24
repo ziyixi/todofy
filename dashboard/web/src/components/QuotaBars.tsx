@@ -6,6 +6,7 @@ import {
   QUOTA_SHOW_REMAINING,
   type QuotaBreakdownItem,
   type QuotaPeriod,
+  type QuotaPlan,
   type QuotaRow,
 } from '../../../worker/src/api-types.ts'
 import { formatAmountShort, formatLimitShort, formatNumber, formatPercent, formatQuantity } from '../lib/format'
@@ -202,7 +203,7 @@ function groupGuardNote(items: readonly QuotaRow[]): string {
 }
 
 /** The account allowances in three groups (每日 / 每月 / 存储), each with its reset rule. */
-export function QuotaGroups({ rows, reg }: { rows: readonly QuotaRow[]; reg: Reg }) {
+export function QuotaGroups({ rows, reg, plan = 'free' }: { rows: readonly QuotaRow[]; reg: Reg; plan?: QuotaPlan }) {
   const groups = PERIOD_ORDER.map((period) => ({ period, rows: rows.filter((row) => row.period === period) })).filter(
     (group) => group.rows.length > 0,
   )
@@ -210,9 +211,9 @@ export function QuotaGroups({ rows, reg }: { rows: readonly QuotaRow[]; reg: Reg
     <div className="quota-columns">
       {groups.map(({ period, rows: items }) => (
         <section key={period} className="panel quota-group" aria-labelledby={`quota-${period}`}>
-          <h4 id={`quota-${period}`}>{PERIODS[period].title}</h4>
+          <h4 id={`quota-${period}`}>{period === 'monthly' && plan === 'paid' ? '每月含额（Workers Paid 与 R2）' : PERIODS[period].title}</h4>
           <p className="small muted">
-            {PERIODS[period].note}
+            {period === 'monthly' && plan === 'paid' ? 'UTC 自然月累计，每月 1 日 00:00 重置' : PERIODS[period].note}
             {groupGuardNote(items)}
           </p>
           <ul className="quota-list">
