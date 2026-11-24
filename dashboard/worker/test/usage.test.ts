@@ -203,8 +203,8 @@ describe('parseUsage', () => {
     expect(row(rows, 'r2_class_b')).toMatchObject({ used: 28, truncated: false });
     expect(row(rows, 'r2_storage')).toMatchObject({ used: 14_000, truncated: false });
     // A full page of the new cap is still a lower bound.
-    const full = parseUsage(graphqlBody({ doScripts: Array.from({ length: 100 }, (_, i) => ({ script: `do-${String(i)}`, requests: 1, errors: 0 })) }), NOW)?.rows ?? [];
-    expect(row(full, 'do_requests')).toMatchObject({ used: 100, truncated: true });
+    const full = parseUsage(graphqlBody({ doScripts: Array.from({ length: 250 }, (_, i) => ({ script: `do-${String(i)}`, requests: 1, errors: 0 })) }), NOW)?.rows ?? [];
+    expect(row(full, 'do_requests')).toMatchObject({ used: 250, truncated: true });
   });
 
   it('reads empty storage datasets as no data, never 0', () => {
@@ -309,12 +309,86 @@ describe('parseUsage per script and per resource (design-v2.md §4)', () => {
     ]);
   });
 
-  it.each([0, 5, 20, 50])('parses %i scripts, and a full page of 50 as truncated', (count) => {
+  it.each([0, 5, 20, 200])('parses %i scripts, and a full page of 200 as truncated', (count) => {
     const data = parseUsage(graphqlBody(usageWithScripts(count)), NOW);
     expect(data?.scripts.filter((s) => s.requests > 0)).toHaveLength(count);
-    expect(data?.workers_truncated).toBe(count >= 50);
-    expect(row(data?.rows ?? [], 'workers_requests').truncated).toBe(count >= 50);
+    expect(data?.workers_truncated).toBe(count >= 200);
+    expect(row(data?.rows ?? [], 'workers_requests').truncated).toBe(count >= 200);
     expect(new Set(data?.scripts.map((s) => s.script)).size).toBe(data?.scripts.length);
+  });
+
+  it('splits invocation statuses cleanly and weights cpu_p50_us by requests across status slices', () => {
+    const body = graphqlBody({
+      scripts: [],
+      doScripts: [],
+    }) as {
+      data: {
+        viewer: {
+          accounts: {
+            workers: unknown[];
+            doInv: unknown[];
+          }[];
+        };
+      };
+    };
+    const account = body.data.viewer.accounts[0];
+    if (account === undefined) throw new Error('missing account');
+    account.workers = [
+      {
+        sum: { requests: 1000, errors: 0, subrequests: 20 },
+        dimensions: { scriptName: 'router', status: 'ok' },
+        quantiles: { cpuTimeP50: 800, cpuTimeP99: 3000 },
+      },
+      {
+        sum: { requests: 2, errors: 2, subrequests: 0 },
+        dimensions: { scriptName: 'router', status: 'exceededResources' },
+        quantiles: { cpuTimeP50: 50000, cpuTimeP99: 50000 },
+      },
+      {
+        sum: { requests: 5, errors: 0, subrequests: 0 },
+        dimensions: { scriptName: 'router', status: 'clientDisconnected' },
+        quantiles: { cpuTimeP50: 1200, cpuTimeP99: 2000 },
+      },
+      {
+        sum: { requests: 3, errors: 3, subrequests: 1 },
+        dimensions: { scriptName: 'router', status: 'scriptThrewException' },
+        quantiles: { cpuTimeP50: 2500, cpuTimeP99: 4000 },
+      },
+    ];
+    account.doInv = [
+      { sum: { requests: 90, errors: 0 }, dimensions: { scriptName: 'router', namespaceId: 'ns-1', status: 'ok' } },
+      { sum: { requests: 1, errors: 1 }, dimensions: { scriptName: 'router', namespaceId: 'ns-1', status: 'exceededResources' } },
+      { sum: { requests: 4, errors: 0 }, dimensions: { scriptName: 'router', namespaceId: 'ns-1', status: 'clientDisconnected' } },
+      { sum: { requests: 2, errors: 2 }, dimensions: { scriptName: 'router', namespaceId: 'ns-1', status: 'scriptThrewException' } },
+    ];
+    const data = parseUsage(body, NOW);
+    // Request-weighted p50: (1000*800 + 2*50000 + 5*1200 + 3*2500) / 1010 = 913500 / 1010 = 904 (not 50,000!).
+    expect(data?.scripts).toEqual([
+      {
+        script: 'router',
+        requests: 1010,
+        errors: 5,
+        subrequests: 21,
+        cpu_p50_us: 904,
+        cpu_p99_us: 50000,
+        do_requests: 97,
+        do_errors: 3,
+        exceeded_resources: 2,
+        client_disconnected: 5,
+        script_exception: 3,
+        do_exceeded_resources: 1,
+        do_client_disconnected: 4,
+        do_script_exception: 2,
+      },
+    ]);
+    expect(row(data?.rows ?? [], 'do_requests').truncated).toBe(false);
+
+    // 250 doInv rows hits the raised limit.
+    account.doInv = Array.from({ length: 250 }, (_, i) => ({
+      sum: { requests: 1, errors: 0 },
+      dimensions: { scriptName: 'router', namespaceId: `ns-${String(i)}`, status: 'ok' },
+    }));
+    expect(row(parseUsage(body, NOW)?.rows ?? [], 'do_requests').truncated).toBe(true);
   });
 
   it('lists D1, DO and R2 resources by their GraphQL identifier, R2 by class', () => {

@@ -352,8 +352,8 @@ export const ERROR_RATE_CRITICAL_PERCENT = 20;
 export const CPU_LIMIT_US = 10_000;
 export const CPU_HINT_US = 8_000;
 
-/** workersInvocationsAdaptive `limit` (was 20 in v1); a dataset returning this many rows is truncated. */
-export const WORKERS_QUERY_LIMIT = 50;
+/** workersInvocationsAdaptive `limit` (was 20 in v1, 50 before status split); a dataset returning this many rows is truncated. */
+export const WORKERS_QUERY_LIMIT = 200;
 /** Scripts not seen for this many UTC days leave the remembered `cf_scripts` set; at most this many kept. */
 export const CF_SCRIPTS_RETENTION_DAYS = 30;
 export const CF_SCRIPTS_MAX = 100;
