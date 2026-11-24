@@ -89,6 +89,21 @@ async function latestState(
   if (!Array.isArray(states)) throw new Error("github_response_invalid");
   return object(states[0]) ?? { state: "missing" };
 }
+async function latestReleaseState(
+  env: RelayEnv,
+  deploymentId: unknown,
+  signal: AbortSignal,
+): Promise<Record<string, unknown>> {
+  const states = await githubJson(env, `/deployments/${deploymentId}/statuses?per_page=10`, signal);
+  if (!Array.isArray(states)) throw new Error("github_response_invalid");
+  const rows = states.map(object).filter((row): row is Record<string, unknown> => row !== null);
+  const first = rows[0];
+  if (!first) return { state: "missing" };
+  if (first.state === "inactive") {
+    return rows.find((row) => row.state !== "inactive") ?? first;
+  }
+  return first;
+}
 function buildIdentity(value: unknown): Record<string, unknown> | null {
   const identity = object(value);
   return identity &&
@@ -178,7 +193,7 @@ async function lastRelease(env: RelayEnv, signal: AbortSignal): Promise<Release 
       !VERSION.test(payload.workerVersionId)
     )
       continue;
-    const state = await latestState(env, row.id, signal);
+    const state = await latestReleaseState(env, row.id, signal);
     if (state.state !== "success" || !utc(state.created_at)) continue;
     const runId =
       typeof payload.workflowUrl === "string"

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { main as runReleaseCli } from "../../scripts/release/cli";
 import type { HostnameGuard, WorkerState, Wrangler } from "../../scripts/release/cloudflare";
-import type { DeploymentRow } from "../../scripts/release/github";
+import { GitHubClient, type DeploymentRow } from "../../scripts/release/github";
 import {
   GateStateSchema,
   parsePayload,
@@ -760,5 +760,47 @@ describe("release CLI dispatch and environment guards", () => {
     await expect(runReleaseCli(["prepare"])).rejects.toThrow(
       /NOTION_API_VERSION does not match the version pinned in site\.config\.ts/,
     );
+  });
+});
+
+describe("GitHubClient.latestState", () => {
+  it("treats inactive-after-success as success while keeping inactive, failure, and in_progress blocking", async () => {
+    const cases: Array<{
+      rows: Array<{ id: number; created_at: string; state: string }>;
+      expected: string;
+    }> = [
+      {
+        rows: [
+          { id: 1, created_at: "2026-11-09T10:18:00Z", state: "success" },
+          { id: 2, created_at: "2026-11-18T19:43:20Z", state: "inactive" },
+        ],
+        expected: "success",
+      },
+      {
+        rows: [{ id: 3, created_at: "2026-11-18T19:43:20Z", state: "inactive" }],
+        expected: "inactive",
+      },
+      {
+        rows: [
+          { id: 4, created_at: "2026-11-09T10:18:00Z", state: "success" },
+          { id: 5, created_at: "2026-11-09T10:19:00Z", state: "failure" },
+        ],
+        expected: "failure",
+      },
+      {
+        rows: [{ id: 6, created_at: "2026-11-09T10:17:00Z", state: "in_progress" }],
+        expected: "in_progress",
+      },
+    ];
+    for (const testCase of cases) {
+      const fetchImpl = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json(testCase.rows));
+      const github = new GitHubClient({
+        apiUrl: "https://api.github.com",
+        repository: "owner/cloud",
+        token: "fixture",
+        fetchImpl,
+      });
+      await expect(github.latestState(10)).resolves.toBe(testCase.expected);
+    }
   });
 });

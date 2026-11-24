@@ -65,6 +65,16 @@ describe('website content checks and owner request', () => {
     expect(within(region()).getByRole('button', { name: '立即同步' })).toBeEnabled()
   })
 
+  it('tells the owner to inspect Actions instead of blindly retrying when the sync ledger is blocked', async () => {
+    freezeClock()
+    const scenario = healthy()
+    scenario.home = { ...scenario.home, website_sync: { ...DETAILS, latest_attempt: { run_id: '12001', run_url: RUN_URL, run_attempt: 1, state: 'blocked', started_at: NOW.toISOString(), error_code: 'sync_gate_blocked' } } }
+    serve(scenario)
+    renderApp()
+    await screen.findByRole('region', { name: '网站同步' })
+    expect(within(region()).getByText(/先在 Actions 里看具体原因；账本被挡时立即同步无效/)).toBeInTheDocument()
+  })
+
   it('does not claim older evidence exists when provider observation has no check or publication', async () => {
     freezeClock()
     const scenario = healthy()

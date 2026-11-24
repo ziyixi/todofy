@@ -113,7 +113,11 @@ export class GitHubClient {
     const statuses = newestFirst(
       await this.all<StatusRow>(`/deployments/${deploymentId}/statuses`, repository),
     );
-    return statuses[0]?.state ?? "missing";
+    const latest = statuses[0]?.state;
+    if (latest === "inactive") {
+      return statuses.find((row) => row.state !== "inactive")?.state ?? "inactive";
+    }
+    return latest ?? "missing";
   }
 
   async createRecord(payload: ReleasePayload, ref: string): Promise<number> {

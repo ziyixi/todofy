@@ -56,12 +56,13 @@ const release = {
     workflowUrl: "https://github.com/owner/site/actions/runs/2",
   },
 };
+type StatusRow = { state: string; description?: string; created_at?: string };
 function observe(
   options: {
     runs?: unknown[];
     checks?: unknown[];
     releases?: unknown[];
-    states?: Record<string, { state: string; description?: string; created_at?: string }>;
+    states?: Record<string, StatusRow | StatusRow[]>;
     site?: Response;
   } = {},
 ) {
@@ -72,14 +73,20 @@ function observe(
       return Response.json(options.checks ?? [check()]);
     if (url.includes("task=website-release")) return Response.json(options.releases ?? [release]);
     const match = /\/deployments\/(\d+)\/statuses/.exec(url);
-    if (match)
-      return Response.json([
-        options.states?.[match[1]!] ?? {
-          state: "success",
-          description: match[1] === "2" ? "Deployed and verified" : "SYNC_UNCHANGED",
-          created_at: match[1] === "2" ? "2026-10-03T10:22:00Z" : "2026-10-04T10:20:00Z",
-        },
-      ]);
+    if (match) {
+      const configured = options.states?.[match[1]!];
+      return Response.json(
+        Array.isArray(configured)
+          ? configured
+          : [
+              configured ?? {
+                state: "success",
+                description: match[1] === "2" ? "Deployed and verified" : "SYNC_UNCHANGED",
+                created_at: match[1] === "2" ? "2026-10-03T10:22:00Z" : "2026-10-04T10:20:00Z",
+              },
+            ],
+      );
+    }
     if (url === "https://www.example.test/build-info.json")
       return options.site ?? Response.json(identity);
     throw new Error("Unexpected fixture URL");
@@ -244,6 +251,33 @@ describe("subrequest budget", () => {
     });
     expect((await getSyncStatus(env, now)).last_publish?.run_id).toBe("4");
     expect(statusReads(send).filter((deployment) => deployment !== "12")).toEqual(["5", "4"]);
+  });
+  it("retains last verified release across inactive-after-success without adopting inactive time, while ignoring inactive-only, failure, and in_progress", async () => {
+    observe({
+      states: {
+        2: [
+          { state: "inactive", description: "", created_at: "2026-10-04T11:00:00Z" },
+          {
+            state: "success",
+            description: "Deployed and verified",
+            created_at: "2026-10-03T10:22:00Z",
+          },
+        ],
+      },
+    });
+    const status = await getSyncStatus(env, now);
+    expect(status.last_publish).toMatchObject({ run_id: "2", verified_at: "2026-10-03T10:22:00Z" });
+    for (const bad of [
+      [{ state: "inactive", created_at: "2026-10-04T11:00:00Z" }],
+      [
+        { state: "failure", created_at: "2026-10-03T10:23:00Z" },
+        { state: "success", created_at: "2026-10-03T10:22:00Z" },
+      ],
+      [{ state: "in_progress", created_at: "2026-10-03T10:21:00Z" }],
+    ]) {
+      observe({ states: { 2: bad } });
+      expect((await getSyncStatus(env, now)).last_publish).toBeUndefined();
+    }
   });
   it("a request lookup keeps the larger run page so older request IDs stay findable", async () => {
     const send = observe();

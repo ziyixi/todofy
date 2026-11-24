@@ -24,7 +24,7 @@ const ERROR_GUIDANCE: Record<string, string> = {
   sync_cancelled: '本次任务已取消。需要更新网站时，点击立即同步。',
   sync_receipt_failed: '同步结果未能登记。请打开本次 Actions，核对内容检查和线上版本，修复回执步骤后立即同步。',
   sync_receipt_missing: '缺少完整同步回执，当前无法确认结果。请打开本次 Actions，核对内容检查和线上版本。',
-  sync_gate_blocked: '发布前校验未通过。请打开本次 Actions，处理校验指出的问题后立即同步。',
+  sync_gate_blocked: '发布前校验未通过。先在 Actions 里看具体原因；账本被挡时立即同步无效。',
   sync_bootstrap_required: '网站尚未完成首次初始化。请按重建手册完成网站初始化，再立即同步。',
   github_permission_denied: 'GitHub 权限不足。请核对网站同步凭据的 Actions 读写和 Deployments 读取权限，然后重试。',
   github_unavailable: '暂时无法读取 GitHub。请检查 GitHub 与发布凭据，恢复后刷新控制台。',

@@ -15,11 +15,11 @@ export function alertGuidance(code: string, source?: string): AlertGuidance {
     case 'model_execution_unknown':
       return { explanation: '有推理请求超过 15 分钟没有留下最终结果。', next: '先在 Model Router 查看对应请求的时间与结果，核对后再发起新请求。' }
     case 'website_sync_stale':
-      return { explanation: '超过 26 小时没有完整的 Notion 内容检查记录。网站可访问不能证明内容同步正常。', next: '在首页点击立即同步；查看本次 Actions，处理失败原因后刷新状态。' }
+      return { explanation: '超过 26 小时没有完整的 Notion 内容检查记录。网站可访问不能证明内容同步正常。', next: '先在 Actions 里看具体原因；账本被挡时立即同步无效。处理后点击立即同步并刷新状态。' }
     case 'website_sync_failed':
     case 'website_sync_blocked':
     case 'website_sync_unconfirmed':
-      return { explanation: '最近一次网站内容同步没有得到完整成功结果。上次验证发布保持不变。', next: '在网站同步卡片打开本次 Actions，处理具体错误后立即同步；可以关闭本次提醒。' }
+      return { explanation: '最近一次网站内容同步没有得到完整成功结果。上次验证发布保持不变。', next: '先在 Actions 里看具体原因；账本被挡时立即同步无效。处理具体错误后再立即同步；可以关闭本次提醒。' }
     case 'website_sync_provider_unavailable':
       return { explanation: 'GitHub 同步记录当前不可读取，页面无法确认最新状态。', next: '查看 Actions 和发布凭据，恢复读取后刷新状态。' }
     case 'runtime_drift':
