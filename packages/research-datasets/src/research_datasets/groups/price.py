@@ -420,6 +420,25 @@ def build_price_liquidity_shock(
             np.isfinite(tc5) & np.isfinite(tc63) & (tc63 > 0), tc5 / tc63, np.nan
         )
 
+    sp = prices.channel("split_index").astype(np.float64)
+    n_assets, n_sess = sp.shape
+    sp_pos = np.where(np.isfinite(sp) & (sp > 0), sp, np.nan)
+    if n_sess > 1 and np.any(np.isfinite(sp_pos)):
+        sp_ff = pd.DataFrame(sp_pos.T).ffill().to_numpy(dtype=np.float64).T
+        ok_sp = (
+            np.isfinite(sp_ff[:, 1:]) & np.isfinite(sp_ff[:, :-1]) & (sp_ff[:, :-1] > 0)
+        )
+        split_ev = np.zeros((n_assets, n_sess), dtype=np.int32)
+        split_ev[:, 1:] = (
+            ok_sp & (np.abs(sp_ff[:, 1:] / sp_ff[:, :-1] - 1.0) > 1e-6)
+        ).astype(np.int32)
+        csplit = np.zeros((n_assets, n_sess + 1), dtype=np.int32)
+        np.cumsum(split_ev, axis=1, out=csplit[:, 1:])
+        left_sp = np.zeros((n_assets, n_sess), dtype=np.int32)
+        if n_sess >= 63:
+            left_sp[:, 62:] = csplit[:, 1 : n_sess - 61]
+        tc_shock[(csplit[:, 1:] - left_sp) > 0] = np.nan
+
     return pd.DataFrame(
         {
             "pliq_dvol_log_21d": _select_at_anchors(dvol_log_21, anchors),
