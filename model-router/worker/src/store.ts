@@ -290,7 +290,7 @@ export class Store {
         .run();
       return true;
     } catch {
-      // Workers Free D1 daily write quota may reject logging; never drop a completed private batch result.
+      // Never drop a completed private extraction result if D1 usage logging fails.
       console.warn('private_request_d1_quota');
       return false;
     }

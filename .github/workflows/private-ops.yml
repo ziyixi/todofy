@@ -19,11 +19,11 @@ on:
           - restore-check
           - runtime-restart
           - runtime-terminate
-          - quant-v4-gates
-          - quant-v4-gates-report
-          - quant-v4-rehearse
-          - quant-v4-cutover
-          - quant-v4-rollback
+          - private-migration-gates
+          - private-migration-gates-report
+          - private-migration-rehearse
+          - private-migration-cutover
+          - private-migration-rollback
           - k3s-check
           - k3s-plan
           - k3s-apply
