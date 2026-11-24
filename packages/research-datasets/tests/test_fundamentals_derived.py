@@ -610,8 +610,53 @@ class DerivedQuartersTest(unittest.TestCase):
             views=("net_income_q",),
             provenance=True,
         )
-        self.assertTrue(np.isnan(with_nci.iloc[0]["net_income_q_value"]))
-        self.assertEqual(with_nci.iloc[0]["net_income_q_status"], "metric_missing")
+        self.assertEqual(with_nci.iloc[0]["net_income_q_value"], 95.0)
+        self.assertEqual(with_nci.iloc[0]["net_income_q_status"], "ok")
+        self.assertEqual(with_nci.iloc[0]["net_income_q_basis"], "total_minus_nci")
+
+        rows_has_nci_no_line = [
+            *rows_no_nci,
+            make_fact(
+                "mi-other",
+                "MinorityInterest",
+                "12",
+                None,
+                "2024-12-31",
+                period_kind="instant",
+                public_at="2025-02-01T12:00:00Z",
+            ),
+        ]
+        approx_pl = derived_fundamentals(
+            make_material(rows_has_nci_no_line),
+            samples,
+            time_policy="public_reconstructed",
+            views=("net_income_q",),
+            provenance=True,
+        )
+        self.assertEqual(approx_pl.iloc[0]["net_income_q_value"], 100.0)
+        self.assertEqual(approx_pl.iloc[0]["net_income_q_status"], "approximate")
+        self.assertEqual(approx_pl.iloc[0]["net_income_q_basis"], "total_approx")
+
+        rows_common = [
+            make_fact(
+                "ni-common",
+                "NetIncomeLossAvailableToCommonStockholdersBasic",
+                "92",
+                "2025-01-01",
+                "2025-03-31",
+                public_at="2025-05-01T12:00:00Z",
+            )
+        ]
+        common_res = derived_fundamentals(
+            make_material(rows_common),
+            samples,
+            time_policy="public_reconstructed",
+            views=("net_income_q",),
+            provenance=True,
+        )
+        self.assertEqual(common_res.iloc[0]["net_income_q_value"], 92.0)
+        self.assertEqual(common_res.iloc[0]["net_income_q_status"], "approximate")
+        self.assertEqual(common_res.iloc[0]["net_income_q_basis"], "common_approx")
 
     def test_within_tag_conflict_same_clock_is_ambiguous(self) -> None:
         rows = [
@@ -2002,6 +2047,117 @@ class TrailingAndFiscalQuartersTest(unittest.TestCase):
                 for _ in ("cold", "warm")
             )
             pd.testing.assert_frame_equal(warm_empty, cold_empty, check_exact=True)
+
+    def test_derived_fallbacks_gross_profit_liabilities_cash_equity_and_debt(
+        self,
+    ) -> None:
+        rows = [
+            make_fact(
+                "rev-1",
+                "Revenues",
+                "500",
+                "2025-01-01",
+                "2025-03-31",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            make_fact(
+                "cor-1",
+                "CostOfRevenue",
+                "200",
+                "2025-01-01",
+                "2025-03-31",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            make_fact(
+                "le-1",
+                "LiabilitiesAndStockholdersEquity",
+                "1000",
+                None,
+                "2025-03-31",
+                period_kind="instant",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            make_fact(
+                "eq-tot-1",
+                "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+                "420",
+                None,
+                "2025-03-31",
+                period_kind="instant",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            make_fact(
+                "mi-1",
+                "MinorityInterest",
+                "20",
+                None,
+                "2025-03-31",
+                period_kind="instant",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            make_fact(
+                "cash-res-1",
+                "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
+                "80",
+                None,
+                "2025-03-31",
+                period_kind="instant",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            make_fact(
+                "ltd-1",
+                "LongTermDebt",
+                "300",
+                None,
+                "2025-03-31",
+                period_kind="instant",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            make_fact(
+                "ltnc-1",
+                "LongTermDebtNoncurrent",
+                "250",
+                None,
+                "2025-03-31",
+                period_kind="instant",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+        ]
+        samples = pd.DataFrame(
+            {
+                "asset_id": [ASSET_A],
+                "signal_session": ["2025-05-02"],
+                "decision_at": ["2025-05-05T10:00:00Z"],
+            }
+        )
+        res = derived_fundamentals(
+            make_material(rows),
+            samples,
+            time_policy="public_reconstructed",
+            views=(
+                "gross_profit_q",
+                "total_liabilities_i",
+                "equity_i",
+                "cash_i",
+                "total_debt_i",
+            ),
+            provenance=True,
+        )
+        row = res.iloc[0]
+        self.assertEqual(row["gross_profit_q_value"], 300.0)
+        self.assertEqual(row["gross_profit_q_status"], "ok")
+        self.assertEqual(row["gross_profit_q_basis"], "rev_minus_cor")
+        self.assertEqual(row["total_liabilities_i_value"], 580.0)
+        self.assertEqual(row["total_liabilities_i_status"], "ok")
+        self.assertEqual(row["total_liabilities_i_basis"], "le_minus_eq")
+        self.assertEqual(row["equity_i_value"], 400.0)
+        self.assertEqual(row["equity_i_status"], "ok")
+        self.assertEqual(row["equity_i_basis"], "total_minus_nci")
+        self.assertEqual(row["cash_i_value"], 80.0)
+        self.assertEqual(row["cash_i_status"], "approximate")
+        self.assertEqual(row["cash_i_basis"], "incl_restricted")
+        self.assertEqual(row["total_debt_i_value"], 300.0)
+        self.assertEqual(row["total_debt_i_status"], "ok")
 
 
 if __name__ == "__main__":

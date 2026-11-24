@@ -494,6 +494,115 @@ class _FiscalYearSlots:
     twelve_week_interims: bool = False
 
 
+def _relabel_period(
+    pv: PeriodValue, basis: str, *, force_approximate: bool = False
+) -> PeriodValue:
+    status = "approximate" if force_approximate and pv.usable else pv.status
+    return PeriodValue(
+        status=status,
+        decimal_value=pv.decimal_value,
+        raw_value=pv.raw_value,
+        available_ns=pv.available_ns,
+        period_start=pv.period_start,
+        period_end=pv.period_end,
+        basis=basis,
+        accessions=pv.accessions,
+        tag=pv.tag,
+        currency=pv.currency,
+        reference_date=pv.reference_date,
+    )
+
+
+def _combine_period_add(
+    a: PeriodValue,
+    b: PeriodValue,
+    sign: int,
+    basis: str,
+    start: date | None,
+    end: date,
+) -> PeriodValue | None:
+    if not a.usable:
+        return _relabel_period(a, basis)
+    if not b.usable:
+        return _relabel_period(b, basis)
+    if a.currency != b.currency:
+        return None
+    assert a.decimal_value is not None and b.decimal_value is not None
+    val = a.decimal_value + (b.decimal_value * sign)
+    status = "approximate" if "approximate" in {a.status, b.status} else "ok"
+    return PeriodValue(
+        status=status,
+        decimal_value=val,
+        raw_value=_format_decimal(val),
+        available_ns=max(a.available_ns, b.available_ns),
+        period_start=start,
+        period_end=end,
+        basis=basis,
+        accessions=_join_accessions(a.accessions, b.accessions),
+        tag=a.tag,
+        currency=a.currency,
+        reference_date=max(a.reference_date, b.reference_date),
+    )
+
+
+def _fill_derived_fallbacks(
+    concept_periods: dict[str, dict[tuple[date | None, date], PeriodValue]],
+    all_duration_keys: Sequence[tuple[date | None, date]],
+    all_instant_keys: Sequence[tuple[date | None, date]],
+    has_nci: bool,
+) -> None:
+    """Populate derived fallbacks for gross_profit, total_liabilities, and cash."""
+    gp_map = concept_periods.setdefault("gross_profit", {})
+    rev_map = concept_periods.get("revenue", {})
+    cor_map = concept_periods.get("cost_of_revenue", {})
+    for key in all_duration_keys:
+        if key in gp_map:
+            continue
+        rev = rev_map.get(key)
+        cor = cor_map.get(key)
+        if rev is not None and cor is not None:
+            pv = _combine_period_add(rev, cor, -1, "rev_minus_cor", key[0], key[1])
+            if pv is not None:
+                gp_map[key] = pv
+
+    tl_map = concept_periods.setdefault("total_liabilities", {})
+    le_map = concept_periods.get("liabilities_and_equity", {})
+    ta_map = concept_periods.get("total_assets", {})
+    eq_t_map = concept_periods.get("equity_total", {})
+    eq_p_map = concept_periods.get("equity_parent", {})
+    mi_map = concept_periods.get("minority_interest", {})
+    for key in all_instant_keys:
+        if key not in tl_map:
+            le = le_map.get(key) or ta_map.get(key)
+            eq_tot = eq_t_map.get(key)
+            if eq_tot is None:
+                ep = eq_p_map.get(key)
+                mi = mi_map.get(key)
+                if ep is not None and mi is not None:
+                    eq_tot = _combine_period_add(ep, mi, 1, "eq_plus_mi", None, key[1])
+                elif ep is not None and not has_nci:
+                    eq_tot = ep
+            if le is not None and eq_tot is not None:
+                pv = _combine_period_add(le, eq_tot, -1, "le_minus_eq", None, key[1])
+                if pv is not None:
+                    tl_map[key] = pv
+
+    cash_map = concept_periods.setdefault("cash", {})
+    cr_map = concept_periods.get("cash_incl_restricted", {})
+    for key in all_instant_keys:
+        if key in cash_map:
+            continue
+        cr = cr_map.get(key)
+        if cr is not None:
+            cash_map[key] = _relabel_period(
+                cr, "incl_restricted", force_approximate=True
+            )
+
+    for c_name in ("gross_profit", "total_liabilities", "cash"):
+        if not concept_periods[c_name]:
+            concept_periods.pop(c_name, None)
+
+
 class IssuerStateMachine:
     """Pure-Python point-in-time state machine for one CIK."""
 
@@ -641,97 +750,69 @@ class IssuerStateMachine:
         def get(c: str) -> PeriodValue | None:
             return base_cache.get((c, start, end))
 
-        def relabel(pv: PeriodValue, basis: str) -> PeriodValue:
-            return PeriodValue(
-                status=pv.status,
-                decimal_value=pv.decimal_value,
-                raw_value=pv.raw_value,
-                available_ns=pv.available_ns,
-                period_start=pv.period_start,
-                period_end=pv.period_end,
-                basis=basis,
-                accessions=pv.accessions,
-                tag=pv.tag,
-                currency=pv.currency,
-                reference_date=pv.reference_date,
-            )
-
-        def combine_add(
-            a: PeriodValue, b: PeriodValue, sign: int, basis: str
-        ) -> PeriodValue | None:
-            if not a.usable:
-                return relabel(a, basis)
-            if not b.usable:
-                return relabel(b, basis)
-            if a.currency != b.currency:
-                return None
-            assert a.decimal_value is not None and b.decimal_value is not None
-            val = a.decimal_value + (b.decimal_value * sign)
-            status = "approximate" if "approximate" in {a.status, b.status} else "ok"
-            return PeriodValue(
-                status=status,
-                decimal_value=val,
-                raw_value=_format_decimal(val),
-                available_ns=max(a.available_ns, b.available_ns),
-                period_start=start,
-                period_end=end,
-                basis=basis,
-                accessions=_join_accessions(a.accessions, b.accessions),
-                tag=a.tag,
-                currency=a.currency,
-                reference_date=max(a.reference_date, b.reference_date),
-            )
-
         if name == "revenue":
             tot = get("revenue_total")
             if tot is not None:
-                return relabel(tot, "total")
+                return _relabel_period(tot, "total")
             con = get("revenue_contracts")
             if con is not None:
-                return relabel(con, "contracts")
+                return _relabel_period(con, "contracts")
             return None
 
         if name == "net_income":
             par = get("net_income_parent")
             if par is not None:
-                return relabel(par, "parent")
-            if not has_nci:
-                tot = get("net_income_total")
-                if tot is not None:
-                    return relabel(tot, "total_no_nci")
+                return _relabel_period(par, "parent")
+            tot = get("net_income_total")
+            nci = get("net_income_nci")
+            if tot is not None and nci is not None:
+                return _combine_period_add(tot, nci, -1, "total_minus_nci", start, end)
+            if tot is not None and not has_nci:
+                return _relabel_period(tot, "total_no_nci")
+            com = get("net_income_common")
+            if com is not None:
+                return _relabel_period(com, "common_approx", force_approximate=True)
+            if tot is not None:
+                return _relabel_period(tot, "total_approx", force_approximate=True)
             return None
 
         if name == "equity":
             par = get("equity_parent")
             if par is not None:
-                return relabel(par, "parent")
-            if not has_nci:
-                tot = get("equity_total")
-                if tot is not None:
-                    return relabel(tot, "total_no_nci")
+                return _relabel_period(par, "parent")
+            tot = get("equity_total")
+            mi = get("minority_interest")
+            if tot is not None and mi is not None:
+                return _combine_period_add(tot, mi, -1, "total_minus_nci", start, end)
+            if tot is not None and not has_nci:
+                return _relabel_period(tot, "total_no_nci")
+            if tot is not None:
+                return _relabel_period(tot, "total_approx", force_approximate=True)
             return None
 
         if name == "shares_outstanding":
             cov = get("shares_outstanding_cover")
             if cov is not None:
-                return relabel(cov, "cover")
+                return _relabel_period(cov, "cover")
             bs = get("shares_outstanding_bs")
             if bs is not None:
-                return relabel(bs, "balance_sheet")
+                return _relabel_period(bs, "balance_sheet")
             return None
 
         if name == "fcf":
             ocf = get("operating_cash_flow")
             capex = get("capex")
             if ocf is not None and capex is not None:
-                return combine_add(ocf, capex, -1, "ocf_minus_capex")
+                return _combine_period_add(
+                    ocf, capex, -1, "ocf_minus_capex", start, end
+                )
             return None
 
         if name == "ebitda":
             oi = get("operating_income")
             da = get("d_and_a")
             if oi is not None and da is not None:
-                return combine_add(oi, da, 1, "oi_plus_da")
+                return _combine_period_add(oi, da, 1, "oi_plus_da", start, end)
             return None
 
         if name == "total_debt":
@@ -741,22 +822,22 @@ class IssuerStateMachine:
             stb = get("short_term_borrowings")
             ltd_c = get("long_term_debt_current")
             if dc is not None and ltd_nc is not None:
-                return combine_add(dc, ltd_nc, 1, "dc_ltdnc")
+                return _combine_period_add(dc, ltd_nc, 1, "dc_ltdnc", start, end)
             if ltd is not None and stb is not None:
-                return combine_add(ltd, stb, 1, "ltd_stb")
+                return _combine_period_add(ltd, stb, 1, "ltd_stb", start, end)
             if ltd_c is not None and ltd_nc is not None:
-                pair = combine_add(ltd_c, ltd_nc, 1, "ltdc_ltdnc")
+                pair = _combine_period_add(ltd_c, ltd_nc, 1, "ltdc_ltdnc", start, end)
                 if pair is not None and stb is not None and pair.usable:
-                    return combine_add(pair, stb, 1, "ltdc_ltdnc")
+                    return _combine_period_add(pair, stb, 1, "ltdc_ltdnc", start, end)
                 return pair
-            if ltd is not None and dc is None and ltd_c is None and ltd_nc is None:
-                return relabel(ltd, "ltd_stb")
-            if ltd_nc is not None and dc is None and ltd_c is None and ltd is None:
+            if ltd is not None and dc is None and (ltd_c is None or ltd_nc is None):
+                return _relabel_period(ltd, "ltd_stb")
+            if ltd_nc is not None and dc is None and ltd_c is None:
                 if stb is not None:
-                    return combine_add(ltd_nc, stb, 1, "dc_ltdnc")
-                return relabel(ltd_nc, "dc_ltdnc")
+                    return _combine_period_add(ltd_nc, stb, 1, "dc_ltdnc", start, end)
+                return _relabel_period(ltd_nc, "dc_ltdnc")
             if dc is not None and ltd_nc is None and ltd is None and ltd_c is None:
-                return relabel(dc, "dc_ltdnc")
+                return _relabel_period(dc, "dc_ltdnc")
             return None
 
         return None
@@ -1621,6 +1702,9 @@ class IssuerStateMachine:
                     comp_map[(ps, pe)] = pv
             if comp_map:
                 concept_periods[comp_name] = comp_map
+        _fill_derived_fallbacks(
+            concept_periods, all_duration_keys, all_instant_keys, has_nci
+        )
 
         slots_list, fy_periods = (
             self._build_fiscal_calendar()

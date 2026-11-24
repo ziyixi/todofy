@@ -100,7 +100,16 @@ _FUND_NORMALIZE_CONCEPTS = frozenset(
     | {
         "revenue_total",
         "revenue_contracts",
+        "cost_of_revenue",
         "net_income_parent",
+        "net_income_total",
+        "net_income_nci",
+        "net_income_common",
+        "equity_parent",
+        "equity_total",
+        "minority_interest",
+        "cash_incl_restricted",
+        "liabilities_and_equity",
         "d_and_a",
         "debt_current",
         "long_term_debt_current",
@@ -824,12 +833,37 @@ def build_fund_store(
                         )
                     elif not vs and c_name == "net_income":
                         vs = d_map.get("net_income_parent", [])
+                        if not vs:
+                            ni_tot = _best_concept_value(
+                                d_map.get("net_income_total", [])
+                            )
+                            ni_nci = _best_concept_value(
+                                d_map.get("net_income_nci", [])
+                            )
+                            if math.isfinite(ni_tot) and math.isfinite(ni_nci):
+                                mat[row_i, _FUND_INDEX[c_name]] = np.float32(
+                                    ni_tot - ni_nci
+                                )
+                                row_versions.extend(d_map.get("net_income_total", []))
+                                row_versions.extend(d_map.get("net_income_nci", []))
+                                continue
+                            vs = d_map.get("net_income_common", []) or d_map.get(
+                                "net_income_total", []
+                            )
                     if vs:
                         mat[row_i, _FUND_INDEX[c_name]] = np.float32(
                             _best_concept_value(vs)
                         )
                         row_versions.extend(vs)
-                # Derived duration fallbacks (fcf / ebitda)
+                # Derived duration fallbacks (gross_profit / fcf / ebitda)
+                if np.isnan(mat[row_i, _FUND_INDEX["gross_profit"]]):
+                    rev_v = mat[row_i, _FUND_INDEX["revenue"]]
+                    cor_v = _best_concept_value(d_map.get("cost_of_revenue", []))
+                    if np.isfinite(rev_v) and math.isfinite(cor_v):
+                        mat[row_i, _FUND_INDEX["gross_profit"]] = np.float32(
+                            rev_v - cor_v
+                        )
+                        row_versions.extend(d_map.get("cost_of_revenue", []))
                 if np.isnan(mat[row_i, _FUND_INDEX["fcf"]]):
                     ocf = mat[row_i, _FUND_INDEX["operating_cash_flow"]]
                     capex = mat[row_i, _FUND_INDEX["capex"]]
@@ -843,11 +877,46 @@ def build_fund_store(
 
                 for c_name in _FUND_INSTANT_CONCEPTS:
                     vs = i_map.get(c_name, [])
+                    if not vs and c_name == "cash":
+                        vs = i_map.get("cash_incl_restricted", [])
+                    elif not vs and c_name == "equity":
+                        vs = i_map.get("equity_parent", [])
+                        if not vs:
+                            eq_tot = _best_concept_value(i_map.get("equity_total", []))
+                            mi_v = _best_concept_value(
+                                i_map.get("minority_interest", [])
+                            )
+                            if math.isfinite(eq_tot) and math.isfinite(mi_v):
+                                mat[row_i, _FUND_INDEX[c_name]] = np.float32(
+                                    eq_tot - mi_v
+                                )
+                                row_versions.extend(i_map.get("equity_total", []))
+                                row_versions.extend(i_map.get("minority_interest", []))
+                                continue
+                            vs = i_map.get("equity_total", [])
                     if vs:
                         mat[row_i, _FUND_INDEX[c_name]] = np.float32(
                             _best_concept_value(vs)
                         )
                         row_versions.extend(vs)
+                if np.isnan(mat[row_i, _FUND_INDEX["total_liabilities"]]):
+                    le_v = _best_concept_value(i_map.get("liabilities_and_equity", []))
+                    if not math.isfinite(le_v):
+                        ta_v = mat[row_i, _FUND_INDEX["total_assets"]]
+                        le_v = float(ta_v) if np.isfinite(ta_v) else float("nan")
+                    eq_tot_v = _best_concept_value(i_map.get("equity_total", []))
+                    if not math.isfinite(eq_tot_v):
+                        ep_v = _best_concept_value(i_map.get("equity_parent", []))
+                        mi_v = _best_concept_value(i_map.get("minority_interest", []))
+                        if math.isfinite(ep_v) and math.isfinite(mi_v):
+                            eq_tot_v = ep_v + mi_v
+                        elif math.isfinite(ep_v):
+                            eq_tot_v = ep_v
+                    if math.isfinite(le_v) and math.isfinite(eq_tot_v):
+                        mat[row_i, _FUND_INDEX["total_liabilities"]] = np.float32(
+                            le_v - eq_tot_v
+                        )
+                        row_versions.extend(i_map.get("liabilities_and_equity", []))
                 if np.isnan(mat[row_i, _FUND_INDEX["total_debt"]]):
                     dc = _best_concept_value(i_map.get("debt_current", [])) or 0.0
                     ltc = _best_concept_value(i_map.get("long_term_debt_current", []))
