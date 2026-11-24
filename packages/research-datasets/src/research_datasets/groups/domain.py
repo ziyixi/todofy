@@ -51,7 +51,7 @@ def _sic_financial_mask(ctx: GroupBuildContext) -> np.ndarray:
     if "sic" not in ind.columns:
         return np.zeros(len(ctx.samples), dtype=bool)
     sic = pd.to_numeric(ind["sic"], errors="coerce").to_numpy(dtype=np.float64)
-    return (sic >= 6000.0) & (sic <= 6799.0)
+    return ((sic >= 6000.0) & (sic <= 6199.0)) | ((sic >= 6300.0) & (sic <= 6399.0))
 
 
 def _float32_col(series: Any, n: int, index: pd.Index) -> np.ndarray:

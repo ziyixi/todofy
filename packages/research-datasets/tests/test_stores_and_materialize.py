@@ -1560,6 +1560,65 @@ class StoresAndMaterializeAdversarialTest(unittest.TestCase):
         self.assertTrue(np.isnan(out.loc[2, "earn_sue_eps_price"]))
         self.assertTrue(np.isnan(out.loc[2, "earn_sue_revenue"]))
 
+    def test_sic_financial_mask_narrows_to_deposit_lending_and_insurance(self) -> None:
+        from unittest.mock import patch
+
+        from research_datasets.feature_groups import GroupBuildContext
+        from research_datasets.groups.domain import _sic_financial_mask
+        from research_datasets.stores import PRICE_CHANNELS, Anchors, PriceStore, Stores
+
+        sessions = _nyse_sessions(date(2025, 1, 2), 5)
+        tensor = np.full(
+            (1, len(sessions), len(PRICE_CHANNELS)), np.nan, dtype=np.float32
+        )
+        pstore = PriceStore(
+            tensor, assets=(ASSET_1,), sessions=sessions, benchmark_idx=-1
+        )
+        anc_df = pd.DataFrame(
+            {
+                "row_id": list(range(5)),
+                "asset_id": [ASSET_1] * 5,
+                "signal_session": [d.isoformat() for d in sessions],
+                "entry_session": [d.isoformat() for d in sessions],
+                "decision_at": [pd.Timestamp(d, tz="UTC") for d in sessions],
+                "in_universe": [True] * 5,
+                "is_benchmark": [False] * 5,
+                "asset_idx": [0] * 5,
+                "session_idx": list(range(5)),
+                "fund_snap_id": [-1] * 5,
+                "event_start_cursor": [0] * 5,
+                "event_end_cursor": [0] * 5,
+            }
+        )
+        anchors = Anchors(
+            frame=anc_df,
+            order_sha256="test-c5-sic",
+            assets=(ASSET_1,),
+            sessions=tuple(sessions),
+            time_policy="public_reconstructed",
+            sampling="weekly",
+        )
+        stores = Stores(
+            anchors=anchors, prices=pstore, fundamentals=None, events=None, macro=None
+        )
+        ver = _SyntheticVersion(
+            calendar=sessions,
+            universe=[{"asset_id": ASSET_1, "symbol": "FIN1", "cik": CIK_1}],
+            families={"issuer_profiles": pd.DataFrame()},
+            prices_adj=pd.DataFrame(),
+            prices_raw=pd.DataFrame(),
+        )
+        ctx = GroupBuildContext(
+            version=ver, stores=stores, time_policy="public_reconstructed"
+        )
+        # 6021 (bank), 6311 (insurer carrier), 6798 (REIT), 6411 (ins broker), 6211 (sec broker)
+        fake_ind = pd.DataFrame({"sic": [6021, 6311, 6798, 6411, 6211]})
+        with patch(
+            "research_datasets.groups.domain._industry.industry", return_value=fake_ind
+        ):
+            mask = _sic_financial_mask(ctx)
+        self.assertEqual(mask.tolist(), [True, True, False, False, False])
+
     def test_fresh_import_populates_feature_groups(self) -> None:
         env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
         output = subprocess.check_output(
