@@ -56,6 +56,7 @@ proto_vitest_test(
     config = "//model-router/worker:test_config",
     data = [
         "//model-router/migrations:0001_router.sql_data",
+        "//model-router/migrations:0005_openai_started_index.sql_data",
         "//model-router/worker:node_modules/vitest",
         "//model-router/worker:package_json",
     ],
@@ -66,6 +67,7 @@ proto_vitest_test(
     deps = [
         "//model-router/tools:backup-restore",
         "//model-router/worker/src:backup",
+        "//model-router/worker/src:store",
     ],
 )
 
