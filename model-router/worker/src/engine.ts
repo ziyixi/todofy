@@ -19,7 +19,7 @@ import {
   type EmbedRequest,
 } from '@ziyixi/proto/modelrouter/inference/v1/inference_pb';
 import { ConsoleService, RequestRecordSchema } from '@ziyixi/proto/modelrouter/inference/v1/console_pb';
-import { Store, DAY, CONTENT_DAYS, timestamp } from './store.ts';
+import { Store, DAY, CONTENT_DAYS, pendingPrivateOpenAICost, timestamp } from './store.ts';
 import { validateConfig, validateOutput, providerOutputSchema, callerOutput, budget, MAX_INPUT_BYTES } from './schema.ts';
 import { modelCatalog, providerFor, routeFor } from './catalog.ts';
 import { executorClient } from './executor.ts';
@@ -33,6 +33,18 @@ import { backupStep, newBackup, type BackupCursor } from './backup.ts';
 import { Code, RpcError, invalid, precondition, resourceId } from './errors.ts';
 import type { Env, ProviderResult } from './types.ts';
 
+interface ModelEngine {
+  readonly environment: Env;
+  generate(req: GenerateRequest, app: string): Promise<Generation>;
+  embed(req: EmbedRequest, app: string): ReturnType<RouterEngine['embed']>;
+  createConversation(req: CreateConversationRequest, app: string): ReturnType<RouterEngine['createConversation']>;
+  closeConversation(name: string, app: string): ReturnType<RouterEngine['closeConversation']>;
+}
+interface ModelContext {
+  engine: ModelEngine;
+  app: string;
+  owner: boolean;
+}
 interface ApiContext {
   engine: RouterEngine;
   app: string;
@@ -47,13 +59,217 @@ export const PRIVATE_INFERENCE_APP = 'private-app';
 const knownApps = new Set(['console', 'mailsort', 'todofy', 'newsletter', PRIVATE_INFERENCE_APP]);
 const privateModels = new Set(['openai/gpt-6-luna', 'openai/gpt-6.1-terra', 'openai/gpt-6.1-sol', 'claude-haiku-5-5']);
 
+interface OpenAISpendHooks {
+  readMonthCost(started: number, monthSuffix: string): Promise<number>;
+  recordMonthCost(monthSuffix: string, cost: number, recordedInD1: boolean): Promise<void> | void;
+}
+
+let privateOpenAICache: { month: string; costMicrousd: number; syncedAt: number; unrecorded: number } | null = null;
+const PRIVATE_CACHE_SYNC_MS = 300_000;
+
+function validateStandaloneGenerate(req: GenerateRequest, app: string): void {
+  if (app === PRIVATE_INFERENCE_APP) {
+    if (req.conversation || req.allowFallback || !Number.isInteger(req.maxOutputTokens) || req.maxOutputTokens < 128 || req.maxOutputTokens > 8192)
+      invalid('INVALID_PARAMETER', 'Use one independent generation with an output token cap between 128 and 8192.');
+    if (!privateModels.has(req.model))
+      throw new RpcError(Code.PERMISSION_DENIED, 'MODEL_NOT_ALLOWED', 'This caller may use only its allowlisted models.');
+  }
+  if (!req.input || new TextEncoder().encode(req.input).length > MAX_INPUT_BYTES)
+    invalid('INVALID_INPUT', 'Input is empty or exceeds 2 MiB.');
+}
+
+async function executeGeneration(
+  effective: GenerateRequest,
+  req: GenerateRequest,
+  context: Context | undefined,
+  app: string,
+  env: Env,
+  store: Store,
+  controller: AbortController,
+  openAIHooks: OpenAISpendHooks,
+): Promise<Generation> {
+  validateConfig(effective);
+  const providerRequest = { ...effective, outputSchemaJson: providerOutputSchema(effective.outputSchemaJson) };
+  const route = routeFor(effective.model);
+  allowModel(app, route.provider);
+  const started = Date.now();
+  const duration = Math.min(budget(req.timeoutMs), context ? context.expireMs - started : 840000);
+  let openaiMonthSuffix: string | null = null;
+  if (route.provider === 'openai') {
+    const configuredLimit = Number(env.OPENAI_MONTHLY_LIMIT_USD ?? 80);
+    const limitUsd = Number.isFinite(configuredLimit) && configuredLimit > 0 ? configuredLimit : 80;
+    openaiMonthSuffix = new Date(started).toISOString().slice(0, 7);
+    const monthCost = await openAIHooks.readMonthCost(started, openaiMonthSuffix);
+    if (monthCost >= limitUsd * 1_000_000)
+      throw new RpcError(Code.RESOURCE_EXHAUSTED, 'MODEL_SPEND_LIMIT', 'The Router monthly estimated OpenAI usage limit has been reached.');
+  }
+  const timer = setTimeout(() => controller.abort(new DOMException('The model exceeded its time budget.', 'TimeoutError')), duration);
+  let value = create(GenerationSchema, {
+    name: `requests/${crypto.randomUUID()}`,
+    model: effective.model,
+    usage: { billingKind: route.provider === 'codex' ? 'subscription' : 'api' },
+  });
+  const trace = create(RequestRecordSchema, {
+    generation: value,
+    app,
+    provider: providerFor(value.model),
+    state: 'running',
+    startedAt: timestamp(started),
+    contentExpireTime: timestamp(started + CONTENT_DAYS * DAY),
+    contentAvailable: app !== PRIVATE_INFERENCE_APP,
+  });
+  if (app !== PRIVATE_INFERENCE_APP) {
+    try {
+      await store.start(trace, effective);
+    } catch {
+      clearTimeout(timer);
+      throw new RpcError(Code.UNAVAILABLE, 'MODEL_STORAGE_UNAVAILABLE', 'The request could not be registered.');
+    }
+  }
+  try {
+    let result: ProviderResult;
+    if (route.provider === 'codex') {
+      const answer = await executorClient(env, controller.signal).generate({
+        ...(req.conversation ? req : providerRequest), timeoutMs: duration,
+      });
+      result = {
+        output: answer.output,
+        reportedModel: '',
+        usage: answer.usage ?? create(UsageSchema, { billingKind: 'subscription' }),
+        observations: answer.observations ?? { searched: false, openedUrls: [] },
+        ...(answer.error ? { error: { ...answer.error } } : {}),
+      };
+      result.usage.estimatedCostMicrousd = estimateCostMicrousd(route.upstreamModel, result.usage);
+    } else {
+      const provider = route.provider === 'openai' ? generateOpenAI : route.provider === 'anthropic' ? generateClaude : generateGemini;
+      result = await provider(providerRequest, {
+        env,
+        caller: app,
+        route,
+        signal: controller.signal,
+        deadlineMs: started + duration,
+        fetcher: (input, init) => fetch(input, init),
+      });
+    }
+    value = create(GenerationSchema, {
+      name: value.name,
+      model: route.provider === 'openai' ? effective.model : result.reportedModel || route.upstreamModel,
+      output: result.error ? result.output : callerOutput(effective.outputSchemaJson, result.output),
+      usage: create(UsageSchema, result.usage),
+      observations: create(ObservationsSchema, result.observations),
+      contributingModels: result.contributingModels ?? [],
+      ...(result.error ? { error: create(ModelErrorSchema, result.error) } : {}),
+    });
+    trace.reportedModel = result.reportedModel;
+    if (!value.error && !validateOutput(effective, value.output)) {
+      value.error = create(ModelErrorSchema, {
+        code: Code.INTERNAL,
+        reason: 'MODEL_INVALID_ANSWER',
+        message: 'The model did not return the requested output format.',
+      });
+    }
+  } catch (error) {
+    let code: Code = Code.INTERNAL;
+    let reason = 'MODEL_INTERNAL';
+    let message = 'The model execution did not complete.';
+    if (controller.signal.aborted && timedOut(controller.signal)) {
+      code = Code.DEADLINE_EXCEEDED;
+      reason = 'MODEL_TIMEOUT';
+      message = 'The model exceeded its time budget.';
+    } else if (controller.signal.aborted) {
+      code = Code.CANCELLED;
+      reason = 'MODEL_CANCELLED';
+      message = 'The context was closed during this turn.';
+    } else if (error instanceof RpcError) {
+      code = error.code;
+      reason = error.reason;
+    } else if (error instanceof RpcStatusError || error instanceof HttpResponseError) {
+      code = error instanceof RpcStatusError ? Code[error.status.status ?? 'UNAVAILABLE'] : Code.UNAVAILABLE;
+      if (error instanceof RpcStatusError && error.status.reason) reason = error.status.reason;
+      else if (code === Code.UNAUTHENTICATED || code === Code.PERMISSION_DENIED) reason = 'MODEL_AUTH';
+      else if (code === Code.RESOURCE_EXHAUSTED) reason = 'MODEL_QUOTA';
+      else reason = 'MODEL_UNAVAILABLE';
+    }
+    value.error = create(ModelErrorSchema, { code, reason, message });
+  } finally {
+    clearTimeout(timer);
+  }
+  if (value.error) {
+    value.output = '';
+    trace.state = value.error.code === Code.CANCELLED ? 'cancelled' : 'failed';
+  } else {
+    trace.state = 'succeeded';
+  }
+  trace.generation = value;
+  trace.completedAt = timestamp(Date.now());
+  trace.durationMs = Date.now() - started;
+  const cost = openaiMonthSuffix !== null ? (value.usage?.estimatedCostMicrousd ?? 0) : 0;
+  let recordedInD1 = true;
+  if (app === PRIVATE_INFERENCE_APP) {
+    recordedInD1 = await store.finishPrivate(trace);
+  } else {
+    await store.finish(trace, effective);
+  }
+  if (openaiMonthSuffix !== null && cost > 0) {
+    await openAIHooks.recordMonthCost(openaiMonthSuffix, cost, recordedInD1);
+  }
+  return value;
+}
+
+/** Stateless worker entrypoint for private-app generation: avoids Durable Object wall-clock duration while keeping OpenAI limits. */
+export async function handlePrivateInference(request: Request, env: Env): Promise<Response> {
+  if (!allowsPrivateRoute(request))
+    return modelApi.errorResponse(new RpcError(Code.PERMISSION_DENIED, 'METHOD_NOT_ALLOWED', 'This caller may only list models or generate text.'), crypto.randomUUID(), request.method === 'HEAD');
+  const store = new Store(env);
+  const hooks: OpenAISpendHooks = {
+    readMonthCost: async (started, monthSuffix) => {
+      const now = Date.now();
+      const unrecorded = privateOpenAICache?.month === monthSuffix ? privateOpenAICache.unrecorded : 0;
+      if (!privateOpenAICache || privateOpenAICache.month !== monthSuffix || now - privateOpenAICache.syncedAt >= PRIVATE_CACHE_SYNC_MS) {
+        const d1Cost = await store.openaiMonthlyCost(started).catch(() => privateOpenAICache?.costMicrousd ?? 0);
+        const prevCost = privateOpenAICache?.month === monthSuffix ? privateOpenAICache.costMicrousd : 0;
+        privateOpenAICache = {
+          month: monthSuffix,
+          costMicrousd: Math.max(prevCost, d1Cost + pendingPrivateOpenAICost(monthSuffix) + unrecorded),
+          syncedAt: now,
+          unrecorded,
+        };
+      }
+      return privateOpenAICache.costMicrousd;
+    },
+    recordMonthCost: (monthSuffix, cost, recordedInD1) => {
+      if (!privateOpenAICache || privateOpenAICache.month !== monthSuffix) {
+        privateOpenAICache = { month: monthSuffix, costMicrousd: cost, syncedAt: Date.now(), unrecorded: recordedInD1 ? 0 : cost };
+      } else {
+        privateOpenAICache = {
+          ...privateOpenAICache,
+          costMicrousd: privateOpenAICache.costMicrousd + cost,
+          unrecorded: privateOpenAICache.unrecorded + (recordedInD1 ? 0 : cost),
+        };
+      }
+    },
+  };
+  const target: ModelEngine = {
+    environment: env,
+    generate: async (req, app) => {
+      validateStandaloneGenerate(req, app);
+      return executeGeneration(req, req, undefined, app, env, store, new AbortController(), hooks);
+    },
+    embed: () => Promise.reject(new RpcError(Code.PERMISSION_DENIED, 'METHOD_NOT_ALLOWED', 'Not allowed.')),
+    createConversation: () => Promise.reject(new RpcError(Code.PERMISSION_DENIED, 'METHOD_NOT_ALLOWED', 'Not allowed.')),
+    closeConversation: () => Promise.reject(new RpcError(Code.PERMISSION_DENIED, 'METHOD_NOT_ALLOWED', 'Not allowed.')),
+  };
+  const result = await modelApi.handle(request, { engine: target, app: PRIVATE_INFERENCE_APP, owner: false }, crypto.randomUUID());
+  return result?.response ?? new Response(null, { status: 404 });
+}
+
 /** The external Newsletter token reaches only subscription Codex models. */
 function allowModel(app: string, provider: string): void {
   if (app === 'newsletter' && provider !== 'codex')
     throw new RpcError(Code.PERMISSION_DENIED, 'MODEL_NOT_ALLOWED', 'This caller may use only Codex models.');
 }
 const modelApi = new HttpTranscoder(ModelService, {
-  listModels: (_req, ctx: ApiContext) => {
+  listModels: (_req, ctx: ModelContext) => {
     const models = modelCatalog(ctx.engine.environment);
     return Promise.resolve(create(ListModelsResponseSchema, {
       models: ctx.app === PRIVATE_INFERENCE_APP ? models.filter((model) => privateModels.has(model.id)) : models,
@@ -104,14 +320,7 @@ export class RouterEngine extends DurableObject<Env> {
     return result?.response ?? new Response(null, { status: 404 });
   }
   async generate(req: GenerateRequest, app: string): Promise<Generation> {
-    if (app === PRIVATE_INFERENCE_APP) {
-      if (req.conversation || req.allowFallback || !Number.isInteger(req.maxOutputTokens) || req.maxOutputTokens < 128 || req.maxOutputTokens > 8192)
-        invalid('INVALID_PARAMETER', 'Use one independent generation with an output token cap between 128 and 8192.');
-      if (!privateModels.has(req.model))
-        throw new RpcError(Code.PERMISSION_DENIED, 'MODEL_NOT_ALLOWED', 'This caller may use only its allowlisted models.');
-    }
-    if (!req.input || new TextEncoder().encode(req.input).length > MAX_INPUT_BYTES)
-      invalid('INVALID_INPUT', 'Input is empty or exceeds 2 MiB.');
+    validateStandaloneGenerate(req, app);
     if (
       req.conversation &&
       (req.model || req.instructions.length || req.effort || req.maxOutputTokens || req.outputSchemaJson || req.allowFallback)
@@ -146,156 +355,38 @@ export class RouterEngine extends DurableObject<Env> {
         timeoutMs: req.timeoutMs,
       });
     }
-    validateConfig(effective);
-    const providerRequest = { ...effective, outputSchemaJson: providerOutputSchema(effective.outputSchemaJson) };
-    const route = routeFor(effective.model);
-    allowModel(app, route.provider);
-    const started = Date.now();
-    const duration = Math.min(budget(req.timeoutMs), context ? context.expireMs - started : 840000);
-    let openaiMonthSuffix: string | null = null;
-    if (route.provider === 'openai') {
-      const configuredLimit = Number(this.env.OPENAI_MONTHLY_LIMIT_USD ?? 80);
-      const limitUsd = Number.isFinite(configuredLimit) && configuredLimit > 0 ? configuredLimit : 80;
-      openaiMonthSuffix = new Date(started).toISOString().slice(0, 7);
-      const unrecorded = (await this.ctx.storage.get<number>(`openai_unrecorded:${openaiMonthSuffix}`)) ?? 0;
-      let monthCost: number;
-      if (app === PRIVATE_INFERENCE_APP) {
-        const cacheKey = `openai_monthly:${openaiMonthSuffix}`;
-        const cached = await this.ctx.storage.get<number>(cacheKey);
-        if (cached === undefined) {
-          monthCost = (await this.store.openaiMonthlyCost(started).catch(() => 0)) + unrecorded;
-          await this.ctx.storage.put(cacheKey, monthCost);
+    const hooks: OpenAISpendHooks = {
+      readMonthCost: async (started, monthSuffix) => {
+        const unrecorded = (await this.ctx.storage.get<number>(`openai_unrecorded:${monthSuffix}`)) ?? 0;
+        if (app === PRIVATE_INFERENCE_APP) {
+          const cacheKey = `openai_monthly:${monthSuffix}`;
+          const cached = await this.ctx.storage.get<number>(cacheKey);
+          if (cached === undefined) {
+            const monthCost = (await this.store.openaiMonthlyCost(started).catch(() => 0)) + unrecorded;
+            await this.ctx.storage.put(cacheKey, monthCost);
+            return monthCost;
+          }
+          return cached;
+        }
+        return (await this.store.openaiMonthlyCost(started)) + unrecorded;
+      },
+      recordMonthCost: async (monthSuffix, cost, recordedInD1) => {
+        const cacheKey = `openai_monthly:${monthSuffix}`;
+        if (app === PRIVATE_INFERENCE_APP) {
+          const prev = (await this.ctx.storage.get<number>(cacheKey)) ?? 0;
+          await this.ctx.storage.put(cacheKey, prev + cost);
+          if (!recordedInD1) {
+            const unrecKey = `openai_unrecorded:${monthSuffix}`;
+            const prevUnrec = (await this.ctx.storage.get<number>(unrecKey)) ?? 0;
+            await this.ctx.storage.put(unrecKey, prevUnrec + cost);
+          }
         } else {
-          monthCost = cached;
+          const prev = await this.ctx.storage.get<number>(cacheKey);
+          if (prev !== undefined) await this.ctx.storage.put(cacheKey, prev + cost);
         }
-      } else {
-        monthCost = (await this.store.openaiMonthlyCost(started)) + unrecorded;
-      }
-      if (monthCost >= limitUsd * 1_000_000)
-        throw new RpcError(Code.RESOURCE_EXHAUSTED, 'MODEL_SPEND_LIMIT', 'The Router monthly estimated OpenAI usage limit has been reached.');
-    }
-    const timer = setTimeout(() => controller.abort(new DOMException('The model exceeded its time budget.', 'TimeoutError')), duration);
-    let value = create(GenerationSchema, {
-      name: `requests/${crypto.randomUUID()}`,
-      model: effective.model,
-      usage: { billingKind: route.provider === 'codex' ? 'subscription' : 'api' },
-    });
-    const trace = create(RequestRecordSchema, {
-      generation: value,
-      app,
-      provider: providerFor(value.model),
-      state: 'running',
-      startedAt: timestamp(started),
-      contentExpireTime: timestamp(started + CONTENT_DAYS * DAY),
-      contentAvailable: app !== PRIVATE_INFERENCE_APP,
-    });
-    if (app !== PRIVATE_INFERENCE_APP) {
-      try {
-        await this.store.start(trace, effective);
-      } catch {
-        clearTimeout(timer);
-        throw new RpcError(Code.UNAVAILABLE, 'MODEL_STORAGE_UNAVAILABLE', 'The request could not be registered.');
-      }
-    }
-    try {
-      let result: ProviderResult;
-      if (route.provider === 'codex') {
-        const answer = await executorClient(this.env, controller.signal).generate({
-          ...(req.conversation ? req : providerRequest), timeoutMs: duration,
-        });
-        result = {
-          output: answer.output,
-          reportedModel: '',
-          usage: answer.usage ?? create(UsageSchema, { billingKind: 'subscription' }),
-          observations: answer.observations ?? { searched: false, openedUrls: [] },
-          ...(answer.error ? { error: { ...answer.error } } : {}),
-        };
-        result.usage.estimatedCostMicrousd = estimateCostMicrousd(route.upstreamModel, result.usage);
-      } else {
-        const provider = route.provider === 'openai' ? generateOpenAI : route.provider === 'anthropic' ? generateClaude : generateGemini;
-        result = await provider(providerRequest, {
-          env: this.env,
-          caller: app,
-          route,
-          signal: controller.signal,
-          deadlineMs: started + duration,
-          fetcher: (input, init) => fetch(input, init),
-        });
-      }
-      value = create(GenerationSchema, {
-        name: value.name,
-        model: route.provider === 'openai' ? effective.model : result.reportedModel || route.upstreamModel,
-        output: result.error ? result.output : callerOutput(effective.outputSchemaJson, result.output),
-        usage: create(UsageSchema, result.usage),
-        observations: create(ObservationsSchema, result.observations),
-        contributingModels: result.contributingModels ?? [],
-        ...(result.error ? { error: create(ModelErrorSchema, result.error) } : {}),
-      });
-      trace.reportedModel = result.reportedModel;
-      if (!value.error && !validateOutput(effective, value.output)) {
-        value.error = create(ModelErrorSchema, {
-          code: Code.INTERNAL,
-          reason: 'MODEL_INVALID_ANSWER',
-          message: 'The model did not return the requested output format.',
-        });
-      }
-    } catch (error) {
-      let code: Code = Code.INTERNAL;
-      let reason = 'MODEL_INTERNAL';
-      let message = 'The model execution did not complete.';
-      if (controller.signal.aborted && timedOut(controller.signal)) {
-        code = Code.DEADLINE_EXCEEDED;
-        reason = 'MODEL_TIMEOUT';
-        message = 'The model exceeded its time budget.';
-      } else if (controller.signal.aborted) {
-        code = Code.CANCELLED;
-        reason = 'MODEL_CANCELLED';
-        message = 'The context was closed during this turn.';
-      } else if (error instanceof RpcError) {
-        code = error.code;
-        reason = error.reason;
-      } else if (error instanceof RpcStatusError || error instanceof HttpResponseError) {
-        code = error instanceof RpcStatusError ? Code[error.status.status ?? 'UNAVAILABLE'] : Code.UNAVAILABLE;
-        if (error instanceof RpcStatusError && error.status.reason) reason = error.status.reason;
-        else if (code === Code.UNAUTHENTICATED || code === Code.PERMISSION_DENIED) reason = 'MODEL_AUTH';
-        else if (code === Code.RESOURCE_EXHAUSTED) reason = 'MODEL_QUOTA';
-        else reason = 'MODEL_UNAVAILABLE';
-      }
-      value.error = create(ModelErrorSchema, { code, reason, message });
-    } finally {
-      clearTimeout(timer);
-    }
-    if (value.error) {
-      value.output = '';
-      trace.state = value.error.code === Code.CANCELLED ? 'cancelled' : 'failed';
-    } else {
-      trace.state = 'succeeded';
-    }
-    trace.generation = value;
-    trace.completedAt = timestamp(Date.now());
-    trace.durationMs = Date.now() - started;
-    const cost = openaiMonthSuffix !== null ? (value.usage?.estimatedCostMicrousd ?? 0) : 0;
-    if (app === PRIVATE_INFERENCE_APP) {
-      const recorded = await this.store.finishPrivate(trace);
-      if (openaiMonthSuffix !== null && cost > 0) {
-        const cacheKey = `openai_monthly:${openaiMonthSuffix}`;
-        const prev = (await this.ctx.storage.get<number>(cacheKey)) ?? 0;
-        await this.ctx.storage.put(cacheKey, prev + cost);
-        if (!recorded) {
-          const unrecKey = `openai_unrecorded:${openaiMonthSuffix}`;
-          const prevUnrec = (await this.ctx.storage.get<number>(unrecKey)) ?? 0;
-          await this.ctx.storage.put(unrecKey, prevUnrec + cost);
-        }
-      }
-    } else {
-      await this.store.finish(trace, effective);
-      if (openaiMonthSuffix !== null && cost > 0) {
-        const cacheKey = `openai_monthly:${openaiMonthSuffix}`;
-        const prev = await this.ctx.storage.get<number>(cacheKey);
-        if (prev !== undefined) await this.ctx.storage.put(cacheKey, prev + cost);
-      }
-    }
-    return value;
+      },
+    };
+    return executeGeneration(effective, req, context, app, this.env, this.store, controller, hooks);
   }
   async createConversation(req: CreateConversationRequest, app: string) {
     resourceId(req.name, 'conversations');
