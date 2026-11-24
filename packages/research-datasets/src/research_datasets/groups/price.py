@@ -277,28 +277,25 @@ def build_price_range_anchor(
     prices = ctx.stores.prices
     anchors = ctx.stores.anchors
     close_raw = prices.channel("close_raw").astype(np.float64)
-    close_adj = prices.channel("close_adj").astype(np.float64)
     hi_raw = prices.channel("high_raw").astype(np.float64)
     lo_raw = prices.channel("low_raw").astype(np.float64)
-    ok_scale = (
-        np.isfinite(close_raw)
-        & (close_raw > 0)
-        & np.isfinite(close_adj)
-        & (close_adj > 0)
-    )
-    scale = np.where(ok_scale, close_adj / close_raw, np.nan)
     lvl = _effective_level(prices)
-    hi_adj = np.where(
-        ok_scale & np.isfinite(hi_raw) & (hi_raw > 0), hi_raw * scale, lvl
+    ok_scale = np.isfinite(close_raw) & (close_raw > 0) & np.isfinite(lvl) & (lvl > 0)
+    hi_tr = np.where(
+        ok_scale & np.isfinite(hi_raw) & (hi_raw > 0),
+        np.maximum(lvl, lvl * (hi_raw / close_raw)),
+        lvl,
     )
-    lo_adj = np.where(
-        ok_scale & np.isfinite(lo_raw) & (lo_raw > 0), lo_raw * scale, lvl
+    lo_tr = np.where(
+        ok_scale & np.isfinite(lo_raw) & (lo_raw > 0),
+        np.minimum(lvl, lvl * (lo_raw / close_raw)),
+        lvl,
     )
 
     data: dict[str, np.ndarray] = {}
     for w in (21, 252):
-        rmax = _rolling_extrema(hi_adj, w, mode="max")
-        rmin = _rolling_extrema(lo_adj, w, mode="min")
+        rmax = _rolling_extrema(hi_tr, w, mode="max")
+        rmin = _rolling_extrema(lo_tr, w, mode="min")
         d_hi = np.where((rmax > 0) & np.isfinite(lvl), lvl / rmax - 1.0, np.nan)
         d_lo = np.where((rmin > 0) & np.isfinite(lvl), lvl / rmin - 1.0, np.nan)
         data[f"prange_dist_high_{w}d"] = _select_at_anchors(d_hi, anchors)

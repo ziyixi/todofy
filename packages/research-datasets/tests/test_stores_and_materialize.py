@@ -894,6 +894,75 @@ class StoresAndMaterializeAdversarialTest(unittest.TestCase):
             self.assertIn("pmom_ret_21d", mat.X.columns)
             self.assertNotIn("pmom_ret_252d", mat.X.columns)
 
+    def test_range_distance_uses_consistent_total_return_units(self) -> None:
+        from types import SimpleNamespace
+
+        from research_datasets.feature_groups import GroupBuildContext
+        from research_datasets.groups.price import build_price_range_anchor
+        from research_datasets.stores import PRICE_CHANNELS, Anchors, PriceStore, Stores
+
+        sessions = _nyse_sessions(date(2025, 1, 2), 30)
+        n_sess = len(sessions)
+        # Constant tr_index=2.0 with raw close=100, high=110, low=90, and arbitrary close_adj=50.
+        tensor = np.full((1, n_sess, len(PRICE_CHANNELS)), np.nan, dtype=np.float32)
+        tensor[0, :, 0] = 100.0
+        tensor[0, :, 1] = 110.0
+        tensor[0, :, 2] = 90.0
+        tensor[0, :, 3] = 100.0
+        tensor[0, :, 7] = 50.0  # arbitrary dollar adjusted scale must not leak
+        tensor[0, :, 8] = 2.0
+        tensor[0, -1, 1] = 100.0
+        tensor[0, -1, 2] = 100.0
+        tensor[0, -1, 3] = 100.0
+        pstore = PriceStore(
+            tensor,
+            assets=[ASSET_1],
+            sessions=sessions,
+            benchmark_idx=-1,
+        )
+        anc_df = pd.DataFrame(
+            {
+                "row_id": [0],
+                "asset_id": [ASSET_1],
+                "signal_session": [sessions[-1].isoformat()],
+                "entry_session": [sessions[-1].isoformat()],
+                "decision_at": [pd.Timestamp(sessions[-1], tz="UTC")],
+                "in_universe": [True],
+                "is_benchmark": [False],
+                "asset_idx": [0],
+                "session_idx": [n_sess - 1],
+                "fund_snap_id": [-1],
+                "event_start_cursor": [0],
+                "event_end_cursor": [0],
+            }
+        )
+        anchors = Anchors(
+            frame=anc_df,
+            order_sha256="test",
+            assets=(ASSET_1,),
+            sessions=tuple(sessions),
+            time_policy="pit_v1",
+            sampling="weekly",
+        )
+        stores = Stores(
+            anchors=anchors, prices=pstore, fundamentals=None, events=None, macro=None
+        )
+        ver = SimpleNamespace(calendar=sessions, manifest={"data_families": {}})
+        ctx = GroupBuildContext(
+            version=ver,
+            stores=stores,
+            time_policy="pit_v1",
+        )
+        out = build_price_range_anchor(ctx, {"windows": [21, 252]})
+        self.assertLessEqual(float(out["prange_dist_high_21d"].iloc[0]), 0.0)
+        self.assertGreaterEqual(float(out["prange_dist_low_21d"].iloc[0]), 0.0)
+        self.assertAlmostEqual(
+            float(out["prange_dist_high_21d"].iloc[0]), 1.0 / 1.1 - 1.0, places=5
+        )
+        self.assertAlmostEqual(
+            float(out["prange_dist_low_21d"].iloc[0]), 1.0 / 0.9 - 1.0, places=5
+        )
+
     def test_fresh_import_populates_feature_groups(self) -> None:
         env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
         output = subprocess.check_output(
