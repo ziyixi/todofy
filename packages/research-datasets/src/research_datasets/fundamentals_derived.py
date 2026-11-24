@@ -752,9 +752,23 @@ class IssuerStateMachine:
 
         if name == "revenue":
             tot = get("revenue_total")
+            con = get("revenue_contracts")
+            if (
+                tot is not None
+                and con is not None
+                and tot.usable
+                and con.usable
+                and tot.currency == con.currency
+                and tot.decimal_value is not None
+                and con.decimal_value is not None
+                and con.decimal_value > 0
+                and tot.decimal_value < con.decimal_value * Decimal("0.5")
+            ):
+                return _relabel_period(
+                    con, "contracts_override", force_approximate=True
+                )
             if tot is not None:
                 return _relabel_period(tot, "total")
-            con = get("revenue_contracts")
             if con is not None:
                 return _relabel_period(con, "contracts")
             return None

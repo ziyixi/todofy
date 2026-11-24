@@ -2159,6 +2159,71 @@ class TrailingAndFiscalQuartersTest(unittest.TestCase):
         self.assertEqual(row["total_debt_i_value"], 300.0)
         self.assertEqual(row["total_debt_i_status"], "ok")
 
+    def test_revenue_contracts_override_when_revenues_below_half(self) -> None:
+        rows = [
+            make_fact(
+                "rev-zero",
+                "Revenues",
+                "0",
+                "2019-01-01",
+                "2019-12-31",
+                form="10-K",
+                period_kind="annual",
+                accession="acc-1",
+                public_at="2020-02-20T12:00:00Z",
+            ),
+            make_fact(
+                "rev-con-1",
+                "RevenueFromContractWithCustomerExcludingAssessedTax",
+                "3940000000",
+                "2019-01-01",
+                "2019-12-31",
+                form="10-K",
+                period_kind="annual",
+                accession="acc-1",
+                public_at="2020-02-20T12:00:00Z",
+            ),
+            # 800 vs 1000 (>= 0.5): keep Revenues tag (e.g. utility hedging offset)
+            make_fact(
+                "rev-util",
+                "Revenues",
+                "800",
+                "2020-01-01",
+                "2020-03-31",
+                accession="acc-2",
+                public_at="2020-05-01T12:00:00Z",
+            ),
+            make_fact(
+                "rev-util-con",
+                "RevenueFromContractWithCustomerExcludingAssessedTax",
+                "1000",
+                "2020-01-01",
+                "2020-03-31",
+                accession="acc-2",
+                public_at="2020-05-01T12:00:00Z",
+            ),
+        ]
+        samples = pd.DataFrame(
+            {
+                "asset_id": [ASSET_A, ASSET_A],
+                "signal_session": ["2020-03-02", "2020-05-04"],
+                "decision_at": ["2020-03-03T10:00:00Z", "2020-05-05T10:00:00Z"],
+            }
+        )
+        res = derived_fundamentals(
+            make_material(rows),
+            samples,
+            time_policy="public_reconstructed",
+            views=("revenue_fy", "revenue_q"),
+            provenance=True,
+        )
+        self.assertEqual(res.loc[0, "revenue_fy_value"], 3_940_000_000.0)
+        self.assertEqual(res.loc[0, "revenue_fy_status"], "approximate")
+        self.assertEqual(res.loc[0, "revenue_fy_basis"], "contracts_override")
+        self.assertEqual(res.loc[1, "revenue_q_value"], 800.0)
+        self.assertEqual(res.loc[1, "revenue_q_status"], "ok")
+        self.assertEqual(res.loc[1, "revenue_q_basis"], "total")
+
 
 if __name__ == "__main__":
     unittest.main()

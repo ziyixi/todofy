@@ -684,7 +684,7 @@ _COMPOSITES: tuple[CompositeSpec, ...] = (
         "money",
         True,
         ("revenue_total", "revenue_contracts"),
-        ("total", "contracts"),
+        ("total", "contracts", "contracts_override"),
         1,
     ),
     CompositeSpec(
