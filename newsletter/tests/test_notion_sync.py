@@ -1290,3 +1290,107 @@ def test_retired_whole_edition_recipe_is_rejected_before_freezing(
             )
     finally:
         with_store.close()
+
+
+async def test_unknown_create_retries_only_after_24h_confirmed_absent(rig):
+    now = [1_000.0]
+    rig.journal.clock = lambda: now[0]
+    rig.journal.enqueue("material", projected())
+    rig.api.fail("create", landed=False)
+    assert await rig.sync.step()
+    assert rig.journal.entity(KEY)["create_state"] == "unknown"
+    assert rig.journal.entity(KEY)["unknown_since"] == 1_000.0
+    assert rig.journal.entity(KEY)["error"] == "NOTION_UNKNOWN"
+
+    # Under 24h: absent readback keeps unknown and never creates again.
+    now[0] = 1_000.0 + notion_sync.NotionSync.UNKNOWN_RETRY_AFTER_SECONDS - 1.0
+    rig.due()
+    assert await rig.sync.step()
+    assert rig.journal.entity(KEY)["create_state"] == "unknown"
+    assert rig.journal.entity(KEY)["error"] == "NOTION_CREATE_UNCONFIRMED"
+    assert rig.api.count("create") == 1
+
+    # At >= 24h: confirmed-absent readback resets and creates cleanly.
+    now[0] = 1_000.0 + notion_sync.NotionSync.UNKNOWN_RETRY_AFTER_SECONDS
+    rig.due()
+    await rig.drain()
+    assert rig.journal.entity(KEY)["create_state"] == "ready"
+    assert rig.journal.entity(KEY)["unknown_since"] == 0.0
+    assert rig.versions()[0]["state"] == "done"
+    assert rig.api.count("create") == 2
+
+
+async def test_unknown_append_retries_after_24h_only_when_prefix_matches(rig):
+    now = [2_000.0]
+    rig.journal.clock = lambda: now[0]
+    rig.journal.enqueue("material", projected())
+    assert await rig.sync.step()
+    rig.api.fail("append", landed=False)
+    assert await rig.sync.step()
+    assert rig.versions()[0]["state"] == "unknown"
+    assert rig.versions()[0]["unknown_since"] == 2_000.0
+    assert rig.journal.entity(KEY)["error"] == "NOTION_UNKNOWN"
+
+    # Under 24h: prefix match stays unknown.
+    now[0] = 2_000.0 + notion_sync.NotionSync.UNKNOWN_RETRY_AFTER_SECONDS - 5.0
+    rig.due()
+    assert await rig.sync.step()
+    assert rig.versions()[0]["state"] == "unknown"
+    assert rig.journal.entity(KEY)["error"] == "NOTION_APPEND_UNCONFIRMED"
+    assert rig.api.count("append") == 1
+
+    # At >= 24h with empty prefix: resets to pending and appends cleanly.
+    now[0] = 2_000.0 + notion_sync.NotionSync.UNKNOWN_RETRY_AFTER_SECONDS
+    rig.due()
+    await rig.drain()
+    assert rig.versions()[0]["state"] == "done"
+    assert rig.versions()[0]["unknown_since"] == 0.0
+    assert rig.api.count("append") == 2
+
+
+async def test_unknown_append_over_24h_still_blocks_on_body_conflict(rig):
+    now = [3_000.0]
+    rig.journal.clock = lambda: now[0]
+    rig.journal.enqueue("material", projected())
+    assert await rig.sync.step()
+    rig.api.fail("append", landed=False)
+    assert await rig.sync.step()
+    # Remote body diverged outside our expected prefix.
+    rig.page()["blocks"] = [paragraph("Concurrent manual edit")]
+    now[0] = 3_000.0 + notion_sync.NotionSync.UNKNOWN_RETRY_AFTER_SECONDS + 60.0
+    rig.due()
+    assert await rig.sync.step()
+    assert rig.versions()[0]["state"] == "unknown"
+    assert rig.journal.entity(KEY)["error"] == "NOTION_PROJECTION_CONFLICT"
+    assert rig.api.count("append") == 1
+
+
+def test_old_unknown_rows_backfill_unknown_since_from_progress_or_clock(
+    tmp_path,
+):
+    path = tmp_path / "backfill.sqlite3"
+    store = newsletter_store.Store(path, "mock")
+    journal = notion_journal.NotionJournal(
+        store, DESTINATION, clock=lambda: 5_000.0
+    )
+    journal.enqueue("material", projected())
+    with store.transaction():
+        store.db.execute(
+            "UPDATE notion_entities SET create_state='unknown',"
+            "progress_at=1234.0,unknown_since=0 WHERE key=?",
+            (KEY,),
+        )
+        store.db.execute(
+            "UPDATE notion_versions SET state='unknown',"
+            "upload_at=0,unknown_since=0 WHERE entity_key=?",
+            (KEY,),
+        )
+    migrated = notion_journal.NotionJournal(
+        store, DESTINATION, clock=lambda: 9_000.0
+    )
+    assert migrated.entity(KEY)["unknown_since"] == 1234.0
+    ver = store.db.execute(
+        "SELECT unknown_since FROM notion_versions WHERE entity_key=?", (KEY,)
+    ).fetchone()
+    assert ver[0] == 9_000.0
+    store.close()

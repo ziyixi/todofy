@@ -160,6 +160,8 @@ def _chunk(blocks: list[types.Payload], offset: int) -> list[types.Payload]:
 class NotionSync:
     """Project durable versions and reconcile uncertain external outcomes."""
 
+    UNKNOWN_RETRY_AFTER_SECONDS = 86_400.0
+
     def __init__(
         self,
         journal: notion_journal.NotionJournal,
@@ -184,10 +186,18 @@ class NotionSync:
             self.journal.confirm_page(key, page["id"])
             return
         if entity["create_state"] == "unknown":
-            # An absent read does not prove a timed-out write cannot still land.
-            raise adapters.AdapterError(
-                "NOTION_CREATE_UNCONFIRMED", ambiguous=True
-            )
+            unknown_since = float(entity.get("unknown_since") or 0.0)
+            if (
+                unknown_since > 0
+                and (self.journal.clock() - unknown_since)
+                >= self.UNKNOWN_RETRY_AFTER_SECONDS
+            ):
+                self.journal.reset_unknown_create(key)
+            else:
+                # An absent read never proves a timed-out write didn't land.
+                raise adapters.AdapterError(
+                    "NOTION_CREATE_UNCONFIRMED", ambiguous=True
+                )
         properties = self.journal.desired(entity)
         self.journal.begin_create(key)
         try:
@@ -251,6 +261,14 @@ class NotionSync:
             )
             return
         if observed == prefix:
+            unknown_since = float(version.get("unknown_since") or 0.0)
+            if (
+                unknown_since > 0
+                and (self.journal.clock() - unknown_since)
+                >= self.UNKNOWN_RETRY_AFTER_SECONDS
+            ):
+                self.journal.reset_unknown_append(version["seq"])
+                return
             raise adapters.AdapterError(
                 "NOTION_APPEND_UNCONFIRMED", ambiguous=True
             )

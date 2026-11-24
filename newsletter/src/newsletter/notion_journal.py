@@ -94,7 +94,8 @@ class NotionJournal:
                     error TEXT NOT NULL DEFAULT '',
                     retry_at REAL NOT NULL DEFAULT 0,
                     attempts INTEGER NOT NULL DEFAULT 0,
-                    progress_at REAL NOT NULL DEFAULT 0);
+                    progress_at REAL NOT NULL DEFAULT 0,
+                    unknown_since REAL NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS notion_versions (
                     seq INTEGER PRIMARY KEY AUTOINCREMENT,
                     entity_key TEXT NOT NULL, digest TEXT NOT NULL,
@@ -104,7 +105,9 @@ class NotionJournal:
                     state TEXT NOT NULL DEFAULT 'pending',
                     offset INTEGER NOT NULL DEFAULT 0,
                     pending_chunk TEXT NOT NULL DEFAULT '',
-                    error TEXT NOT NULL DEFAULT '', UNIQUE(entity_key,digest),
+                    error TEXT NOT NULL DEFAULT '',
+                    unknown_since REAL NOT NULL DEFAULT 0,
+                    UNIQUE(entity_key,digest),
                     FOREIGN KEY(entity_key) REFERENCES notion_entities(key));
                 CREATE TABLE IF NOT EXISTS notion_aliases (
                     alias TEXT PRIMARY KEY, entity_key TEXT NOT NULL,
@@ -125,7 +128,9 @@ class NotionJournal:
         with store.transaction():
             for table, column in (
                 ("notion_versions", "upload_at"),
+                ("notion_versions", "unknown_since"),
                 ("notion_entities", "progress_at"),
+                ("notion_entities", "unknown_since"),
             ):
                 if column not in {
                     row["name"]
@@ -151,13 +156,34 @@ class NotionJournal:
             )
             # A crash after dispatch but before acknowledgement is an unknown
             # external result, not permission to repeat the mutation.
+            now = self.clock()
             store.db.execute(
-                "UPDATE notion_entities SET create_state='unknown' "
-                "WHERE create_state='creating'"
+                "UPDATE notion_entities SET create_state='unknown',"
+                "unknown_since=CASE WHEN unknown_since>0 "
+                "THEN unknown_since ELSE ? END "
+                "WHERE create_state='creating'",
+                (now,),
             )
             store.db.execute(
-                "UPDATE notion_versions SET state='unknown' "
-                "WHERE state='appending'"
+                "UPDATE notion_versions SET state='unknown',"
+                "unknown_since=CASE WHEN unknown_since>0 "
+                "THEN unknown_since ELSE ? END "
+                "WHERE state='appending'",
+                (now,),
+            )
+            store.db.execute(
+                "UPDATE notion_entities "
+                "SET unknown_since=CASE WHEN progress_at>0 "
+                "THEN progress_at ELSE ? END "
+                "WHERE create_state='unknown' AND unknown_since=0",
+                (now,),
+            )
+            store.db.execute(
+                "UPDATE notion_versions "
+                "SET unknown_since=CASE WHEN upload_at>0 "
+                "THEN upload_at ELSE ? END "
+                "WHERE state='unknown' AND unknown_since=0",
+                (now,),
             )
 
     def rows(self, sql: str, args: tuple[Any, ...] = ()) -> list[types.Payload]:
@@ -315,8 +341,17 @@ class NotionJournal:
     def fail_create(self, key: str, *, ambiguous: bool) -> None:
         """Record whether a failed create is safe to attempt again."""
         self.execute(
-            "UPDATE notion_entities SET create_state=? WHERE key=?",
-            ("unknown" if ambiguous else "new", key),
+            "UPDATE notion_entities SET create_state=?,unknown_since=? "
+            "WHERE key=?",
+            ("unknown", self.clock(), key) if ambiguous else ("new", 0.0, key),
+        )
+
+    def reset_unknown_create(self, key: str) -> None:
+        """Reset aged unknown create after confirmed-absent readback."""
+        self.execute(
+            "UPDATE notion_entities SET create_state='new',unknown_since=0 "
+            "WHERE key=? AND create_state='unknown'",
+            (key,),
         )
 
     def confirm_page(
@@ -325,7 +360,7 @@ class NotionJournal:
         """Bind a known remote page without inventing property acceptance."""
         self.execute(
             "UPDATE notion_entities SET page_id=?,create_state='ready',"
-            "applied_hash=COALESCE(?,applied_hash) WHERE key=?",
+            "unknown_since=0,applied_hash=COALESCE(?,applied_hash) WHERE key=?",
             (page_id, applied_hash, key),
         )
 
@@ -367,8 +402,18 @@ class NotionJournal:
     def fail_append(self, sequence: int, *, ambiguous: bool) -> None:
         """Retain an uncertain append receipt until readback resolves it."""
         self.execute(
-            "UPDATE notion_versions SET state=? WHERE seq=?",
-            ("unknown" if ambiguous else "pending", sequence),
+            "UPDATE notion_versions SET state=?,unknown_since=? WHERE seq=?",
+            ("unknown", self.clock(), sequence)
+            if ambiguous
+            else ("pending", 0.0, sequence),
+        )
+
+    def reset_unknown_append(self, sequence: int) -> None:
+        """Reset aged unknown append after matching-prefix readback."""
+        self.execute(
+            "UPDATE notion_versions SET state='pending',unknown_since=0 "
+            "WHERE seq=? AND state='unknown'",
+            (sequence,),
         )
 
     def acknowledge_append(
@@ -377,7 +422,7 @@ class NotionJournal:
         """Advance only a remotely acknowledged or readback-confirmed prefix."""
         self.execute(
             "UPDATE notion_versions SET offset=?,state=?,pending_chunk='',"
-            "error='' WHERE seq=?",
+            "error='',unknown_since=0 WHERE seq=?",
             (offset, "done" if complete else "pending", sequence),
         )
 
