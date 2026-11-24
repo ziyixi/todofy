@@ -195,6 +195,18 @@ class _SyntheticVersion:
                     for u in self._universe
                     if str(u["asset_id"]) in ids and u.get("cik")
                 }
+                if (
+                    "issuer_history" in self._families
+                    and not self._families["issuer_history"].empty
+                ):
+                    ih = self._families["issuer_history"]
+                    for row in ih.to_dict("records"):
+                        if (
+                            str(row.get("asset_id") or "") in ids
+                            and str(row.get("status") or "") == "verified"
+                            and str(row.get("cik") or "").strip().isdigit()
+                        ):
+                            ciks.add(str(row["cik"]).strip().zfill(10))
                 cik_col = "issuer_cik" if "issuer_cik" in df.columns else "cik"
                 if cik_col in df.columns and ciks:
                     df = df[df[cik_col].astype(str).str.zfill(10).isin(ciks)]
@@ -1163,6 +1175,231 @@ class StoresAndMaterializeAdversarialTest(unittest.TestCase):
             float(out["pliq_trade_shock_5d_63d"].iloc[4]), 1.0, places=5
         )
         self.assertTrue(np.all(np.isfinite(out["pliq_rel_vol_5d_63d"].to_numpy())))
+
+    def test_fund_store_includes_issuer_history_for_delisted_asset(self) -> None:
+        sessions = _nyse_sessions(date(2025, 1, 2), 40)
+        asset_dlst = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+        cik_dlst = "0000999888"
+        universe = [
+            {
+                "asset_id": asset_dlst,
+                "symbol": "DLST",
+                "cik": "",
+                "issuer_mapping_status": "missing",
+                "listed_from": sessions[0].isoformat(),
+                "listed_to": sessions[-1].isoformat(),
+                "status": "delisted",
+                "is_benchmark": False,
+            },
+            {
+                "asset_id": ASSET_SPY,
+                "symbol": "SPY",
+                "cik": None,
+                "listed_from": sessions[0].isoformat(),
+                "listed_to": None,
+                "status": "active",
+                "is_benchmark": True,
+            },
+        ]
+        price_rows = []
+        dr_rows = []
+        for aid in (asset_dlst, ASSET_SPY):
+            for idx, d in enumerate(sessions):
+                px = 100.0 + idx
+                price_rows.append(
+                    {
+                        "asset_id": aid,
+                        "date": d.isoformat(),
+                        "open": px,
+                        "high": px + 0.5,
+                        "low": px - 0.5,
+                        "close": px,
+                        "volume": 1000.0,
+                        "adjustment": "all",
+                    }
+                )
+                dr_rows.append(
+                    {
+                        "asset_id": aid,
+                        "date": d.isoformat(),
+                        "row_kind": "first" if idx == 0 else "session",
+                        "tr_index": px / 100.0,
+                        "split_index": 1.0,
+                        "flags": [],
+                    }
+                )
+        pub_iso = _et_iso(sessions[5], 9, 0)
+        facts_df = pd.DataFrame(
+            [
+                {
+                    "fact_id": "dlst-rev-1",
+                    "cik": cik_dlst,
+                    "metric": "Revenues",
+                    "source": "sec",
+                    "taxonomy": "us-gaap",
+                    "tag": "Revenues",
+                    "tag_priority": 1,
+                    "unit": "USD",
+                    "currency": "USD",
+                    "period_start": "2024-10-01",
+                    "period_end": "2024-12-31",
+                    "period_kind": "duration",
+                    "form": "10-K",
+                    "accession": "0009-0001",
+                    "filed": sessions[5].isoformat(),
+                    "public_at": pub_iso,
+                    "public_date": sessions[5].isoformat(),
+                    "public_time_precision": "second",
+                    "value": "5000.00",
+                    "observed_at": pub_iso,
+                    "content_first_seen_at": pub_iso,
+                    "observation_sequence": 1,
+                    "is_retracted": False,
+                }
+            ]
+        )
+        ih_df = pd.DataFrame(
+            [
+                {
+                    "asset_id": asset_dlst,
+                    "cik": cik_dlst,
+                    "valid_from": sessions[0].isoformat(),
+                    "valid_to": sessions[-1].isoformat(),
+                    "status": "verified",
+                }
+            ]
+        )
+        ver = _SyntheticVersion(
+            calendar=sessions,
+            universe=universe,
+            families={
+                "fundamentals": facts_df,
+                "daily_returns": pd.DataFrame(dr_rows),
+                "issuer_history": ih_df,
+            },
+            prices_adj=pd.DataFrame(price_rows),
+            prices_raw=pd.DataFrame(price_rows),
+            manifest_extra={"source_timezones": {"sec": "America/New_York"}},
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            recipe = _minimal_recipe(
+                sampling="weekly",
+                groups={"fundamentals_pit": {"enabled": True}},
+            )
+            res = research_datasets.materialize(
+                ver,
+                recipe_yaml=recipe,
+                cache_dir=tmp,
+                benchmark="SPY",
+                include_labels=False,
+            )
+            late_rows = res.anchors.frame[
+                (res.anchors.frame["asset_id"] == asset_dlst)
+                & (res.anchors.frame["session_idx"] >= 6)
+            ]
+            self.assertGreater(len(late_rows), 0)
+            self.assertTrue((late_rows["fund_snap_id"] >= 0).all())
+            late_feats = res.X.loc[late_rows.index, "fund_visible_quarters"]
+            self.assertTrue((late_feats >= 1.0).all())
+
+    def test_fund_store_reaction_window_uses_public_ns(self) -> None:
+        sessions = _nyse_sessions(date(2025, 1, 2), 40)
+        cal = clocks.Calendar(sessions)
+        universe = [
+            {
+                "asset_id": ASSET_1,
+                "symbol": "PUB1",
+                "cik": CIK_1,
+                "listed_from": sessions[0].isoformat(),
+                "listed_to": None,
+                "status": "active",
+                "is_benchmark": False,
+            }
+        ]
+        price_rows = []
+        dr_rows = []
+        for idx, d in enumerate(sessions):
+            # Jump at session 26 (day after public_at at session 24 post-close) vs different move at session 31+ (after observed_at at session 30)
+            lvl = 100.0 if idx <= 25 else (120.0 if idx <= 30 else 132.0)
+            price_rows.append(
+                {
+                    "asset_id": ASSET_1,
+                    "date": d.isoformat(),
+                    "open": lvl,
+                    "high": lvl,
+                    "low": lvl,
+                    "close": lvl,
+                    "volume": 1000.0,
+                    "adjustment": "all",
+                }
+            )
+            dr_rows.append(
+                {
+                    "asset_id": ASSET_1,
+                    "date": d.isoformat(),
+                    "row_kind": "first" if idx == 0 else "session",
+                    "tr_index": lvl / 100.0,
+                    "split_index": 1.0,
+                    "flags": [],
+                }
+            )
+        pub_day = sessions[24]
+        obs_day = sessions[30]
+        pub_iso = _et_iso(pub_day, 16, 30)
+        obs_iso = _et_iso(obs_day, 10, 0)
+        facts_df = pd.DataFrame(
+            [
+                {
+                    "fact_id": "pub-clock-1",
+                    "cik": CIK_1,
+                    "metric": "Revenues",
+                    "source": "sec",
+                    "taxonomy": "us-gaap",
+                    "tag": "Revenues",
+                    "tag_priority": 1,
+                    "unit": "USD",
+                    "currency": "USD",
+                    "period_start": "2024-10-01",
+                    "period_end": "2024-12-31",
+                    "period_kind": "duration",
+                    "form": "10-Q",
+                    "accession": "0001-7777",
+                    "filed": pub_day.isoformat(),
+                    "public_at": pub_iso,
+                    "public_date": pub_day.isoformat(),
+                    "public_time_precision": "second",
+                    "value": "1000.00",
+                    "observed_at": obs_iso,
+                    "content_first_seen_at": obs_iso,
+                    "observation_sequence": 1,
+                    "is_retracted": False,
+                }
+            ]
+        )
+        ver = _SyntheticVersion(
+            calendar=sessions,
+            universe=universe,
+            families={
+                "fundamentals": facts_df,
+                "daily_returns": pd.DataFrame(dr_rows),
+            },
+            prices_adj=pd.DataFrame(price_rows),
+            prices_raw=pd.DataFrame(price_rows),
+            manifest_extra={"source_timezones": {"sec": "America/New_York"}},
+        )
+        pstore = build_price_store(ver, [ASSET_1], cal.days)
+        fstore = build_fund_store(
+            ver,
+            [CIK_1],
+            time_policy="observed_content",
+            cal=cal,
+            price_store=pstore,
+            primary_asset_of_cik={CIK_1: 0},
+        )
+        self.assertEqual(len(fstore.snap_epoch_ns), 1)
+        # public_at is 16:30 after session 24 close -> r0_idx=25, +1d=26 (lvl 120 / pre lvl 100 - 1 = +0.20)
+        self.assertEqual(int(fstore.snap_post_1d_ready_ns[0]), int(cal.closes[26]))
+        self.assertAlmostEqual(float(fstore.snap_post_1d_ret[0]), 0.20, places=4)
 
     def test_fresh_import_populates_feature_groups(self) -> None:
         env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}

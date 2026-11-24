@@ -604,14 +604,22 @@ def materialize(
         # Map each CIK to its primary active asset_idx for Event-Time Cross-Binding
         primary_cik_asset: dict[str, int] = {}
         for rec in universe_records:
-            cik = (
-                str(rec.get("cik") or "").strip().zfill(10)
-                if str(rec.get("cik") or "").isdigit()
-                else ""
-            )
+            cik_raw = str(rec.get("cik") or "").strip()
+            cik = cik_raw.zfill(10) if cik_raw.isdigit() else ""
             aid = str(rec.get("asset_id") or "")
             if cik and aid in asset_pos and cik not in primary_cik_asset:
                 primary_cik_asset[cik] = asset_pos[aid]
+        if "issuer_history" in _candidates.families(version):
+            ih_df = version.family("issuer_history")
+            if ih_df is not None and not ih_df.empty:
+                for rec in ih_df.to_dict("records"):
+                    if str(rec.get("status") or "") != "verified":
+                        continue
+                    cik_raw = str(rec.get("cik") or "").strip()
+                    cik = cik_raw.zfill(10) if cik_raw.isdigit() else ""
+                    aid = str(rec.get("asset_id") or "")
+                    if cik and aid in asset_pos and cik not in primary_cik_asset:
+                        primary_cik_asset[cik] = asset_pos[aid]
         all_ciks = sorted(primary_cik_asset)
         fstore = build_fund_store(
             version,

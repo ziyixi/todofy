@@ -773,11 +773,20 @@ def build_fund_store(
         idx = 0
         total_v = len(versions)
         while idx < total_v:
+            start_idx = idx
             epoch_ns = int(versions[idx].available_ns)
             end_idx = idx + 1
             while end_idx < total_v and int(versions[end_idx].available_ns) == epoch_ns:
                 end_idx += 1
-            for v in versions[idx:end_idx]:
+            snap_pub_ns = max(
+                (
+                    int(v.public_ns)
+                    for v in versions[start_idx:end_idx]
+                    if v.public_ns != NAT
+                ),
+                default=epoch_ns,
+            )
+            for v in versions[start_idx:end_idx]:
                 if v.is_retracted:
                     active.pop(v.fact_id, None)
                 else:
@@ -867,7 +876,7 @@ def build_fund_store(
                 q_pub_ns.append(int(pe_pub))
 
             pre_r, p1_r, p3_r, r1_ns, r3_ns = _reaction_window_metrics(
-                primary_aid, epoch_ns, price_store, cal
+                primary_aid, snap_pub_ns, price_store, cal
             )
             snap_cik_idx.append(c_idx)
             snap_epoch_ns.append(epoch_ns)
@@ -1151,6 +1160,20 @@ def build_event_store(
                 for a_idx, cik_v in enumerate(ciks_s.tolist()):
                     if cik_v:
                         cik_to_assets.setdefault(str(cik_v), []).append(a_idx)
+                if "issuer_history" in families:
+                    ih_ev = version.family("issuer_history")
+                    if ih_ev is not None and not ih_ev.empty:
+                        for ih_row in ih_ev.to_dict("records"):
+                            if str(ih_row.get("status") or "") != "verified":
+                                continue
+                            cik_raw = str(ih_row.get("cik") or "").strip()
+                            if not cik_raw.isdigit():
+                                continue
+                            a_idx = asset_pos.get(str(ih_row.get("asset_id") or ""))
+                            if a_idx is not None:
+                                bucket = cik_to_assets.setdefault(cik_raw.zfill(10), [])
+                                if a_idx not in bucket:
+                                    bucket.append(a_idx)
                 acc_col = (
                     "accepted_at" if "accepted_at" in valid.columns else "recorded_at"
                 )
