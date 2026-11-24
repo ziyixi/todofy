@@ -1091,6 +1091,79 @@ class StoresAndMaterializeAdversarialTest(unittest.TestCase):
         self.assertTrue(np.isnan(rng["prange_dist_low_21d"].iloc[1]))
         self.assertFalse(np.isnan(mom["pmom_ret_1d"].iloc[1]))
 
+    def test_trade_shock_masked_across_split_window(self) -> None:
+        from types import SimpleNamespace
+
+        from research_datasets.feature_groups import GroupBuildContext
+        from research_datasets.groups.price import build_price_liquidity_shock
+        from research_datasets.stores import PRICE_CHANNELS, Anchors, PriceStore, Stores
+
+        n_sess = 140
+        sessions = _nyse_sessions(date(2025, 1, 2), n_sess)
+        tensor = np.full((1, n_sess, len(PRICE_CHANNELS)), np.nan, dtype=np.float32)
+        ch = {name: idx for idx, name in enumerate(PRICE_CHANNELS)}
+        tensor[0, :, ch["close_raw"]] = 100.0
+        tensor[0, :, ch["high_raw"]] = 101.0
+        tensor[0, :, ch["low_raw"]] = 99.0
+        tensor[0, :, ch["vwap_raw"]] = 100.0
+        tensor[0, :, ch["volume_raw"]] = 1000.0
+        tensor[0, :, ch["ret_1d"]] = 0.0
+        tensor[0, :70, ch["split_index"]] = 1.0
+        tensor[0, 70:, ch["split_index"]] = 4.0
+        tensor[0, :70, ch["trade_count_raw"]] = 100.0
+        tensor[0, 70:, ch["trade_count_raw"]] = 400.0
+
+        pstore = PriceStore(
+            tensor, assets=(ASSET_1,), sessions=sessions, benchmark_idx=-1
+        )
+        sample_idxs = [69, 70, 75, 131, 132]
+        anc_df = pd.DataFrame(
+            {
+                "row_id": list(range(len(sample_idxs))),
+                "asset_id": [ASSET_1] * len(sample_idxs),
+                "signal_session": [sessions[i].isoformat() for i in sample_idxs],
+                "entry_session": [sessions[i].isoformat() for i in sample_idxs],
+                "decision_at": [
+                    pd.Timestamp(sessions[i], tz="UTC") for i in sample_idxs
+                ],
+                "in_universe": [True] * len(sample_idxs),
+                "is_benchmark": [False] * len(sample_idxs),
+                "asset_idx": [0] * len(sample_idxs),
+                "session_idx": sample_idxs,
+                "fund_snap_id": [-1] * len(sample_idxs),
+                "event_start_cursor": [0] * len(sample_idxs),
+                "event_end_cursor": [0] * len(sample_idxs),
+            }
+        )
+        anchors = Anchors(
+            frame=anc_df,
+            order_sha256="test-b13",
+            assets=(ASSET_1,),
+            sessions=tuple(sessions),
+            time_policy="pit_v1",
+            sampling="weekly",
+        )
+        stores = Stores(
+            anchors=anchors, prices=pstore, fundamentals=None, events=None, macro=None
+        )
+        ctx = GroupBuildContext(
+            version=SimpleNamespace(calendar=sessions, manifest={"data_families": {}}),
+            stores=stores,
+            time_policy="pit_v1",
+        )
+        out = build_price_liquidity_shock(ctx, {})
+        # Session 69 (pre-split): finite ~1.0; sessions 70, 75, 131 (70+61): NaN; session 132 (70+62): finite
+        self.assertAlmostEqual(
+            float(out["pliq_trade_shock_5d_63d"].iloc[0]), 1.0, places=5
+        )
+        self.assertTrue(np.isnan(out["pliq_trade_shock_5d_63d"].iloc[1]))
+        self.assertTrue(np.isnan(out["pliq_trade_shock_5d_63d"].iloc[2]))
+        self.assertTrue(np.isnan(out["pliq_trade_shock_5d_63d"].iloc[3]))
+        self.assertAlmostEqual(
+            float(out["pliq_trade_shock_5d_63d"].iloc[4]), 1.0, places=5
+        )
+        self.assertTrue(np.all(np.isfinite(out["pliq_rel_vol_5d_63d"].to_numpy())))
+
     def test_fresh_import_populates_feature_groups(self) -> None:
         env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
         output = subprocess.check_output(
