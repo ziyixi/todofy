@@ -518,6 +518,19 @@ def build_earnings_pead_sue(
                 primary_period_end=primary_periods,
             )
             fin_sub = fin_mask[pos] if fin_mask.any() else None
+            stale_s = (
+                sue_df["earn_sue_stale"].fillna(False).to_numpy(dtype=bool)
+                if "earn_sue_stale" in sue_df.columns
+                else np.zeros(len(sue_df), dtype=bool)
+            )
+            age_s = (
+                pd.to_numeric(sue_df["earn_sue_age_days"], errors="coerce").to_numpy(
+                    dtype=np.float64
+                )
+                if "earn_sue_age_days" in sue_df.columns
+                else np.full(len(sue_df), np.nan, dtype=np.float64)
+            )
+            stale_mask = stale_s | (np.isfinite(age_s) & (age_s > 200.0))
             for col in (
                 "earn_sue_eps",
                 "earn_sue_eps_price",
@@ -530,6 +543,8 @@ def build_earnings_pead_sue(
                     )
                     if col in _REV_MASK_VIEWS and fin_sub is not None and fin_sub.any():
                         arr[fin_sub] = np.nan
+                    if col != "earn_sue_age_days" and stale_mask.any():
+                        arr[stale_mask] = np.nan
                     data[col][pos] = arr
             del q_ledger, raw_df, sue_df
 

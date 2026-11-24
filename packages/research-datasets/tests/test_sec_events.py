@@ -902,6 +902,65 @@ class EarningsAndSueFeaturesTest(unittest.TestCase):
         # Once 2025Q1 8-K arrives while XBRL is still on 2024Q4, earn_sue_stale flips True!
         self.assertEqual(bool(out.loc[1, "earn_sue_stale"]), True)
 
+    def test_sue_revenue_removes_drift_and_clips_extremes(self) -> None:
+        all_days = pd.bdate_range("2022-01-03", "2025-12-31").date.tolist()
+        cal = Calendar(all_days)
+        # 8 prior quarters growing linearly around mean YoY delta ~100.0 (+/- small noise),
+        # then Q9 matches trend (+100.0 -> drift-adjusted SUE == 0.0), Q10 explodes (+10000 -> clipped +10.0)
+        q_dates = [
+            ("2023-03-31", "2023-05-05", 100.0, 0.10),
+            ("2023-06-30", "2023-08-05", 102.0, 0.11),
+            ("2023-09-30", "2023-11-05", 98.0, 0.09),
+            ("2023-12-31", "2024-02-10", 100.0, 0.10),
+            ("2024-03-31", "2024-05-05", 101.0, 0.105),
+            ("2024-06-30", "2024-08-05", 99.0, 0.095),
+            ("2024-09-30", "2024-11-05", 100.0, 0.10),
+            ("2024-12-31", "2025-02-10", 100.0, 0.10),
+            ("2025-03-31", "2025-05-05", 100.0, 0.10),
+            ("2025-06-30", "2025-08-05", 10000.0, 50.0),
+        ]
+        rows = []
+        for pe_s, fd_s, rev_d, eps_d in q_dates:
+            rows.append(
+                {
+                    "cik": CIK_1,
+                    "concept": "revenue",
+                    "period_end": date.fromisoformat(pe_s),
+                    "value_first": 1000.0 + rev_d,
+                    "prior_year_value_first": 1000.0,
+                    "basis_first": "reported",
+                    "status_first": "ok",
+                    "available_at_first": pd.Timestamp(f"{fd_s}T20:30:00Z"),
+                }
+            )
+            rows.append(
+                {
+                    "cik": CIK_1,
+                    "concept": "eps_diluted",
+                    "period_end": date.fromisoformat(pe_s),
+                    "value_first": 1.0 + eps_d,
+                    "prior_year_value_first": 1.0,
+                    "basis_first": "reported",
+                    "status_first": "ok",
+                    "available_at_first": pd.Timestamp(f"{fd_s}T20:30:00Z"),
+                }
+            )
+        raw_df = pd.DataFrame(
+            [{"asset_id": ASSET_1, "date": d, "close": 100.0} for d in all_days]
+        )
+        i_trend = int(np.searchsorted(cal.days, date(2025, 5, 10), "left"))
+        i_shock = int(np.searchsorted(cal.days, date(2025, 8, 10), "left"))
+        samples = _sample_rows(cal, [ASSET_1], [i_trend, i_shock])
+        out = sue_features(
+            pd.DataFrame(rows),
+            samples,
+            raw=raw_df,
+            asset_ciks={ASSET_1: CIK_1},
+        )
+        self.assertAlmostEqual(float(out.loc[0, "earn_sue_revenue"]), 0.0, places=5)
+        self.assertAlmostEqual(float(out.loc[1, "earn_sue_revenue"]), 10.0, places=5)
+        self.assertAlmostEqual(float(out.loc[1, "earn_sue_eps"]), 10.0, places=5)
+
     def test_earnings_calendar_asof_respects_removals_and_observed_clock(self) -> None:
         ev_obs = pd.DataFrame(
             [
