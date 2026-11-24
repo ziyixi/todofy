@@ -1432,6 +1432,123 @@ class ValuationTest(unittest.TestCase):
         self.assertEqual(res.loc[1, "net_payout_yield_status"], "stale")
         self.assertTrue(np.isnan(res.loc[1, "net_payout_yield_value"]))
 
+    def test_spinoff_pseudo_splits_excluded_while_real_splits_kept(self) -> None:
+        cal = _business_days("2025-04-01", "2025-06-30")
+        facts = [
+            _fact(
+                "sh_spin",
+                "EntityCommonStockSharesOutstanding",
+                "1000",
+                None,
+                "2025-04-20",
+                taxonomy="dei",
+                unit="shares",
+                currency="",
+                period_kind="instant",
+            ),
+            _fact(
+                "sh_real",
+                "EntityCommonStockSharesOutstanding",
+                "1000",
+                None,
+                "2025-04-20",
+                cik=CIK_DUAL,
+                taxonomy="dei",
+                unit="shares",
+                currency="",
+                period_kind="instant",
+            ),
+        ]
+        ca = pd.DataFrame(
+            [
+                # Spin-off encoded as 1000->1289 forward_split -> must NOT scale shares
+                {
+                    "asset_id": ASSET_SINGLE,
+                    "role": "subject",
+                    "type": "forward_split",
+                    "ex_date": "2025-05-01",
+                    "split_ratio": 1.289,
+                    "old_rate": 1000.0,
+                    "new_rate": 1289.0,
+                    "status": "verified",
+                },
+                # Fractional spin-off encoded as reverse_split -> must NOT scale shares
+                {
+                    "asset_id": ASSET_SINGLE,
+                    "role": "subject",
+                    "type": "reverse_split",
+                    "ex_date": "2025-05-10",
+                    "split_ratio": 0.33333,
+                    "old_rate": 1.0,
+                    "new_rate": 0.33333,
+                    "status": "verified",
+                },
+                # Real 3:2 split AND 5% stock dividend -> BOTH must scale shares (1.5 * 1.05 = 1.575)
+                {
+                    "asset_id": ASSET_A,
+                    "role": "subject",
+                    "type": "forward_split",
+                    "ex_date": "2025-05-01",
+                    "split_ratio": 1.5,
+                    "old_rate": 2.0,
+                    "new_rate": 3.0,
+                    "status": "verified",
+                },
+                {
+                    "asset_id": ASSET_A,
+                    "role": "subject",
+                    "type": "stock_dividend",
+                    "ex_date": "2025-05-10",
+                    "split_ratio": 1.05,
+                    "rate": 1.05,
+                    "status": "verified",
+                },
+            ]
+        )
+        material = {
+            "manifest": {
+                "calendar": cal,
+                "source_timezones": {"sec": "America/New_York"},
+            },
+            "universe": pd.DataFrame(
+                [
+                    {
+                        "asset_id": ASSET_SINGLE,
+                        "symbol": "SPIN",
+                        "cik": CIK_SINGLE,
+                        "issuer_mapping_status": "verified",
+                    },
+                    {
+                        "asset_id": ASSET_A,
+                        "symbol": "REAL",
+                        "cik": CIK_DUAL,
+                        "issuer_mapping_status": "verified",
+                    },
+                ]
+            ),
+            "fundamentals": pd.DataFrame(facts),
+            "corporate_actions": ca,
+            "raw": pd.DataFrame(
+                [
+                    {"asset_id": ASSET_SINGLE, "date": "2025-05-15", "close": 50.0},
+                    {"asset_id": ASSET_A, "date": "2025-05-15", "close": 40.0},
+                ]
+            ),
+        }
+        samples = _sample_rows(
+            [
+                (ASSET_SINGLE, "2025-05-15", "2025-05-16T10:00:00Z"),
+                (ASSET_A, "2025-05-15", "2025-05-16T10:00:00Z"),
+            ]
+        )
+        res = valuation(
+            material, samples, time_policy="public_reconstructed", provenance=True
+        )
+        self.assertAlmostEqual(float(res.loc[0, "valuation_split_factor"]), 1.0)
+        self.assertAlmostEqual(float(res.loc[0, "market_cap_issuer_value"]), 50_000.0)
+        self.assertAlmostEqual(float(res.loc[1, "valuation_split_factor"]), 1.575)
+        self.assertAlmostEqual(float(res.loc[1, "market_cap_issuer_value"]), 63_000.0)
+
 
 if __name__ == "__main__":
     unittest.main()
