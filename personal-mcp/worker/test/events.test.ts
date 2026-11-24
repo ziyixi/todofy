@@ -48,6 +48,7 @@ function sourceEnv(sources: {
   } } as unknown as Fetcher);
   return { TASKS: binding(sources.tasks), TODOFY_MAIL: binding(sources.mail), HOME: {
     readHome(request) { return Promise.resolve(sources.home?.(request) ?? snapshot()); },
+    readUsage: () => Promise.reject(new Error('UNEXPECTED_SYNTHETIC_USAGE_READ')),
   } };
 }
 
@@ -324,7 +325,10 @@ function createTestStore(overrides: Partial<Env> = {}) {
     TODOFY_MAIL: { fetch: () => Promise.resolve(Response.json({ cursor: '1' })) },
     RECALL: { fetch: () => Promise.resolve(Response.json({})) },
     WATCH: { fetch: () => Promise.resolve(Response.json({ cursor: '1' })) },
-    HOME: { readHome: () => Promise.resolve(snapshot()) },
+    HOME: {
+      readHome: () => Promise.resolve(snapshot()),
+      readUsage: () => Promise.reject(new Error('UNEXPECTED_SYNTHETIC_USAGE_READ')),
+    },
     ...overrides,
   } as unknown as Env;
   return { store: new SubscriptionStore(ctx, env), sql };

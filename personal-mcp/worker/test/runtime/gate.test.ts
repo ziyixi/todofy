@@ -83,6 +83,9 @@ async function start(persist: string, received: unknown[], options: RuntimeOptio
             }));
             return response.json();
           }
+          async readUsage() {
+            throw new Error('unexpected');
+          }
         }
         export default { fetch() { return new Response(null, { status: 404 }); } };`,
       serviceBindings: { FIXTURE: async (request: Request) => {

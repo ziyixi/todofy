@@ -55,6 +55,7 @@ function tools(sources: Sources = {}) {
       homeReads.push(request);
       return sources.home?.(request) ?? Promise.resolve(homeSnapshot());
     },
+    readUsage: () => Promise.reject(new Error('Unexpected synthetic usage read')),
   } };
   const call = createToolCaller('synthetic-content', server => { registerContentTools(server, env); });
   return { env, seen, homeReads, call };
