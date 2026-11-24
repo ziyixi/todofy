@@ -696,9 +696,10 @@ _COMPOSITES: tuple[CompositeSpec, ...] = (
             "net_income_parent",
             "net_income_total",
             "net_income_nci",
+            "net_income_common",
             "minority_interest",
         ),
-        ("parent", "total_no_nci"),
+        ("parent", "total_minus_nci", "total_no_nci", "common_approx", "total_approx"),
         1,
     ),
     CompositeSpec(
@@ -707,7 +708,7 @@ _COMPOSITES: tuple[CompositeSpec, ...] = (
         "money",
         False,
         ("equity_parent", "equity_total", "net_income_nci", "minority_interest"),
-        ("parent", "total_no_nci"),
+        ("parent", "total_minus_nci", "total_no_nci", "total_approx"),
         1,
     ),
     CompositeSpec(
@@ -976,18 +977,35 @@ DEFAULT_VIEWS: tuple[str, ...] = (
 )
 
 
+_FALLBACK_INPUTS: Mapping[str, tuple[str, ...]] = MappingProxyType(
+    {
+        "gross_profit": ("revenue_total", "revenue_contracts", "cost_of_revenue"),
+        "total_liabilities": (
+            "liabilities_and_equity",
+            "total_assets",
+            "equity_total",
+            "equity_parent",
+            "minority_interest",
+        ),
+        "cash": ("cash_incl_restricted",),
+    }
+)
+
+
 def required_base_concepts(concepts_or_views: tuple[str, ...] | list[str]) -> set[str]:
     """Expand base/composite concept names or view names to required base concepts."""
     needed: set[str] = set()
     for item in concepts_or_views:
         if item in CONCEPTS:
             needed.add(item)
+            needed.update(_FALLBACK_INPUTS.get(item, ()))
         elif item in COMPOSITES:
             needed.update(COMPOSITES[item].inputs)
         else:
             concept_name, _ = parse_view_name(item)
             if concept_name in CONCEPTS:
                 needed.add(concept_name)
+                needed.update(_FALLBACK_INPUTS.get(concept_name, ()))
             else:
                 needed.update(COMPOSITES[concept_name].inputs)
     return needed
