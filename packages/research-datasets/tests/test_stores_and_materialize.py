@@ -378,7 +378,7 @@ class StoresAndMaterializeAdversarialTest(unittest.TestCase):
                     "checked_start": sessions[0].isoformat(),
                     "checked_end": sessions[-1].isoformat(),
                     "checked_at": _et_iso(sessions[-1], 20, 0),
-                    "status": "ok",
+                    "status": "checked",
                     "error_code": "",
                     "count": 1,
                 }
@@ -1618,6 +1618,234 @@ class StoresAndMaterializeAdversarialTest(unittest.TestCase):
         ):
             mask = _sic_financial_mask(ctx)
         self.assertEqual(mask.tolist(), [True, True, False, False, False])
+
+    def test_ev_last_post_uses_sec_only_and_news_intensity_normalizes_sources(
+        self,
+    ) -> None:
+        from research_datasets.feature_groups import GroupBuildContext
+        from research_datasets.groups.domain import (
+            build_earnings_pead_sue,
+            build_news_intensity,
+        )
+        from research_datasets.stores import PRICE_CHANNELS, Anchors, PriceStore, Stores
+
+        sessions = _nyse_sessions(date(2025, 1, 2), 20)
+        cal = clocks.Calendar(sessions)
+        asset_2 = "22222222-2222-4222-8222-222222222222"
+        assets = (ASSET_1, asset_2)
+        tensor = np.full(
+            (2, len(sessions), len(PRICE_CHANNELS)), np.nan, dtype=np.float32
+        )
+        for idx in range(len(sessions)):
+            # Asset 1 jumps 10% after SEC filing on session 5, flat later
+            lvl1 = 100.0 if idx <= 5 else 110.0
+            tensor[0, idx, 3] = lvl1
+            tensor[0, idx, 7] = lvl1
+            tensor[0, idx, 8] = lvl1 / 100.0
+            tensor[0, idx, 4] = 1000.0
+            tensor[1, idx, 3] = 100.0
+            tensor[1, idx, 7] = 100.0
+            tensor[1, idx, 8] = 1.0
+            tensor[1, idx, 4] = 1000.0
+        pstore = PriceStore(tensor, assets=assets, sessions=sessions, benchmark_idx=-1)
+
+        # EventStore contains 1 SEC event (sec reaction=+10% ready by session 6 close) at session 5,
+        # PLUS a newer alpaca_news at session 12 (whose 1d reaction is NOT used for ev_last_post),
+        # PLUS 10x more finnhub_news than alpaca_news at session 15.
+        sec_pub = int(pd.Timestamp(_et_iso(sessions[5], 8, 30)).value)
+        alp_1_pub = int(pd.Timestamp(_et_iso(sessions[12], 12, 0)).value)
+        alp_2_pub = int(pd.Timestamp(_et_iso(sessions[15], 10, 0)).value)
+        fin_pubs = [
+            int(pd.Timestamp(_et_iso(sessions[15], 10, m)).value) for m in range(10)
+        ]
+        ev_rows_obs = [
+            {
+                "source": "alpaca_news",
+                "event_uid": "alp-12",
+                "event_id": "alp-12",
+                "observation_sequence": 1,
+                "event_date": sessions[12].isoformat(),
+                "asset_ids": [ASSET_1],
+                "asset_first_seen_at": {ASSET_1: _et_iso(sessions[12], 12, 0)},
+                "content_first_seen_at": _et_iso(sessions[12], 12, 0),
+                "observation_recorded_at": _et_iso(sessions[12], 12, 0),
+                "public_time_precision": "second",
+                "public_at": _et_iso(sessions[12], 12, 0),
+                "public_date": sessions[12].isoformat(),
+                "story_key": "s12",
+            },
+            {
+                "source": "alpaca_news",
+                "event_uid": "alp-15-a2",
+                "event_id": "alp-15-a2",
+                "observation_sequence": 1,
+                "event_date": sessions[15].isoformat(),
+                "asset_ids": [asset_2],
+                "asset_first_seen_at": {asset_2: _et_iso(sessions[15], 10, 0)},
+                "content_first_seen_at": _et_iso(sessions[15], 10, 0),
+                "observation_recorded_at": _et_iso(sessions[15], 10, 0),
+                "public_time_precision": "second",
+                "public_at": _et_iso(sessions[15], 10, 0),
+                "public_date": sessions[15].isoformat(),
+                "story_key": "s15a2",
+            },
+            *(
+                {
+                    "source": "finnhub_news",
+                    "event_uid": f"fin-15-{k}",
+                    "event_id": f"fin-15-{k}",
+                    "observation_sequence": 1,
+                    "event_date": sessions[15].isoformat(),
+                    "asset_ids": [ASSET_1 if k < 9 else asset_2],
+                    "asset_first_seen_at": {
+                        (ASSET_1 if k < 9 else asset_2): _et_iso(sessions[15], 10, k)
+                    },
+                    "content_first_seen_at": _et_iso(sessions[15], 10, k),
+                    "observation_recorded_at": _et_iso(sessions[15], 10, k),
+                    "public_time_precision": "second",
+                    "public_at": _et_iso(sessions[15], 10, k),
+                    "public_date": sessions[15].isoformat(),
+                    "story_key": f"f15_{k}",
+                }
+                for k in range(10)
+            ),
+        ]
+        checks_df = pd.DataFrame(
+            [
+                {
+                    "source": src,
+                    "asset_id": aid,
+                    "checked_start": sessions[0].isoformat(),
+                    "checked_end": sessions[-1].isoformat(),
+                    "checked_at": _et_iso(sessions[-1], 20, 0),
+                    "status": "checked",
+                    "error_code": "",
+                    "count": 1,
+                }
+                for aid in assets
+                for src in ("sec", "alpaca_news", "finnhub_news")
+            ]
+        )
+        # Build EventStore with exact events: asset_0 has [SEC@5, ALP@12, 9x FIN@15], asset_1 has [ALP@15, 1x FIN@15]
+        pub_0 = [sec_pub, alp_1_pub, *fin_pubs[:9]]
+        src_0 = [0, 1, *([2] * 9)]
+        pub_1 = [alp_2_pub, fin_pubs[9]]
+        src_1 = [1, 2]
+        from research_datasets.stores import EventStore
+
+        estore = EventStore(
+            assets=assets,
+            asset_offsets=np.array(
+                [0, len(pub_0), len(pub_0) + len(pub_1)], dtype=np.int64
+            ),
+            public_at_ns=np.array([*pub_0, *pub_1], dtype=np.int64),
+            available_at_ns=np.array([*pub_0, *pub_1], dtype=np.int64),
+            source_id=np.array([*src_0, *src_1], dtype=np.uint8),
+            kind_code=np.zeros(len(pub_0) + len(pub_1), dtype=np.int32),
+            kinds=("sec",),
+            numeric_value=np.ones(len(pub_0) + len(pub_1), dtype=np.float32),
+            pre_ret_21d=np.full(len(pub_0) + len(pub_1), np.nan, dtype=np.float32),
+            post_1d_ret=np.array([0.10, 0.0, *([0.0] * 11)], dtype=np.float32),
+            post_3d_ret=np.array([0.10, 0.0, *([0.0] * 11)], dtype=np.float32),
+            post_1d_ready_ns=np.full(
+                len(pub_0) + len(pub_1), cal.closes[6], dtype=np.int64
+            ),
+            post_3d_ready_ns=np.full(
+                len(pub_0) + len(pub_1), cal.closes[8], dtype=np.int64
+            ),
+            time_policy="public_reconstructed",
+        )
+        # Rows at sessions[3] (pre any news -> must be NaN), sessions[13] (after SEC@5 & ALP@12), sessions[16] (after FIN@15)
+        sig_idxs = [3, 13, 16, 16]
+        row_aids = [ASSET_1, ASSET_1, ASSET_1, asset_2]
+        row_aidxs = [0, 0, 0, 1]
+        anc_df = pd.DataFrame(
+            {
+                "row_id": [0, 1, 2, 3],
+                "asset_id": row_aids,
+                "signal_session": [sessions[k] for k in sig_idxs],
+                "entry_session": [sessions[k + 1] for k in sig_idxs],
+                "decision_at": [
+                    pd.Timestamp(cal.decisions[k + 1], unit="ns", tz="UTC")
+                    for k in sig_idxs
+                ],
+                "in_universe": [True] * 4,
+                "is_benchmark": [False] * 4,
+                "asset_idx": row_aidxs,
+                "session_idx": sig_idxs,
+                "fund_snap_id": [-1] * 4,
+                "event_start_cursor": [0] * 4,
+                "event_end_cursor": [0] * 4,
+            }
+        )
+        anchors = Anchors(
+            frame=anc_df,
+            order_sha256="test-b12",
+            assets=assets,
+            sessions=tuple(sessions),
+            time_policy="public_reconstructed",
+            sampling="weekly",
+        )
+        stores = Stores(
+            anchors=anchors, prices=pstore, fundamentals=None, events=estore, macro=None
+        )
+        ver = _SyntheticVersion(
+            calendar=sessions,
+            universe=[
+                {"asset_id": ASSET_1, "symbol": "NEW1", "cik": CIK_1},
+                {"asset_id": asset_2, "symbol": "NEW2", "cik": "0000100002"},
+            ],
+            families={
+                "event_observations": pd.DataFrame(ev_rows_obs),
+                "source_checks": checks_df,
+                "earnings_announcements": pd.DataFrame(),
+            },
+            prices_adj=pd.DataFrame(
+                [
+                    {"asset_id": aid, "date": d.isoformat(), "close": 100.0}
+                    for aid in assets
+                    for d in sessions
+                ]
+            ),
+            prices_raw=pd.DataFrame(
+                [
+                    {"asset_id": aid, "date": d.isoformat(), "close": 100.0}
+                    for aid in assets
+                    for d in sessions
+                ]
+            ),
+            manifest_extra={
+                "source_timezones": {
+                    "sec": "America/New_York",
+                    "alpaca_news": "America/New_York",
+                    "finnhub_news": "America/New_York",
+                }
+            },
+        )
+        ctx = GroupBuildContext(
+            version=ver, stores=stores, time_policy="public_reconstructed"
+        )
+        ev_out = build_earnings_pead_sue(ctx, {})
+        # Session 13 & 16 on ASSET_1 still keep SEC filing's +0.10 reaction (not overwritten by news @12)
+        self.assertAlmostEqual(
+            float(ev_out.loc[1, "ev_last_post_1d_ret"]), 0.10, places=5
+        )
+        self.assertAlmostEqual(
+            float(ev_out.loc[2, "ev_last_post_1d_ret"]), 0.10, places=5
+        )
+
+        news_out = build_news_intensity(ctx, {"half_lives_days": [5.0]})
+        # Row 0 (session 3 < first alpaca session 12 & finnhub session 15): all news columns must be NaN
+        self.assertTrue(np.isnan(news_out.loc[0, "alpaca_news_events_1d"]))
+        self.assertTrue(np.isnan(news_out.loc[0, "finnhub_news_events_1d"]))
+        self.assertTrue(np.isnan(news_out.loc[0, "news_decay_hl_5d"]))
+        # Session 13 (after alpaca @12, before finnhub @15): finnhub stays NaN while normalized alpaca ~ 1.0 (not inflated!)
+        self.assertTrue(np.isnan(news_out.loc[1, "finnhub_news_events_1d"]))
+        self.assertAlmostEqual(
+            float(news_out.loc[1, "news_decay_hl_5d"]), 1.0, places=4
+        )
+        # Session 16 (finnhub turns on at 9x volume on ASSET_1): normalized cross-sectionally (no 9x jump!)
+        self.assertLess(float(news_out.loc[2, "news_decay_hl_5d"]), 2.5)
 
     def test_fresh_import_populates_feature_groups(self) -> None:
         env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}

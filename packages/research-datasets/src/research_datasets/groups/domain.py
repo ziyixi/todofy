@@ -277,7 +277,11 @@ def _reindex_event_grid(
 
 
 def _latest_visible_event_pos(
-    ev_store: Any, ai: np.ndarray, dec_ns: np.ndarray
+    ev_store: Any,
+    ai: np.ndarray,
+    dec_ns: np.ndarray,
+    *,
+    source_ids: tuple[int, ...] | None = None,
 ) -> np.ndarray:
     """Vectorized per-asset lookup returning last EventStore row with ``avail <= dec_ns`` (else -1)."""
     n = len(ai)
@@ -301,6 +305,8 @@ def _latest_visible_event_pos(
             continue
         avail = ev_store.available_at_ns[e0:e1]
         valid = avail != clocks.NAT
+        if source_ids is not None:
+            valid = valid & np.isin(ev_store.source_id[e0:e1], source_ids)
         if not valid.any():
             continue
         av_v = avail[valid]
@@ -548,11 +554,11 @@ def build_earnings_pead_sue(
                     data[col][pos] = arr
             del q_ledger, raw_df, sue_df
 
-    # Causal latest event post-1d/3d reaction strictly masked by reaction_ready_mask
+    # Causal latest SEC filing post-1d/3d reaction strictly masked by reaction_ready_mask
     ev_store = ctx.stores.events
     ai = af["asset_idx"].to_numpy(dtype=np.int64, copy=False)
     dec_ns = clocks.instants(af["decision_at"].to_numpy(dtype=object))
-    last_pos = _latest_visible_event_pos(ev_store, ai, dec_ns)
+    last_pos = _latest_visible_event_pos(ev_store, ai, dec_ns, source_ids=(0,))
     post1 = np.full(n, np.nan, dtype=np.float32)
     post3 = np.full(n, np.nan, dtype=np.float32)
     found = last_pos >= 0
@@ -775,6 +781,33 @@ def build_news_intensity(
             )
             data.update(_reindex_event_grid(ev_df, assets, signals, af, raw_event_cols))
 
+            # Mask each news source before its earliest observed event in obs
+            if obs is not None and not obs.empty and "source" in obs.columns:
+                sig_days_arr = pd.to_datetime(af["signal_session"]).dt.date.to_numpy()
+                src_col = obs["source"].astype(str)
+                for src_name, prefix in (
+                    ("alpaca_news", "alpaca_news_events_"),
+                    ("finnhub_news", "finnhub_news_events_"),
+                ):
+                    sub_obs = obs[src_col == src_name]
+                    if sub_obs.empty:
+                        continue
+                    dates_list: list[Any] = []
+                    for d_col in ("event_date", "public_date", "public_at"):
+                        if d_col in sub_obs.columns:
+                            parsed = pd.to_datetime(
+                                sub_obs[d_col], errors="coerce"
+                            ).dropna()
+                            if not parsed.empty:
+                                dates_list.append(parsed.min().date())
+                    if dates_list:
+                        first_ev_day = min(dates_list)
+                        before_src = sig_days_arr < first_ev_day
+                        if before_src.any():
+                            for col in raw_event_cols:
+                                if col.startswith(prefix):
+                                    data[col][before_src] = np.nan
+
     # Combined causal news_21d_rank
     a21 = data["alpaca_news_events_rank_21d"]
     f21 = data["finnhub_news_events_rank_21d"]
@@ -785,19 +818,21 @@ def build_news_intensity(
     )
     data["news_21d_rank"] = both.astype(np.float32)
 
-    # Exponentially decayed news intensity from EventStore (only populated where news events are countable!)
+    # Exponentially decayed news intensity from EventStore computed per source & normalized per session
     ev_store = ctx.stores.events
     ai = af["asset_idx"].to_numpy(dtype=np.int64, copy=False)
+    s_idx_arr = af["session_idx"].to_numpy(dtype=np.int64, copy=False)
     dec_ns = clocks.instants(af["decision_at"].to_numpy(dtype=object))
-    countable_row = np.isfinite(data["alpaca_news_events_1d"]) | np.isfinite(
-        data["finnhub_news_events_1d"]
-    )
-    c_rows = np.flatnonzero(countable_row)
     ns_per_day = 86_400_000_000_000.0
     cutoff_ns = 180 * 86_400_000_000_000
 
-    per_asset_news: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
-    if len(c_rows):
+    def _per_asset_news_for_source(
+        src_id: int, countable_mask: np.ndarray
+    ) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
+        c_rows = np.flatnonzero(countable_mask)
+        if not len(c_rows):
+            return []
+        per_asset: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
         c_ai = ai[c_rows]
         order = np.argsort(c_ai, kind="mergesort")
         c_rows_s = c_rows[order]
@@ -825,27 +860,28 @@ def build_news_intensity(
             e0 = int(ev_store.asset_offsets[a_i])
             e1 = int(ev_store.asset_offsets[a_i + 1])
             if e1 <= e0:
-                per_asset_news.append((rows_a, d_a, np.empty(0, dtype=np.int64)))
+                per_asset.append((rows_a, d_a, np.empty(0, dtype=np.int64)))
                 continue
             srcs_a = ev_store.source_id[e0:e1]
             avs_a = ev_store.available_at_ns[e0:e1]
-            mask = ((srcs_a == 1) | (srcs_a == 2)) & (avs_a != clocks.NAT)
+            mask = (srcs_a == src_id) & (avs_a != clocks.NAT)
             news_av = (
                 np.sort(avs_a[mask]) if mask.any() else np.empty(0, dtype=np.int64)
             )
-            per_asset_news.append((rows_a, d_a, news_av))
+            per_asset.append((rows_a, d_a, news_av))
+        return per_asset
 
-    for hl in hls:
-        colname = f"news_decay_hl_{int(hl) if float(hl).is_integer() else str(hl).replace('.', '_')}d"
-        arr = np.full(n, np.nan, dtype=np.float32)
-        lam = math.log(2.0) / max(hl, 1e-6)
-        for rows_a, d_a, news_av in per_asset_news:
+    def _decay_values(
+        lam: float, per_asset: list[tuple[np.ndarray, np.ndarray, np.ndarray]]
+    ) -> np.ndarray:
+        arr = np.full(n, np.nan, dtype=np.float64)
+        for rows_a, d_a, news_av in per_asset:
             if not len(news_av):
-                arr[rows_a] = np.float32(0.0)
+                arr[rows_a] = 0.0
                 continue
             ls = np.searchsorted(news_av, d_a - cutoff_ns, side="left")
             rs = np.searchsorted(news_av, d_a, side="right")
-            vals = np.zeros(len(rows_a), dtype=np.float32)
+            vals = np.zeros(len(rows_a), dtype=np.float64)
             acc = 0.0
             prev_l = 0
             prev_r = 0
@@ -871,12 +907,56 @@ def build_news_intensity(
                         for av in news_av[prev_l:lj]:
                             acc -= math.exp(-lam * ((d_ns - int(av)) / ns_per_day))
                     acc = max(acc, 0.0)
-                vals[j] = np.float32(acc)
+                vals[j] = acc
                 prev_l = lj
                 prev_r = rj
                 prev_d = d_ns
             arr[rows_a] = vals
-        data[colname] = arr
+        return arr
+
+    def _normalize_by_session(raw_arr: np.ndarray) -> np.ndarray:
+        out = raw_arr.copy()
+        finite_idx = np.flatnonzero(np.isfinite(raw_arr))
+        if not len(finite_idx):
+            return out
+        sess_sub = s_idx_arr[finite_idx]
+        s_ord = np.argsort(sess_sub, kind="mergesort")
+        fi_s = finite_idx[s_ord]
+        ss_s = sess_sub[s_ord]
+        s_diffs = np.flatnonzero(np.diff(ss_s)) + 1
+        s_starts = np.concatenate(([0], s_diffs))
+        s_ends = np.concatenate((s_diffs, [len(ss_s)]))
+        for k in range(len(s_starts)):
+            idx_k = fi_s[s_starts[k] : s_ends[k]]
+            vals_k = raw_arr[idx_k]
+            pos_k = vals_k[vals_k > 0.0]
+            if not len(pos_k):
+                continue
+            scale = float(np.median(pos_k))
+            if scale <= 0.0:
+                scale = float(np.mean(pos_k))
+            if scale > 0.0:
+                out[idx_k] = vals_k / scale
+        return out
+
+    alp_per_asset = _per_asset_news_for_source(
+        1, np.isfinite(data["alpaca_news_events_1d"])
+    )
+    fin_per_asset = _per_asset_news_for_source(
+        2, np.isfinite(data["finnhub_news_events_1d"])
+    )
+
+    for hl in hls:
+        colname = f"news_decay_hl_{int(hl) if float(hl).is_integer() else str(hl).replace('.', '_')}d"
+        lam = math.log(2.0) / max(hl, 1e-6)
+        alp_norm = _normalize_by_session(_decay_values(lam, alp_per_asset))
+        fin_norm = _normalize_by_session(_decay_values(lam, fin_per_asset))
+        combined = np.where(
+            np.isfinite(alp_norm) & np.isfinite(fin_norm),
+            0.5 * (alp_norm + fin_norm),
+            np.where(np.isfinite(alp_norm), alp_norm, fin_norm),
+        )
+        data[colname] = combined.astype(np.float32)
     return pd.DataFrame(data, index=af.index)
 
 
