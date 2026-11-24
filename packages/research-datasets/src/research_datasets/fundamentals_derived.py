@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from bisect import bisect_left, bisect_right
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
@@ -603,6 +604,254 @@ def _fill_derived_fallbacks(
             concept_periods.pop(c_name, None)
 
 
+def _scale_decimal_to_ref(
+    pv: PeriodValue,
+    unit_kind: str,
+    target_ref: date,
+    split_factor_fn: Callable[[date | None, date | None], float] | None,
+) -> Decimal:
+    assert pv.decimal_value is not None
+    if split_factor_fn is None or unit_kind not in {"per_share", "shares"}:
+        return pv.decimal_value
+    f = split_factor_fn(pv.reference_date, target_ref)
+    if f == 1.0 or not math.isfinite(f) or f <= 0.0:
+        return pv.decimal_value
+    factor_dec = Decimal(str(f))
+    if unit_kind == "per_share":
+        return pv.decimal_value / factor_dec
+    return pv.decimal_value * factor_dec
+
+
+def _split_ratio_between(
+    events: Sequence[tuple[date, float]],
+    d_from: date | None,
+    d_to: date | None,
+) -> float:
+    """Cumulative split ratio (new/old) over ``(d_from, d_to]`` (inverted if reversed)."""
+    if not events or d_from is None or d_to is None or d_from == d_to:
+        return 1.0
+    if d_from < d_to:
+        prod = 1.0
+        for ex_d, ratio in events:
+            if d_from < ex_d <= d_to:
+                prod *= ratio
+        return prod
+    prod = 1.0
+    for ex_d, ratio in events:
+        if d_to < ex_d <= d_from:
+            prod *= ratio
+    return 1.0 / prod if prod > 0.0 else 1.0
+
+
+def _extract_split_events(
+    version_or_material: Any,
+    asset_ids: Sequence[str] | None,
+) -> dict[str, list[tuple[date, float]]]:
+    """Load share-changing split events per asset_id from corporate_actions or daily_returns."""
+    from .valuation import _is_share_changing_split
+
+    aids = list(dict.fromkeys(str(a) for a in (asset_ids or ()) if a))
+    has_ca = False
+    ca_df = pd.DataFrame()
+    has_dr = False
+    dr_df = pd.DataFrame()
+
+    if isinstance(version_or_material, Mapping):
+        families = version_or_material.get("manifest", {}).get("data_families") or {}
+        if (
+            "corporate_actions" in version_or_material
+            or "corporate_actions" in families
+        ):
+            has_ca = True
+            raw_ca = version_or_material.get("corporate_actions")
+            ca_df = (
+                raw_ca
+                if isinstance(raw_ca, pd.DataFrame)
+                else pd.DataFrame(raw_ca or [])
+            )
+        elif "daily_returns" in version_or_material or "daily_returns" in families:
+            has_dr = True
+            raw_dr = version_or_material.get("daily_returns")
+            dr_df = (
+                raw_dr
+                if isinstance(raw_dr, pd.DataFrame)
+                else pd.DataFrame(raw_dr or [])
+            )
+    else:
+        families = (
+            getattr(version_or_material, "manifest", {}).get("data_families") or {}
+        )
+        if isinstance(families, Mapping) and "corporate_actions" in families:
+            has_ca = True
+            ca_fn = getattr(version_or_material, "corporate_actions", None)
+            ca_df = ca_fn(aids or None) if callable(ca_fn) else pd.DataFrame()
+        elif isinstance(families, Mapping) and "daily_returns" in families:
+            has_dr = True
+            tr_fn = getattr(version_or_material, "total_returns", None)
+            if callable(tr_fn):
+                dr_df = tr_fn(aids or None)
+
+    out: dict[str, list[tuple[date, float]]] = {}
+    if has_ca and not ca_df.empty and "asset_id" in ca_df.columns:
+        work = ca_df
+        id_col = (
+            "action_uid"
+            if "action_uid" in work.columns
+            else ("action_id" if "action_id" in work.columns else None)
+        )
+        if id_col is not None and "observation_sequence" in work.columns:
+            role_cols = (
+                [id_col, "asset_id", "role"]
+                if "role" in work.columns
+                else [id_col, "asset_id"]
+            )
+            work = work.sort_values("observation_sequence").drop_duplicates(
+                role_cols, keep="last"
+            )
+        if "is_retracted" in work.columns:
+            work = work[~work["is_retracted"].fillna(False).astype(bool)]
+        if "status" in work.columns:
+            work = work[work["status"].astype(str) != "withdrawn"]
+        date_col = next(
+            (c for c in ("effect_date", "ex_date", "date") if c in work.columns),
+            None,
+        )
+        ratio_col = next(
+            (
+                c
+                for c in ("split_ratio", "ratio_new_per_old", "ratio")
+                if c in work.columns
+            ),
+            None,
+        )
+        if date_col is not None and ratio_col is not None:
+            aids_filter = set(aids) if aids else None
+            for rec in work.to_dict("records"):
+                aid = str(rec.get("asset_id") or "")
+                if not aid or (aids_filter is not None and aid not in aids_filter):
+                    continue
+                if str(rec.get("role") or "subject") != "subject":
+                    continue
+                kind = str(
+                    rec.get("type") or rec.get("action_type") or rec.get("kind") or ""
+                ).lower()
+                if kind and kind not in {
+                    "split",
+                    "forward_split",
+                    "reverse_split",
+                    "stock_dividend",
+                }:
+                    continue
+                r_raw = pd.to_numeric(rec.get(ratio_col), errors="coerce")
+                r = (
+                    float(r_raw)
+                    if pd.notna(r_raw) and math.isfinite(float(r_raw))
+                    else 0.0
+                )
+                if r <= 0.0 or r == 1.0:
+                    continue
+                old_raw = pd.to_numeric(rec.get("old_rate"), errors="coerce")
+                new_raw = pd.to_numeric(rec.get("new_rate"), errors="coerce")
+                old_r = float(old_raw) if pd.notna(old_raw) else None
+                new_r = float(new_raw) if pd.notna(new_raw) else None
+                if not _is_share_changing_split(kind, r, old_r, new_r):
+                    continue
+                ex_d = _parse_iso_date(rec.get(date_col))
+                if ex_d is not None:
+                    out.setdefault(aid, []).append((ex_d, r))
+        for evs in out.values():
+            evs.sort(key=lambda item: item[0])
+        return out
+
+    if (
+        has_dr
+        and not dr_df.empty
+        and {"asset_id", "date", "split_index"}.issubset(dr_df.columns)
+    ):
+        work = dr_df
+        if "row_kind" in work.columns:
+            work = work[work["row_kind"].astype(str) != "terminal"]
+        aids_filter = set(aids) if aids else None
+        si_by_asset: dict[str, list[tuple[date, float]]] = {}
+        for rec in work.to_dict("records"):
+            aid = str(rec.get("asset_id") or "")
+            if not aid or (aids_filter is not None and aid not in aids_filter):
+                continue
+            d = _parse_iso_date(rec.get("date"))
+            sp = pd.to_numeric(rec.get("split_index"), errors="coerce")
+            if d is not None and pd.notna(sp) and float(sp) > 0.0:
+                si_by_asset.setdefault(aid, []).append((d, float(sp)))
+        for aid, pts in si_by_asset.items():
+            pts.sort(key=lambda item: item[0])
+            prev_sp = pts[0][1]
+            for d, sp in pts[1:]:
+                if prev_sp > 0.0 and abs(sp / prev_sp - 1.0) > 1e-6:
+                    ratio = sp / prev_sp
+                    if _is_share_changing_split("split", ratio):
+                        out.setdefault(aid, []).append((d, ratio))
+                    prev_sp = sp
+        return out
+
+    return out
+
+
+def _cik_split_events(
+    version_or_material: Any,
+    ciks: Sequence[str] | None,
+) -> dict[str, list[tuple[date, float]]]:
+    """Map each CIK to its primary common-equity asset's split events."""
+    from .valuation import _is_common_equity
+
+    _, universe = _extract_manifest_and_universe(version_or_material)
+    wanted = {c for c in (ciks or ()) if c} if ciks is not None else None
+    is_common = {
+        str(row.get("asset_id") or ""): _is_common_equity(row)
+        for row in universe
+        if row.get("asset_id")
+    }
+    asset_of_cik: dict[str, str] = {}
+    for row in sorted(
+        universe,
+        key=lambda r: (str(r.get("symbol") or "~"), str(r.get("asset_id") or "")),
+    ):
+        aid = str(row.get("asset_id") or "")
+        cik = _valid_cik(str(row.get("cik") or ""))
+        if (
+            cik
+            and aid
+            and row.get("issuer_mapping_status") == "verified"
+            and is_common.get(aid, True)
+            and (wanted is None or cik in wanted)
+            and cik not in asset_of_cik
+        ):
+            asset_of_cik[cik] = aid
+    ih_df = _optional_family(version_or_material, "issuer_history")
+    if ih_df is not None and not ih_df.empty:
+        for row in ih_df.to_dict("records"):
+            if str(row.get("status") or "") != "verified":
+                continue
+            cik = _valid_cik(str(row.get("cik") or ""))
+            aid = str(row.get("asset_id") or "")
+            if (
+                cik
+                and aid
+                and is_common.get(aid, True)
+                and (wanted is None or cik in wanted)
+                and cik not in asset_of_cik
+            ):
+                asset_of_cik[cik] = aid
+    if not asset_of_cik:
+        return {}
+    asset_splits = _extract_split_events(
+        version_or_material, list(dict.fromkeys(asset_of_cik.values()))
+    )
+    return {
+        cik: asset_splits[aid]
+        for cik, aid in asset_of_cik.items()
+        if aid in asset_splits
+    }
+
+
 class IssuerStateMachine:
     """Pure-Python point-in-time state machine for one CIK."""
 
@@ -612,8 +861,10 @@ class IssuerStateMachine:
         *,
         target_views: Sequence[str] | None = None,
         record_quarters: Collection[str] = (),
+        split_factor_fn: Callable[[date | None, date | None], float] | None = None,
     ) -> None:
         self.cik = cik
+        self._split_factor_fn = split_factor_fn
         if target_views is None:
             views_list: list[str] = []
             for name, spec in ALL_CONCEPTS.items():
@@ -1123,7 +1374,14 @@ class IssuerStateMachine:
             assert (
                 cur_ytd.decimal_value is not None and prev_ytd.decimal_value is not None
             )
-            val = cur_ytd.decimal_value - prev_ytd.decimal_value
+            target_ref = max(cur_ytd.reference_date, prev_ytd.reference_date)
+            cur_val = _scale_decimal_to_ref(
+                cur_ytd, spec.unit_kind, target_ref, self._split_factor_fn
+            )
+            prev_val = _scale_decimal_to_ref(
+                prev_ytd, spec.unit_kind, target_ref, self._split_factor_fn
+            )
+            val = cur_val - prev_val
             status = (
                 "approximate"
                 if approx or "approximate" in {cur_ytd.status, prev_ytd.status}
@@ -1140,7 +1398,7 @@ class IssuerStateMachine:
                 accessions=_join_accessions(cur_ytd.accessions, prev_ytd.accessions),
                 tag=cur_ytd.tag,
                 currency=cur_ytd.currency,
-                reference_date=max(cur_ytd.reference_date, prev_ytd.reference_date),
+                reference_date=target_ref,
             )
 
         is_eps = spec.name in {"eps_diluted", "eps_basic"}
@@ -1223,8 +1481,24 @@ class IssuerStateMachine:
                             and q2.decimal_value is not None
                             and q3.decimal_value is not None
                         )
-                        val = fy_pv.decimal_value - (
-                            q1.decimal_value + q2.decimal_value + q3.decimal_value
+                        target_ref = max(
+                            fy_pv.reference_date,
+                            q1.reference_date,
+                            q2.reference_date,
+                            q3.reference_date,
+                        )
+                        val = _scale_decimal_to_ref(
+                            fy_pv, spec.unit_kind, target_ref, self._split_factor_fn
+                        ) - (
+                            _scale_decimal_to_ref(
+                                q1, spec.unit_kind, target_ref, self._split_factor_fn
+                            )
+                            + _scale_decimal_to_ref(
+                                q2, spec.unit_kind, target_ref, self._split_factor_fn
+                            )
+                            + _scale_decimal_to_ref(
+                                q3, spec.unit_kind, target_ref, self._split_factor_fn
+                            )
                         )
                         q4 = PeriodValue(
                             status="approximate",
@@ -1247,12 +1521,7 @@ class IssuerStateMachine:
                             ),
                             tag=fy_pv.tag,
                             currency=fy_pv.currency,
-                            reference_date=max(
-                                fy_pv.reference_date,
-                                q1.reference_date,
-                                q2.reference_date,
-                                q3.reference_date,
-                            ),
+                            reference_date=target_ref,
                         )
             # Preserve the existing concept-specific choices, including Q4's original Q3
             # reference. Use the inferred weekly calendar only for missing usable quarters.
@@ -1497,11 +1766,20 @@ class IssuerStateMachine:
                         and q3.decimal_value is not None
                         and q4.decimal_value is not None
                     )
+                    target_ref = max(q.reference_date for q in (q1, q2, q3, q4))
                     val = (
-                        q1.decimal_value
-                        + q2.decimal_value
-                        + q3.decimal_value
-                        + q4.decimal_value
+                        _scale_decimal_to_ref(
+                            q1, spec.unit_kind, target_ref, self._split_factor_fn
+                        )
+                        + _scale_decimal_to_ref(
+                            q2, spec.unit_kind, target_ref, self._split_factor_fn
+                        )
+                        + _scale_decimal_to_ref(
+                            q3, spec.unit_kind, target_ref, self._split_factor_fn
+                        )
+                        + _scale_decimal_to_ref(
+                            q4, spec.unit_kind, target_ref, self._split_factor_fn
+                        )
                     )
                     st = (
                         "approximate"
@@ -1532,12 +1810,7 @@ class IssuerStateMachine:
                         ),
                         tag=q4.tag,
                         currency=q4.currency,
-                        reference_date=max(
-                            q1.reference_date,
-                            q2.reference_date,
-                            q3.reference_date,
-                            q4.reference_date,
-                        ),
+                        reference_date=target_ref,
                     )
                     continue
 
@@ -2223,7 +2496,15 @@ class IssuerStateMachine:
             return _err("nonpositive_prior", prior)
 
         assert cur.decimal_value is not None
-        growth = (cur.decimal_value - prior.decimal_value) / prior.decimal_value
+        unit_kind = ALL_CONCEPTS[c_name].unit_kind
+        prior_val = _scale_decimal_to_ref(
+            prior, unit_kind, cur.reference_date, self._split_factor_fn
+        )
+        if prior_val == 0:
+            return _err("zero_prior", prior)
+        if prior_val < 0:
+            return _err("nonpositive_prior", prior)
+        growth = (cur.decimal_value - prior_val) / prior_val
         st = "approximate" if "approximate" in {cur.status, prior.status} else "ok"
         return PeriodValue(
             status=st,
@@ -2682,11 +2963,20 @@ def fundamental_states(
             by_cik_buffer.setdefault(v.cik, []).append(v)
         versions.clear()
 
+    split_events_by_cik = _cik_split_events(version_or_material, ciks)
     for cik in sorted(by_cik_buffer):
         # An issuer is replayed once. Release its facts before accumulating more states.
         issuer_versions = by_cik_buffer.pop(cik)
         issuer_versions.sort(key=lambda v: (v.available_ns, v.observation_sequence))
-        machine = IssuerStateMachine(cik, target_views=target_views)
+        evs = split_events_by_cik.get(cik)
+        split_fn = (
+            (lambda d0, d1, _evs=evs: _split_ratio_between(_evs, d0, d1))
+            if evs
+            else None
+        )
+        machine = IssuerStateMachine(
+            cik, target_views=target_views, split_factor_fn=split_fn
+        )
         machine.ingest(issuer_versions)
         all_rows.extend(machine.rows)
         if machine.annual_only_steps:
@@ -2916,6 +3206,7 @@ def derived_fundamentals(
     views: Sequence[str] | None = None,
     stale_after_days: Mapping[str, int] | None = None,
     provenance: bool = False,
+    split_adjust: bool = True,
 ) -> pd.DataFrame:
     """Join derived point-in-time fundamental views onto ``samples`` at ``decision_at``."""
     clocks.policy(time_policy)
@@ -3021,8 +3312,21 @@ def derived_fundamentals(
         index=samples.index,
     )
 
+    need_split_ref = split_adjust and any(
+        ALL_CONCEPTS[parse_view_name(v)[0]].unit_kind in {"per_share", "shares"}
+        and not parse_view_name(v)[1].endswith("_yoy")
+        for v in selected_views
+    )
+    asset_split_events = (
+        _extract_split_events(version_or_material, unique_assets)
+        if need_split_ref
+        else {}
+    )
+
     # Convert each state's date once, before broadcasting it onto decision rows.
     join_cols = ["value", "status", "period_ordinal"]
+    if provenance or need_split_ref:
+        join_cols.append("reference_date")
     if provenance:
         join_cols.extend(
             [
@@ -3032,13 +3336,13 @@ def derived_fundamentals(
                 "accessions",
                 "tag",
                 "currency",
-                "reference_date",
             ]
         )
     new_cols: dict[str, Any] = {}
     for view in selected_views:
         c_name, suffix = parse_view_name(view)
-        spec_min_parser = ALL_CONCEPTS[c_name].min_parser
+        spec_obj = ALL_CONCEPTS[c_name]
+        spec_min_parser = spec_obj.min_parser
         base_suffix = suffix.removesuffix("_yoy")
         default_stale_limit = thresholds.get(suffix, thresholds.get(base_suffix, 200))
         fy_stale_limit = thresholds.get("fy", 460)
@@ -3092,6 +3396,30 @@ def derived_fundamentals(
         )
         usable = (final_status == "ok") | (final_status == "approximate")
         final_status[usable & (ages > age_limit)] = "stale"
+
+        if (
+            split_adjust
+            and spec_obj.unit_kind in {"per_share", "shares"}
+            and not suffix.endswith("_yoy")
+            and asset_split_events
+        ):
+            refs_col = joined["reference_date"].tolist()
+            for r_i in range(len(vals)):
+                if final_status[r_i] not in {"ok", "approximate"} or not np.isfinite(
+                    vals[r_i]
+                ):
+                    continue
+                evs = asset_split_events.get(asset_list[r_i])
+                if not evs:
+                    continue
+                ref_d = _parse_iso_date(refs_col[r_i])
+                f = _split_ratio_between(evs, ref_d, signal_days[r_i])
+                if f != 1.0 and math.isfinite(f) and f > 0.0:
+                    vals[r_i] = (
+                        vals[r_i] / f
+                        if spec_obj.unit_kind == "per_share"
+                        else vals[r_i] * f
+                    )
 
         new_cols[f"{view}_value"] = vals
         new_cols[f"{view}_status"] = pd.Categorical(
