@@ -1274,6 +1274,164 @@ class ValuationTest(unittest.TestCase):
         self.assertEqual(res.loc[0, "market_cap_security_status"], "ok")
         self.assertAlmostEqual(res.loc[0, "market_cap_security_value"], 90_000.0)
 
+    def test_superseded_stale_optional_legs_treated_as_zero(self) -> None:
+        cal = _business_days("2024-01-01", "2025-06-30")
+        # Stale optional legs filed in 2024-05 (period_end 2024-03-31), never repeated in 2025-03-31
+        facts = [
+            _fact(
+                "sh_1",
+                "EntityCommonStockSharesOutstanding",
+                "1000",
+                None,
+                "2025-04-20",
+                taxonomy="dei",
+                unit="shares",
+                currency="",
+                period_kind="instant",
+                filed="2025-05-01",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            _fact(
+                "ocf_1",
+                "NetCashProvidedByUsedInOperatingActivities",
+                "30000",
+                "2024-04-01",
+                "2025-03-31",
+                form="10-K",
+                period_kind="annual",
+                filed="2025-05-01",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            _fact(
+                "rep_1",
+                "PaymentsForRepurchaseOfCommonStock",
+                "5000",
+                "2024-04-01",
+                "2025-03-31",
+                form="10-K",
+                period_kind="annual",
+                filed="2025-05-01",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            _fact(
+                "cash_1",
+                "CashAndCashEquivalentsAtCarryingValue",
+                "20000",
+                None,
+                "2025-03-31",
+                period_kind="instant",
+                filed="2025-05-01",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            _fact(
+                "debt_1",
+                "LongTermDebtNoncurrent",
+                "10000",
+                None,
+                "2025-03-31",
+                period_kind="instant",
+                filed="2025-05-01",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            # Old 2024-03-31 optional legs -> stale by 2025-05-05, superseded by 2025-03-31 statements
+            _fact(
+                "iss_old",
+                "ProceedsFromIssuanceOfCommonStock",
+                "1000",
+                "2023-04-01",
+                "2024-03-31",
+                form="10-K",
+                period_kind="annual",
+                accession="0000000020-24-000001",
+                filed="2024-05-01",
+                public_at="2024-05-01T12:00:00Z",
+            ),
+            _fact(
+                "pref_old",
+                "PreferredStockValue",
+                "2000",
+                None,
+                "2024-03-31",
+                period_kind="instant",
+                accession="0000000020-24-000001",
+                filed="2024-05-01",
+                public_at="2024-05-01T12:00:00Z",
+            ),
+            # Second company where ALL cash flow statements are stale (nothing supersedes)
+            _fact(
+                "sh_stale",
+                "EntityCommonStockSharesOutstanding",
+                "1000",
+                None,
+                "2025-04-20",
+                cik=CIK_DUAL,
+                taxonomy="dei",
+                unit="shares",
+                currency="",
+                period_kind="instant",
+                filed="2025-05-01",
+                public_at="2025-05-01T12:00:00Z",
+            ),
+            _fact(
+                "div_stale",
+                "PaymentsOfDividends",
+                "1000",
+                "2023-04-01",
+                "2024-03-31",
+                cik=CIK_DUAL,
+                form="10-K",
+                period_kind="annual",
+                accession="0000000010-24-000001",
+                filed="2024-05-01",
+                public_at="2024-05-01T12:00:00Z",
+            ),
+        ]
+        material = {
+            "manifest": {
+                "calendar": cal,
+                "source_timezones": {"sec": "America/New_York"},
+            },
+            "universe": pd.DataFrame(
+                [
+                    {
+                        "asset_id": ASSET_SINGLE,
+                        "symbol": "CURR",
+                        "cik": CIK_SINGLE,
+                        "issuer_mapping_status": "verified",
+                    },
+                    {
+                        "asset_id": ASSET_A,
+                        "symbol": "STAL",
+                        "cik": CIK_DUAL,
+                        "issuer_mapping_status": "verified",
+                    },
+                ]
+            ),
+            "fundamentals": pd.DataFrame(facts),
+            "raw": pd.DataFrame(
+                [
+                    {"asset_id": ASSET_SINGLE, "date": "2025-05-05", "close": 100.0},
+                    {"asset_id": ASSET_A, "date": "2025-05-05", "close": 100.0},
+                ]
+            ),
+        }
+        samples = _sample_rows(
+            [
+                (ASSET_SINGLE, "2025-05-05", "2025-05-06T10:00:00Z"),
+                (ASSET_A, "2025-05-05", "2025-05-06T10:00:00Z"),
+            ]
+        )
+        res = valuation(material, samples, time_policy="public_reconstructed")
+        self.assertEqual(res.loc[0, "net_payout_yield_status"], "approximate")
+        self.assertAlmostEqual(res.loc[0, "net_payout_yield_value"], 5000.0 / 100_000.0)
+        self.assertEqual(res.loc[0, "enterprise_value_status"], "approximate")
+        self.assertAlmostEqual(
+            res.loc[0, "enterprise_value_value"], 100_000.0 + 10_000.0 - 20_000.0
+        )
+        # Truly stale cash-flow issuer remains stale
+        self.assertEqual(res.loc[1, "net_payout_yield_status"], "stale")
+        self.assertTrue(np.isnan(res.loc[1, "net_payout_yield_value"]))
+
 
 if __name__ == "__main__":
     unittest.main()
