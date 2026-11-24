@@ -2224,6 +2224,121 @@ class TrailingAndFiscalQuartersTest(unittest.TestCase):
         self.assertEqual(res.loc[1, "revenue_q_status"], "ok")
         self.assertEqual(res.loc[1, "revenue_q_basis"], "total")
 
+    def test_split_adjusts_eps_ttm_eps_q_and_shares_yoy(self) -> None:
+        # 20:1 forward split on 2022-07-18: Q3 2021..Q1 2022 reported pre-split (20.0 each),
+        # Q2 2022 filed 2022-07-27 post-split (1.20).
+        rows = [
+            make_fact(
+                "eps-21q3",
+                "EarningsPerShareDiluted",
+                "20.0",
+                "2021-07-01",
+                "2021-09-30",
+                unit="USD/shares",
+                accession="acc-21q3",
+                filed="2021-10-27",
+                public_at="2021-10-27T20:00:00Z",
+            ),
+            make_fact(
+                "eps-21q4",
+                "EarningsPerShareDiluted",
+                "20.0",
+                "2021-10-01",
+                "2021-12-31",
+                unit="USD/shares",
+                accession="acc-21q4",
+                filed="2022-02-02",
+                public_at="2022-02-02T20:00:00Z",
+            ),
+            make_fact(
+                "eps-22q1",
+                "EarningsPerShareDiluted",
+                "20.0",
+                "2022-01-01",
+                "2022-03-31",
+                unit="USD/shares",
+                accession="acc-22q1",
+                filed="2022-04-27",
+                public_at="2022-04-27T20:00:00Z",
+            ),
+            make_fact(
+                "eps-22q2",
+                "EarningsPerShareDiluted",
+                "1.20",
+                "2022-04-01",
+                "2022-06-30",
+                unit="USD/shares",
+                accession="acc-22q2",
+                filed="2022-07-27",
+                public_at="2022-07-27T20:00:00Z",
+            ),
+            make_fact(
+                "sh-21",
+                "EntityCommonStockSharesOutstanding",
+                "1000000",
+                None,
+                "2021-07-20",
+                taxonomy="dei",
+                unit="shares",
+                currency="",
+                period_kind="instant",
+                accession="acc-21s",
+                filed="2021-07-28",
+                public_at="2021-07-28T20:00:00Z",
+            ),
+            make_fact(
+                "sh-22",
+                "EntityCommonStockSharesOutstanding",
+                "20000000",
+                None,
+                "2022-07-20",
+                taxonomy="dei",
+                unit="shares",
+                currency="",
+                period_kind="instant",
+                accession="acc-22s",
+                filed="2022-07-27",
+                public_at="2022-07-27T20:00:00Z",
+            ),
+        ]
+        mat = make_material(rows)
+        mat["corporate_actions"] = pd.DataFrame(
+            [
+                {
+                    "asset_id": ASSET_A,
+                    "role": "subject",
+                    "type": "forward_split",
+                    "ex_date": "2022-07-18",
+                    "split_ratio": 20.0,
+                    "old_rate": 1.0,
+                    "new_rate": 20.0,
+                    "status": "verified",
+                }
+            ]
+        )
+        samples = pd.DataFrame(
+            {
+                "asset_id": [ASSET_A, ASSET_A],
+                # First row: 2022-07-22 (after 20:1 split, before Q2 filing) -> Q1 EPS=20/20=1.0
+                # Second row: 2022-08-05 (after Q2 filing) -> TTM EPS = 1+1+1+1.2 = 4.2, YoY shares = 0.0
+                "signal_session": ["2022-07-22", "2022-08-05"],
+                "decision_at": ["2022-07-25T10:00:00Z", "2022-08-08T10:00:00Z"],
+            }
+        )
+        res = derived_fundamentals(
+            mat,
+            samples,
+            time_policy="public_reconstructed",
+            views=("eps_diluted_q", "eps_diluted_ttm", "shares_outstanding_i_yoy"),
+        )
+        self.assertAlmostEqual(float(res.loc[0, "eps_diluted_q_value"]), 1.0, places=5)
+        self.assertAlmostEqual(
+            float(res.loc[1, "eps_diluted_ttm_value"]), 4.2, places=5
+        )
+        self.assertAlmostEqual(
+            float(res.loc[1, "shares_outstanding_i_yoy_value"]), 0.0, places=5
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

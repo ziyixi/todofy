@@ -886,6 +886,7 @@ def valuation(
             time_policy=time_policy,
             views=_VALUATION_REQUIRED_VIEWS,
             provenance=True,
+            split_adjust=False,
         )
         if need_derived
         else derived
