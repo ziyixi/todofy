@@ -25,8 +25,17 @@ def _select_at_anchors(matrix: np.ndarray, anchors: Anchors) -> np.ndarray:
 def _effective_level(prices: PriceStore) -> np.ndarray:
     tr = prices.channel("tr_index").astype(np.float64)
     adj = prices.channel("close_adj").astype(np.float64)
-    lvl = np.where(np.isfinite(tr) & (tr > 0), tr, adj)
+    has_tr = np.any(np.isfinite(tr) & (tr > 0), axis=1, keepdims=True)
+    lvl = np.where(has_tr, tr, adj)
     return np.where(np.isfinite(lvl) & (lvl > 0), lvl, np.nan)
+
+
+def _suspect_prefix(prices: PriceStore) -> np.ndarray:
+    susp = prices.channel("tr_suspect").astype(np.float64)
+    is_susp = (np.isfinite(susp) & (susp > 0.5)).astype(np.int32)
+    csus = np.zeros((is_susp.shape[0], is_susp.shape[1] + 1), dtype=np.int32)
+    np.cumsum(is_susp, axis=1, out=csus[:, 1:])
+    return csus
 
 
 def _rolling_mean(
@@ -139,6 +148,7 @@ def build_price_momentum_reversal(
     valid_lvl = np.isfinite(lvl) & (lvl > 0)
     ccnt = np.zeros((n_assets, n_sess + 1), dtype=np.int32)
     np.cumsum(valid_lvl.astype(np.int32), axis=1, out=ccnt[:, 1:])
+    csus = _suspect_prefix(prices)
 
     data: dict[str, np.ndarray] = {}
     for w in wins:
@@ -148,7 +158,15 @@ def build_price_momentum_reversal(
             p0 = lvl[:, :-w]
             req = w + 1 if w <= 21 else max(2, int(0.8 * (w + 1)))
             cnt = ccnt[:, w + 1 :] - ccnt[:, : -(w + 1)]
-            ok = (p1 > 0) & (p0 > 0) & np.isfinite(p1) & np.isfinite(p0) & (cnt >= req)
+            clean = (csus[:, w + 1 :] - csus[:, 1:-w]) == 0
+            ok = (
+                (p1 > 0)
+                & (p0 > 0)
+                & np.isfinite(p1)
+                & np.isfinite(p0)
+                & (cnt >= req)
+                & clean
+            )
             mat[:, w:][ok] = p1[ok] / p0[ok] - 1.0
         data[f"pmom_ret_{w}d"] = _select_at_anchors(mat, anchors)
 
@@ -158,12 +176,14 @@ def build_price_momentum_reversal(
             p1 = lvl[:, 231:-21]
             p0 = lvl[:, :-252]
             cnt = ccnt[:, 232:-21] - ccnt[:, :-253]
+            clean = (csus[:, 232:-21] - csus[:, 1:-252]) == 0
             ok = (
                 (p1 > 0)
                 & (p0 > 0)
                 & np.isfinite(p1)
                 & np.isfinite(p0)
                 & (cnt >= int(0.8 * 232))
+                & clean
             )
             mat[:, 252:][ok] = p1[ok] / p0[ok] - 1.0
         data["pmom_ret_252d_skip21d"] = _select_at_anchors(mat, anchors)
@@ -292,12 +312,20 @@ def build_price_range_anchor(
         lvl,
     )
 
+    csus = _suspect_prefix(prices)
+    n_sess = lvl.shape[1]
     data: dict[str, np.ndarray] = {}
     for w in (21, 252):
         rmax = _rolling_extrema(hi_tr, w, mode="max")
         rmin = _rolling_extrema(lo_tr, w, mode="min")
         d_hi = np.where((rmax > 0) & np.isfinite(lvl), lvl / rmax - 1.0, np.nan)
         d_lo = np.where((rmin > 0) & np.isfinite(lvl), lvl / rmin - 1.0, np.nan)
+        left_su = np.zeros_like(csus[:, 1:])
+        if n_sess >= w:
+            left_su[:, w - 1 :] = csus[:, 1 : n_sess - w + 2]
+        bad_win = (csus[:, 1:] - left_su) > 0
+        d_hi[bad_win] = np.nan
+        d_lo[bad_win] = np.nan
         data[f"prange_dist_high_{w}d"] = _select_at_anchors(d_hi, anchors)
         data[f"prange_dist_low_{w}d"] = _select_at_anchors(d_lo, anchors)
 
@@ -306,6 +334,10 @@ def build_price_range_anchor(
             continue
         ma = _rolling_mean(lvl, w, min_periods=max(5, int(0.75 * w)))
         gap = np.where((ma > 0) & np.isfinite(lvl), lvl / ma - 1.0, np.nan)
+        left_su = np.zeros_like(csus[:, 1:])
+        if n_sess >= w:
+            left_su[:, w - 1 :] = csus[:, 1 : n_sess - w + 2]
+        gap[(csus[:, 1:] - left_su) > 0] = np.nan
         data[f"prange_ma_gap_{w}d"] = _select_at_anchors(gap, anchors)
 
     return pd.DataFrame(data, index=anchors.frame.index)

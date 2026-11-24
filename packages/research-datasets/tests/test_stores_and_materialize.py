@@ -963,6 +963,134 @@ class StoresAndMaterializeAdversarialTest(unittest.TestCase):
             float(out["prange_dist_low_21d"].iloc[0]), 1.0 / 0.9 - 1.0, places=5
         )
 
+    def test_price_store_never_mixes_units_and_masks_adjustment_suspect(self) -> None:
+        from types import SimpleNamespace
+
+        from research_datasets.feature_groups import GroupBuildContext
+        from research_datasets.groups.price import (
+            build_price_momentum_reversal,
+            build_price_range_anchor,
+        )
+        from research_datasets.stores import Anchors, Stores
+
+        sessions = _nyse_sessions(date(2025, 1, 2), 30)
+        asset_mix = ASSET_1
+        asset_susp = "22222222-2222-4222-8222-222222222222"
+        all_rows = []
+        raw_rows = []
+        dr_rows = []
+        for idx, d in enumerate(sessions):
+            ds = d.isoformat()
+            # asset_mix: first 2 sessions have dollar close_adj=50 without daily_returns, then tr_index starts at 1.0
+            for aid in (asset_mix, asset_susp):
+                px = 50.0 if aid == asset_mix else (100.0 if idx < 25 else 50.0)
+                all_rows.append(
+                    {
+                        "asset_id": aid,
+                        "date": ds,
+                        "open": px,
+                        "high": px,
+                        "low": px,
+                        "close": px,
+                        "volume": 1000.0,
+                        "adjustment": "all",
+                    }
+                )
+                raw_rows.append(
+                    {
+                        "asset_id": aid,
+                        "date": ds,
+                        "open": px,
+                        "high": px,
+                        "low": px,
+                        "close": px,
+                        "volume": 1000.0,
+                        "adjustment": "raw",
+                    }
+                )
+            if idx >= 2:
+                dr_rows.append(
+                    {
+                        "asset_id": asset_mix,
+                        "date": ds,
+                        "row_kind": "first" if idx == 2 else "session",
+                        "tr_index": 1.0,
+                        "split_index": 1.0,
+                        "flags": [],
+                    }
+                )
+            dr_rows.append(
+                {
+                    "asset_id": asset_susp,
+                    "date": ds,
+                    "row_kind": "first" if idx == 0 else "session",
+                    "tr_index": 1.0 if idx < 25 else 0.25,
+                    "split_index": 1.0,
+                    "flags": ["adjustment_suspect"] if idx == 25 else [],
+                }
+            )
+
+        ver = _SyntheticVersion(
+            calendar=sessions,
+            universe=[
+                {"asset_id": asset_mix, "symbol": "MIX1", "cik": CIK_1},
+                {"asset_id": asset_susp, "symbol": "SUS1", "cik": "0000100002"},
+            ],
+            families={"daily_returns": pd.DataFrame(dr_rows)},
+            prices_adj=pd.DataFrame(all_rows),
+            prices_raw=pd.DataFrame(raw_rows),
+        )
+        pstore = build_price_store(ver, [asset_mix, asset_susp], sessions)
+        # No -98% (1.0/50.0 - 1) jump when tr_index begins on session 2!
+        self.assertTrue(np.isnan(pstore.channel("ret_1d")[0, 2]))
+        # adjustment_suspect blanks ret_1d on idx=25
+        self.assertTrue(np.isnan(pstore.channel("ret_1d")[1, 25]))
+
+        anc_df = pd.DataFrame(
+            {
+                "row_id": [0, 1],
+                "asset_id": [asset_susp, asset_susp],
+                "signal_session": [sessions[25].isoformat(), sessions[29].isoformat()],
+                "entry_session": [sessions[26].isoformat(), sessions[29].isoformat()],
+                "decision_at": [
+                    pd.Timestamp(sessions[25], tz="UTC"),
+                    pd.Timestamp(sessions[29], tz="UTC"),
+                ],
+                "in_universe": [True, True],
+                "is_benchmark": [False, False],
+                "asset_idx": [1, 1],
+                "session_idx": [25, 29],
+                "fund_snap_id": [-1, -1],
+                "event_start_cursor": [0, 0],
+                "event_end_cursor": [0, 0],
+            }
+        )
+        anchors = Anchors(
+            frame=anc_df,
+            order_sha256="test-b3",
+            assets=(asset_mix, asset_susp),
+            sessions=tuple(sessions),
+            time_policy="pit_v1",
+            sampling="weekly",
+        )
+        stores = Stores(
+            anchors=anchors, prices=pstore, fundamentals=None, events=None, macro=None
+        )
+        ctx = GroupBuildContext(
+            version=SimpleNamespace(calendar=sessions, manifest={"data_families": {}}),
+            stores=stores,
+            time_policy="pit_v1",
+        )
+        mom = build_price_momentum_reversal(ctx, {"windows": [1, 5, 21]})
+        rng = build_price_range_anchor(ctx, {"windows": [21, 252]})
+        self.assertTrue(np.isnan(mom["pmom_ret_1d"].iloc[0]))
+        self.assertTrue(np.isnan(mom["pmom_ret_5d"].iloc[0]))
+        self.assertTrue(np.isnan(mom["pmom_ret_21d"].iloc[1]))
+        self.assertTrue(np.isnan(rng["prange_ma_gap_21d"].iloc[1]))
+        self.assertTrue(np.isnan(rng["prange_dist_high_21d"].iloc[1]))
+        self.assertTrue(np.isnan(rng["prange_dist_low_21d"].iloc[1]))
+        self.assertFalse(np.isnan(mom["pmom_ret_1d"].iloc[1]))
+
     def test_fresh_import_populates_feature_groups(self) -> None:
         env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
         output = subprocess.check_output(
