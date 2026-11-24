@@ -28,14 +28,16 @@ export const GRAPHQL_MAX_BYTES = 1_000_000;
  * included); those values are not yet verified on the live account. On 2026-11-24 Paid billing-period
  * variables (`$billingDay`, `$billingStart`), `workersMonth.cpuTimeUs`, `doInv.namespaceId` (limit 100),
  * and `r2opsPaid` were added to measure Workers CPU ms and exclude cross-Worker Service Binding RPCs.
+ * Invocation status (`status`) was added to `workers` (limit 200) and `doInv` (limit 250) to split resource
+ * limits, client disconnects and script exceptions cleanly and weight `cpu_p50_us` across status buckets.
  */
 export const USAGE_QUERY = `query($a: string!, $day: Date!, $start: Time!, $end: Time!, $month: Date!, $billingDay: Date!, $billingStart: Time!) { viewer { accounts(filter: {accountTag: $a}) {
-  workers: workersInvocationsAdaptive(limit: 50, filter: {datetime_geq: $start, datetime_leq: $end}) { sum { requests errors subrequests } dimensions { scriptName } quantiles { cpuTimeP50 cpuTimeP99 } }
-  workersMonth: workersInvocationsAdaptive(limit: 50, filter: {datetime_geq: $billingStart, datetime_leq: $end}) { sum { requests cpuTimeUs } dimensions { scriptName } }
+  workers: workersInvocationsAdaptive(limit: 200, filter: {datetime_geq: $start, datetime_leq: $end}) { sum { requests errors subrequests } dimensions { scriptName status } quantiles { cpuTimeP50 cpuTimeP99 } }
+  workersMonth: workersInvocationsAdaptive(limit: 200, filter: {datetime_geq: $billingStart, datetime_leq: $end}) { sum { requests cpuTimeUs } dimensions { scriptName } }
   d1: d1AnalyticsAdaptiveGroups(limit: 10, filter: {date: $day}) { sum { rowsRead rowsWritten readQueries writeQueries } dimensions { databaseId } }
   d1Month: d1AnalyticsAdaptiveGroups(limit: 10, filter: {date_geq: $billingDay, date_leq: $day}) { sum { rowsRead rowsWritten } dimensions { databaseId } }
   d1s: d1StorageAdaptiveGroups(limit: 10, filter: {date: $day}) { max { databaseSizeBytes } dimensions { databaseId } }
-  doInv: durableObjectsInvocationsAdaptiveGroups(limit: 100, filter: {date: $day}) { sum { requests errors } dimensions { scriptName namespaceId } }
+  doInv: durableObjectsInvocationsAdaptiveGroups(limit: 250, filter: {date: $day}) { sum { requests errors } dimensions { scriptName namespaceId status } }
   doInvMonth: durableObjectsInvocationsAdaptiveGroups(limit: 100, filter: {date_geq: $billingDay, date_leq: $day}) { sum { requests } dimensions { scriptName namespaceId } }
   doPer: durableObjectsPeriodicGroups(limit: 25, filter: {date: $day}) { sum { activeTime rowsRead rowsWritten cpuTime storageDeletes storageReadUnits storageWriteUnits } dimensions { namespaceId } }
   doPerMonth: durableObjectsPeriodicGroups(limit: 25, filter: {date_geq: $billingDay, date_leq: $day}) { sum { activeTime rowsRead rowsWritten } dimensions { namespaceId } }
@@ -51,7 +53,7 @@ export const DATASET_LIMITS = {
   workers: WORKERS_QUERY_LIMIT,
   d1: 10,
   d1s: 10,
-  doInv: 100,
+  doInv: 250,
   doPer: 25,
   doSto: 5,
   r2ops: 250,
@@ -103,6 +105,13 @@ export interface ScriptUsage {
   /** From `doInv` by scriptName; null when the script had no Durable Object invocations. */
   readonly do_requests: number | null;
   readonly do_errors: number | null;
+  /** Optional non-`ok` invocation counts split by Analytics `status` (omitted when 0). */
+  readonly exceeded_resources?: number;
+  readonly client_disconnected?: number;
+  readonly script_exception?: number;
+  readonly do_exceeded_resources?: number;
+  readonly do_client_disconnected?: number;
+  readonly do_script_exception?: number;
 }
 
 /** Per-resource rows of the same response, keyed by the GraphQL identifier. */
@@ -545,44 +554,105 @@ interface ScriptAcc {
   requests: number;
   errors: number;
   subrequests: number;
-  cpu_p50_us: number | null;
+  p50_weighted_sum: number;
+  p50_weight: number;
   cpu_p99_us: number | null;
   do_requests: number | null;
   do_errors: number | null;
+  exceeded_resources: number;
+  client_disconnected: number;
+  script_exception: number;
+  do_exceeded_resources: number;
+  do_client_disconnected: number;
+  do_script_exception: number;
 }
 
 const maxOrNull = (a: number | null, b: number | null): number | null => (a === null ? b : b === null ? a : Math.max(a, b));
 
+function statusBucket(status: string): 'ok' | 'exceeded_resources' | 'client_disconnected' | 'script_exception' | null {
+  if (status === UNKNOWN_DIMENSION) return null;
+  if (status === 'ok') return 'ok';
+  if (status === 'exceededResources' || status === 'exceededCpu' || status === 'exceededMemory') return 'exceeded_resources';
+  if (status === 'clientDisconnected') return 'client_disconnected';
+  return 'script_exception';
+}
+
 /**
- * Per-script rows: `workers` (one row per scriptName; a repeated name is summed, its quantiles take the
- * larger value) joined with `doInv` by scriptName. A script only in `doInv` (a class whose Worker gets
- * no requests of its own, such as todofy-core) is kept with 0 Worker requests.
+ * Per-script rows: `workers` (repeated scriptName/status slices summed; p50 is request-weighted across
+ * slices reporting p50 so a tiny error slice does not distort the median, while p99 keeps the maximum)
+ * joined with `doInv` by scriptName. A script only in `doInv` (a class whose Worker gets no requests
+ * of its own, such as todofy-core) is kept with 0 Worker requests.
  */
 function parseScripts(workers: readonly unknown[], doInv: readonly unknown[]): ScriptUsage[] {
   const acc = new Map<string, ScriptAcc>();
   const get = (script: string): ScriptAcc => {
     let entry = acc.get(script);
     if (entry === undefined) {
-      entry = { requests: 0, errors: 0, subrequests: 0, cpu_p50_us: null, cpu_p99_us: null, do_requests: null, do_errors: null };
+      entry = {
+        requests: 0,
+        errors: 0,
+        subrequests: 0,
+        p50_weighted_sum: 0,
+        p50_weight: 0,
+        cpu_p99_us: null,
+        do_requests: null,
+        do_errors: null,
+        exceeded_resources: 0,
+        client_disconnected: 0,
+        script_exception: 0,
+        do_exceeded_resources: 0,
+        do_client_disconnected: 0,
+        do_script_exception: 0,
+      };
       acc.set(script, entry);
     }
     return entry;
   };
   for (const row of workers) {
     const entry = get(dimension(row, 'scriptName'));
-    entry.requests += field(row, 'sum', 'requests');
-    entry.errors += field(row, 'sum', 'errors');
+    const req = field(row, 'sum', 'requests');
+    const err = field(row, 'sum', 'errors');
+    entry.requests += req;
+    entry.errors += err;
     entry.subrequests += field(row, 'sum', 'subrequests');
-    entry.cpu_p50_us = maxOrNull(entry.cpu_p50_us, optional(row, 'quantiles', 'cpuTimeP50'));
+    const p50 = optional(row, 'quantiles', 'cpuTimeP50');
+    if (p50 !== null) {
+      const weight = req > 0 ? req : 1;
+      entry.p50_weighted_sum += p50 * weight;
+      entry.p50_weight += weight;
+    }
     entry.cpu_p99_us = maxOrNull(entry.cpu_p99_us, optional(row, 'quantiles', 'cpuTimeP99'));
+    const bucket = statusBucket(dimension(row, 'status'));
+    if (bucket !== null && bucket !== 'ok') entry[bucket] += req > 0 ? req : err;
   }
   for (const row of doInv) {
     const entry = get(dimension(row, 'scriptName'));
-    entry.do_requests = (entry.do_requests ?? 0) + field(row, 'sum', 'requests');
-    entry.do_errors = (entry.do_errors ?? 0) + field(row, 'sum', 'errors');
+    const req = field(row, 'sum', 'requests');
+    const err = field(row, 'sum', 'errors');
+    entry.do_requests = (entry.do_requests ?? 0) + req;
+    entry.do_errors = (entry.do_errors ?? 0) + err;
+    const bucket = statusBucket(dimension(row, 'status'));
+    if (bucket === 'exceeded_resources') entry.do_exceeded_resources += req > 0 ? req : err;
+    else if (bucket === 'client_disconnected') entry.do_client_disconnected += req > 0 ? req : err;
+    else if (bucket === 'script_exception') entry.do_script_exception += req > 0 ? req : err;
   }
   return [...acc]
-    .map(([script, v]) => ({ script, ...v }))
+    .map(([script, v]): ScriptUsage => ({
+      script,
+      requests: v.requests,
+      errors: v.errors,
+      subrequests: v.subrequests,
+      cpu_p50_us: v.p50_weight > 0 ? Math.round(v.p50_weighted_sum / v.p50_weight) : null,
+      cpu_p99_us: v.cpu_p99_us,
+      do_requests: v.do_requests,
+      do_errors: v.do_errors,
+      ...(v.exceeded_resources > 0 ? { exceeded_resources: v.exceeded_resources } : {}),
+      ...(v.client_disconnected > 0 ? { client_disconnected: v.client_disconnected } : {}),
+      ...(v.script_exception > 0 ? { script_exception: v.script_exception } : {}),
+      ...(v.do_exceeded_resources > 0 ? { do_exceeded_resources: v.do_exceeded_resources } : {}),
+      ...(v.do_client_disconnected > 0 ? { do_client_disconnected: v.do_client_disconnected } : {}),
+      ...(v.do_script_exception > 0 ? { do_script_exception: v.do_script_exception } : {}),
+    }))
     .sort((a, b) => b.requests - a.requests || (b.do_requests ?? 0) - (a.do_requests ?? 0) || a.script.localeCompare(b.script));
 }
 

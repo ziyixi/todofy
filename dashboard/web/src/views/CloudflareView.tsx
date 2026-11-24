@@ -122,10 +122,21 @@ function UsageNotices({ data, now }: { data: CloudflareViewData; now: Date }) {
   )
 }
 
+function statusParts(exceeded?: number, disconnected?: number, exception?: number): string[] {
+  const parts: string[] = []
+  if (exceeded !== undefined && exceeded > 0) parts.push(`超资源 ${formatNumber(exceeded)}`)
+  if (disconnected !== undefined && disconnected > 0) parts.push(`断开 ${formatNumber(disconnected)}`)
+  if (exception !== undefined && exception > 0) parts.push(`异常 ${formatNumber(exception)}`)
+  return parts
+}
+
 function errorCell(row: WorkerRow): { text: string; note: string | null } {
   const text = `${formatNumber(row.errors)}${row.error_percent === null ? '' : ` · ${formatPercent(row.error_percent)}`}`
-  if (row.error_percent === null && row.requests > 0) return { text, note: `样本太少（< ${ERROR_RATE_MIN_REQUESTS} 次），不判定` }
-  return { text, note: null }
+  const statuses = statusParts(row.exceeded_resources, row.client_disconnected, row.script_exception)
+  const notes: string[] = []
+  if (statuses.length > 0) notes.push(statuses.join(' · '))
+  if (row.error_percent === null && row.requests > 0) notes.push(`样本太少（< ${ERROR_RATE_MIN_REQUESTS} 次），不判定`)
+  return { text, note: notes.length > 0 ? notes.join('；') : null }
 }
 
 function CpuCell({ row, plan }: { row: WorkerRow; plan: QuotaPlan }) {
@@ -329,7 +340,11 @@ function WorkersTable({ reg, data, focus, now, plan }: { reg: Reg; data: Cloudfl
                     </td>
                     <td role="cell" data-label="DO 请求" className="num">
                       {row.do_requests === null ? '—' : formatNumber(row.do_requests)}
-                      {row.do_errors ? <span className="small muted cell-note">错误 {formatNumber(row.do_errors)}</span> : null}
+                      {(() => {
+                        const doStatuses = statusParts(row.do_exceeded_resources, row.do_client_disconnected, row.do_script_exception)
+                        if (doStatuses.length > 0) return <span className="small muted cell-note">{doStatuses.join(' · ')}</span>
+                        return row.do_errors ? <span className="small muted cell-note">错误 {formatNumber(row.do_errors)}</span> : null
+                      })()}
                     </td>
                     <td role="cell" data-label="最近有请求">
                       {lastActive(row, now)}

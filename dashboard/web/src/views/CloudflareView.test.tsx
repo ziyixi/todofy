@@ -572,4 +572,40 @@ describe('Cloudflare 监控', () => {
     expect(within(quota).getByText(/Workers \/ Durable Objects 会被消费上限全部拦截到账期结束/)).toBeInTheDocument()
     expect(within(quota).getByText(/已按命名空间归属剔除跨 Worker 的 Service Binding 调用/)).toBeInTheDocument()
   })
+
+  it('renders non-ok invocation status counts for Workers and Durable Objects', async () => {
+    const base = healthy()
+    await showCloudflare({
+      ...base,
+      cloudflare: {
+        ...base.cloudflare,
+        workers: [
+          {
+            script: 'model-router',
+            entry: 'model-router',
+            requests: 500,
+            errors: 5,
+            error_percent: 1,
+            level: 'ok',
+            subrequests: 12,
+            cpu_p50_us: 900,
+            cpu_p99_us: 4000,
+            do_requests: 120,
+            do_errors: 3,
+            first_seen_day: '2026-09-01',
+            last_seen_day: '2026-09-29',
+            last_active_hour: null,
+            exceeded_resources: 2,
+            client_disconnected: 1,
+            script_exception: 2,
+            do_exceeded_resources: 1,
+            do_script_exception: 2,
+          },
+        ],
+      },
+    })
+    const row = document.getElementById('worker-model-router') as HTMLElement
+    expect(within(row).getAllByText('超资源 2 · 断开 1 · 异常 2').length).toBeGreaterThanOrEqual(1)
+    expect(within(row).getByText('超资源 1 · 异常 2')).toBeInTheDocument()
+  })
 })

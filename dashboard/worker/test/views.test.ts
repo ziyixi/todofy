@@ -203,6 +203,32 @@ describe('the views', () => {
     expect(view.do_storage_bytes).toBeNull();
     expect(view.workers_truncated).toBe(false);
     expect(bytes(view)).toBeLessThanOrEqual(VIEW_BODY_BUDGET.cloudflare);
+
+    // Non-ok status breakdown fields conform byte-for-byte with dashboard.ui.v1.
+    if (count > 0) {
+      const docScripts = scripts(usage);
+      const withStatuses: CfScriptsDoc = {
+        ...docScripts,
+        scripts: docScripts.scripts.map((s, idx) =>
+          idx === 0
+            ? {
+                ...s,
+                today: {
+                  ...s.today,
+                  exceeded_resources: 2,
+                  client_disconnected: 1,
+                  script_exception: 3,
+                  do_exceeded_resources: 1,
+                  do_client_disconnected: 4,
+                  do_script_exception: 2,
+                },
+              }
+            : s,
+        ),
+      };
+      const cfWithStatus = cloudflareView(base(), NOW, usageView(usage), doc, withStatuses, GUARD, DRIFT_OK);
+      expect(cfWithStatus.workers.some((w) => w.exceeded_resources === 2 && w.do_client_disconnected === 4)).toBe(true);
+    }
   });
 
   it('ops: guard, the canary with its id, the digest and every ops-v1 app in registry order', () => {

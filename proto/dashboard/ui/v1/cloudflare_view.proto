@@ -278,6 +278,18 @@ message WorkerRow {
     (google.api.field_behavior) = REQUIRED,
     (common.wire.v1.field).format = "Timestamp"
   ];
+  // Worker invocations terminated by resource limits today; omitted when 0 or unmeasured.
+  optional double exceeded_resources = 15;
+  // Worker invocations where the client disconnected today; omitted when 0 or unmeasured.
+  optional double client_disconnected = 16;
+  // Worker invocations failing with an exception or other non-ok status today; omitted when 0 or unmeasured.
+  optional double script_exception = 17;
+  // Durable Object invocations terminated by resource limits today; omitted when 0 or unmeasured.
+  optional double do_exceeded_resources = 18;
+  // Durable Object invocations or alarms disconnected today; omitted when 0 or unmeasured.
+  optional double do_client_disconnected = 19;
+  // Durable Object invocations failing with an exception or other non-ok status today; omitted when 0 or unmeasured.
+  optional double do_script_exception = 20;
 }
 
 // A storage resource measured today: a D1 database, a Durable Object namespace or an R2 bucket.

@@ -136,6 +136,12 @@ export function workerRows(doc: CfScriptsDoc | null, now: number, registry: Regi
         first_seen_day: record.first_seen_day,
         last_seen_day: record.last_seen_day,
         last_active_hour: isoOrNull(record.last_active_hour),
+        ...((today.exceeded_resources ?? 0) > 0 ? { exceeded_resources: today.exceeded_resources } : {}),
+        ...((today.client_disconnected ?? 0) > 0 ? { client_disconnected: today.client_disconnected } : {}),
+        ...((today.script_exception ?? 0) > 0 ? { script_exception: today.script_exception } : {}),
+        ...((today.do_exceeded_resources ?? 0) > 0 ? { do_exceeded_resources: today.do_exceeded_resources } : {}),
+        ...((today.do_client_disconnected ?? 0) > 0 ? { do_client_disconnected: today.do_client_disconnected } : {}),
+        ...((today.do_script_exception ?? 0) > 0 ? { do_script_exception: today.do_script_exception } : {}),
       };
     })
     .sort((a, b) => b.errors - a.errors || b.requests - a.requests || (b.do_requests ?? 0) - (a.do_requests ?? 0) || a.script.localeCompare(b.script));
