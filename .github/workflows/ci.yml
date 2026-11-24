@@ -25,7 +25,7 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   CI: 'true'
@@ -166,11 +166,14 @@ jobs:
           key: bazel-9.3.1-${{ runner.os }}-repository-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}
           restore-keys: |
             bazel-9.3.1-${{ runner.os }}-repository-
+      - name: Cache bucket (UTC ISO week)
+        id: cache-bucket
+        run: printf 'week=%s\n' "$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: action-cache
         with:
           path: ~/.cache/personal-cloud-bazel/actions
-          key: bazel-9.3.1-${{ runner.os }}-${{ matrix.cache }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-${{ github.sha }}
+          key: bazel-9.3.1-${{ runner.os }}-${{ matrix.cache }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-${{ steps.cache-bucket.outputs.week }}
           restore-keys: |
             bazel-9.3.1-${{ runner.os }}-${{ matrix.cache }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-
             bazel-9.3.1-${{ runner.os }}-${{ matrix.cache }}-
@@ -255,14 +258,42 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  private-prep:
+    name: Prepare private verification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      private_sha: ${{ steps.private.outputs.sha }}
+      base: ${{ steps.baseline.outputs.base }}
+      private_verified: ${{ steps.baseline.outputs.private_verified }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Read the pinned private revision
+        id: private
+        run: |
+          revision=$(git ls-tree HEAD private | awk '$1 == "160000" {print $3}')
+          printf 'sha=%s\n' "$revision" >> "$GITHUB_OUTPUT"
+      - name: Resolve cumulative base and same-SHA verification
+        id: baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/bazel/ci/releases.py baseline
+
   private:
     name: Private Bazel
-    needs: changes
-    if: github.repository == 'ziyixi/todofy' && needs.changes.outputs.private_sha != ''
+    needs: private-prep
+    if: github.repository == 'ziyixi/todofy' && needs.private-prep.outputs.private_sha != ''
     uses: ./.github/workflows/private-check.yml
     with:
-      revision: ${{ needs.changes.outputs.private_sha }}
-      base: ${{ needs.changes.outputs.base }}
+      revision: ${{ needs.private-prep.outputs.private_sha }}
+      base: ${{ needs.private-prep.outputs.base }}
+      verified: ${{ needs.private-prep.outputs.private_verified == 'true' }}
     secrets:
       private_ssh_key: ${{ secrets.TODOFY_PRIVATE_SSH_KEY }}
     permissions:
@@ -271,11 +302,11 @@ jobs:
 
   private-home-artifact:
     name: Build Home artifact for private publication
-    needs: [changes, private]
+    needs: [changes]
     if: >-
       ${{ needs.changes.result == 'success'
-      && needs.private.result == 'success'
-      && needs.private.outputs.release_required == 'true'
+      && github.ref == 'refs/heads/main'
+      && needs.changes.outputs.private_sha != ''
       && needs.changes.outputs.dashboard_deploy != 'true'
       && (github.event_name == 'push'
         || (github.event_name == 'workflow_dispatch' && inputs.app == 'all' && !inputs.resume_vps_release)) }}
@@ -305,7 +336,7 @@ jobs:
 
   gate:
     name: CI gate
-    needs: [changes, checks, artifacts, private, private-home-artifact]
+    needs: [changes, checks, artifacts, private-prep, private, private-home-artifact]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -317,12 +348,14 @@ jobs:
           ARTIFACTS: ${{ needs.artifacts.result }}
           HAS_CHECKS: ${{ needs.changes.outputs.has_checks }}
           HAS_ARTIFACTS: ${{ needs.changes.outputs.has_artifacts }}
+          PRIVATE_PREP: ${{ needs.private-prep.result }}
           PRIVATE: ${{ needs.private.result }}
-          HAS_PRIVATE: ${{ github.repository == 'ziyixi/todofy' && needs.changes.outputs.private_sha != '' }}
+          HAS_PRIVATE: ${{ github.repository == 'ziyixi/todofy' && needs.private-prep.outputs.private_sha != '' }}
           PRIVATE_HOME_ARTIFACT: ${{ needs.private-home-artifact.result }}
-          HAS_PRIVATE_HOME_ARTIFACT: ${{ needs.private.outputs.release_required == 'true' && needs.changes.outputs.dashboard_deploy != 'true' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.app == 'all' && !inputs.resume_vps_release)) }}
+          HAS_PRIVATE_HOME_ARTIFACT: ${{ github.ref == 'refs/heads/main' && needs.changes.outputs.private_sha != '' && needs.changes.outputs.dashboard_deploy != 'true' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.app == 'all' && !inputs.resume_vps_release)) }}
         run: |
           test "$CHANGES" = success
+          test "$PRIVATE_PREP" = success
           if [ "$HAS_CHECKS" = true ]; then test "$CHECKS" = success; fi
           if [ "$HAS_ARTIFACTS" = true ]; then test "$ARTIFACTS" = success; fi
           if [ "$HAS_PRIVATE" = true ]; then test "$PRIVATE" = success; fi

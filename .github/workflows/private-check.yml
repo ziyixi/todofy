@@ -9,6 +9,10 @@ on:
       base:
         type: string
         required: true
+      verified:
+        type: boolean
+        required: false
+        default: false
     outputs:
       release_required:
         description: Whether the pinned private release inputs changed
@@ -21,8 +25,8 @@ permissions:
   contents: read
 
 jobs:
-  check:
-    name: Build and test pinned private sources
+  plan:
+    name: Plan and check private targets
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     # packages: the storage v4 rollback drill pulls a pinned private image.
@@ -31,6 +35,9 @@ jobs:
       packages: read
     outputs:
       release_required: ${{ steps.plan.outputs.release_required }}
+      build_required: ${{ steps.plan.outputs.build_required }}
+      run_mode: ${{ steps.plan.outputs.run_mode }}
+      shard_matrix: ${{ steps.plan.outputs.shard_matrix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -113,35 +120,194 @@ jobs:
             bazel-9.3.1-${{ runner.os }}-python-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-
             bazel-9.3.1-${{ runner.os }}-workerd-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-
             bazel-9.3.1-${{ runner.os }}-node-
-      # Bazel names every private target and prints failing test logs, so its output stays on the runner.
-      - name: Build and test private targets
-        run: |
-          options=("--repository_cache=$HOME/.cache/personal-cloud-bazel/repository" "--disk_cache=$HOME/.cache/personal-cloud-bazel/actions")
-          log="$RUNNER_TEMP/private-bazel.log"
-          if ! bazel build @private//:private "${options[@]}" > "$log" 2>&1; then
-            echo "::error::PRIVATE_BUILD_FAILED"
-            exit 1
-          fi
-          if ! bazel test @private//:check "${options[@]}" >> "$log" 2>&1; then
-            echo "::error::PRIVATE_TEST_FAILED"
-            # Name each failed target only by a short hash of its label; docs/ci-cd.md shows how to map it back locally.
-            grep -E '^@{1,2}[^/ ]*//[^ ]+ +(FAILED|TIMEOUT|NO STATUS|INCOMPLETE)' "$log" | while read -r label status _; do
-              label=${label#@}; label=${label#@}
-              echo "PRIVATE_TEST_${status} $(printf '%s' "$label" | sha256sum | cut -c1-10)"
-            done || true
-            exit 1
-          fi
-      # Run the pinned private rollback check; its output and configuration stay behind private/ci.
-      - name: Run the pinned rollback drill
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 private/ci/rollback_drill.py
-      - name: Select the pinned private release inputs
+      - name: Select the pinned private checks and release inputs
         id: plan
         env:
           BASE_SHA: ${{ inputs.base }}
         run: |
-          if ! python3 private/ci/plan.py --base "$BASE_SHA" --github-output "$GITHUB_OUTPUT" > "$RUNNER_TEMP/private-plan.log" 2>&1; then
+          if ! python3 private/ci/plan.py --base "$BASE_SHA" --github-output "$GITHUB_OUTPUT" --plan-checks --targets-output "$RUNNER_TEMP/private-targets.txt" > "$RUNNER_TEMP/private-plan.log" 2>&1; then
             echo "::error::PRIVATE_PLAN_FAILED"
             exit 1
+          fi
+          printf 'PRIVATE_PLAN_SUMMARY mode=%s count=%s total=%s release=%s verified=%s\n' \
+            "$(awk -F= '$1=="run_mode"{v=$2} END{print v}' "$GITHUB_OUTPUT")" \
+            "$(awk -F= '$1=="test_count"{v=$2} END{print v}' "$GITHUB_OUTPUT")" \
+            "$(awk -F= '$1=="total_test_count"{v=$2} END{print v}' "$GITHUB_OUTPUT")" \
+            "$(awk -F= '$1=="release_required"{v=$2} END{print v}' "$GITHUB_OUTPUT")" \
+            "${{ inputs.verified }}"
+      # Bazel names every private target and prints failing test logs, so its output stays on the runner.
+      - name: Build and test private targets
+        if: ${{ !inputs.verified && steps.plan.outputs.run_mode == 'single' }}
+        env:
+          BUILD_REQUIRED: ${{ steps.plan.outputs.build_required }}
+        run: |
+          options=("--repository_cache=$HOME/.cache/personal-cloud-bazel/repository" "--disk_cache=$HOME/.cache/personal-cloud-bazel/actions")
+          log="$RUNNER_TEMP/private-bazel.log"
+          if [ "$BUILD_REQUIRED" = true ]; then
+            t0=$(date +%s)
+            if ! bazel build @private//:private "${options[@]}" > "$log" 2>&1; then
+              echo "::error::PRIVATE_BUILD_FAILED"
+              exit 1
+            fi
+            echo "PRIVATE_BUILD_SECONDS=$(($(date +%s) - t0))"
+          fi
+          if [ -s "$RUNNER_TEMP/private-targets.txt" ]; then
+            t1=$(date +%s)
+            if ! bazel test --target_pattern_file="$RUNNER_TEMP/private-targets.txt" "${options[@]}" >> "$log" 2>&1; then
+              echo "::error::PRIVATE_TEST_FAILED"
+              grep -E '^@{1,2}[^/ ]*//[^ ]+ +(FAILED|TIMEOUT|NO STATUS|INCOMPLETE)' "$log" | while read -r label status _; do
+                label=${label#@}; label=${label#@}
+                echo "PRIVATE_TEST_${status} $(printf '%s' "$label" | sha256sum | cut -c1-10)"
+              done || true
+              exit 1
+            fi
+            echo "PRIVATE_TEST_SECONDS=$(($(date +%s) - t1))"
+            grep -E 'Executed [0-9]+ out of [0-9]+ tests' "$log" | tail -n 1 || true
+          fi
+      # Run the pinned private rollback check; its output and configuration stay behind private/ci.
+      - name: Run the pinned rollback drill
+        if: ${{ !inputs.verified && steps.plan.outputs.run_mode == 'single' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 private/ci/rollback_drill.py
+
+  shards:
+    name: Test private targets shard ${{ matrix.shard }}
+    needs: plan
+    if: ${{ !inputs.verified && needs.plan.outputs.run_mode == 'sharded' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.shard_matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Read the baseline private revision
+        id: baseline
+        env:
+          BASE_SHA: ${{ inputs.base }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          import subprocess
+
+          base = os.environ["BASE_SHA"]
+          revision = ""
+          if base and re.fullmatch(r"[0-9a-f]{40}", base):
+              result = subprocess.run(["git", "ls-tree", base, "private"], capture_output=True, text=True)
+              entry = result.stdout.split()
+              if result.returncode == 0 and len(entry) == 4 and entry[:2] == ["160000", "commit"] and entry[3] == "private" and re.fullmatch(r"[0-9a-f]{40}", entry[2]):
+                  revision = entry[2]
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write("revision=" + revision + "\n")
+          PY
+      - uses: ./.github/actions/private-checkout
+        with:
+          revision: ${{ inputs.revision }}
+          path: private
+          ssh-key: ${{ secrets.private_ssh_key }}
+          history: ancestry
+      - uses: ./.github/actions/private-checkout
+        if: steps.baseline.outputs.revision != '' && steps.baseline.outputs.revision != inputs.revision
+        with:
+          revision: ${{ steps.baseline.outputs.revision }}
+          path: .private-baseline
+          ssh-key: ${{ secrets.private_ssh_key }}
+          history: ancestry
+      - name: Import the pinned baseline ancestry locally
+        if: steps.baseline.outputs.revision != '' && steps.baseline.outputs.revision != inputs.revision
+        env:
+          BASE_PRIVATE_REVISION: ${{ steps.baseline.outputs.revision }}
+        run: |
+          if ! git -C private -c protocol.file.allow=always fetch --quiet --no-tags ../.private-baseline "$BASE_PRIVATE_REVISION" > "$RUNNER_TEMP/private-baseline.log" 2>&1; then
+            echo "::error::PRIVATE_BASE_FETCH_FAILED"
+            exit 1
+          fi
+      - uses: ./.github/actions/setup-bazel
+      - name: Install fixed Target Determinator
+        run: |
+          curl -fsSL https://github.com/bazel-contrib/target-determinator/releases/download/v0.34.0/target-determinator.linux.amd64 -o "$RUNNER_TEMP/bazel-tools/target-determinator"
+          echo "115e1c63d39e2cd0d0b011c9fadc80f059f021176a4ae0de2232cdd83b1f8011  $RUNNER_TEMP/bazel-tools/target-determinator" | sha256sum --check --status
+          chmod +x "$RUNNER_TEMP/bazel-tools/target-determinator"
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/personal-cloud-bazel/repository
+          key: bazel-9.3.1-${{ runner.os }}-repository-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}
+          restore-keys: |
+            bazel-9.3.1-${{ runner.os }}-repository-
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/personal-cloud-bazel/actions
+          key: bazel-9.3.1-${{ runner.os }}-node-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-${{ github.sha }}
+          restore-keys: |
+            bazel-9.3.1-${{ runner.os }}-node-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-
+            bazel-9.3.1-${{ runner.os }}-python-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-
+            bazel-9.3.1-${{ runner.os }}-workerd-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', 'pnpm-lock.yaml', 'uv.lock') }}-
+            bazel-9.3.1-${{ runner.os }}-node-
+      - name: Build and test private targets shard
+        env:
+          BASE_SHA: ${{ inputs.base }}
+          SHARD_INDEX: ${{ matrix.shard }}
+          SHARD_COUNT: ${{ matrix.shards }}
+          BUILD_REQUIRED: ${{ needs.plan.outputs.build_required }}
+        run: |
+          if ! python3 private/ci/plan.py --base "$BASE_SHA" --plan-checks --shard-index "$SHARD_INDEX" --shard-count "$SHARD_COUNT" --targets-output "$RUNNER_TEMP/private-targets.txt" --github-output /dev/null > "$RUNNER_TEMP/private-plan.log" 2>&1; then
+            echo "::error::PRIVATE_PLAN_FAILED"
+            exit 1
+          fi
+          options=("--repository_cache=$HOME/.cache/personal-cloud-bazel/repository" "--disk_cache=$HOME/.cache/personal-cloud-bazel/actions")
+          log="$RUNNER_TEMP/private-bazel.log"
+          if [ "$SHARD_INDEX" -eq 0 ] && [ "$BUILD_REQUIRED" = true ]; then
+            t0=$(date +%s)
+            if ! bazel build @private//:private "${options[@]}" > "$log" 2>&1; then
+              echo "::error::PRIVATE_BUILD_FAILED"
+              exit 1
+            fi
+            echo "PRIVATE_BUILD_SECONDS=$(($(date +%s) - t0))"
+          fi
+          if [ -s "$RUNNER_TEMP/private-targets.txt" ]; then
+            t1=$(date +%s)
+            if ! bazel test --target_pattern_file="$RUNNER_TEMP/private-targets.txt" "${options[@]}" >> "$log" 2>&1; then
+              echo "::error::PRIVATE_TEST_FAILED"
+              grep -E '^@{1,2}[^/ ]*//[^ ]+ +(FAILED|TIMEOUT|NO STATUS|INCOMPLETE)' "$log" | while read -r label status _; do
+                label=${label#@}; label=${label#@}
+                echo "PRIVATE_TEST_${status} $(printf '%s' "$label" | sha256sum | cut -c1-10)"
+              done || true
+              exit 1
+            fi
+            echo "PRIVATE_SHARD_${SHARD_INDEX}_TEST_SECONDS=$(($(date +%s) - t1))"
+            grep -E 'Executed [0-9]+ out of [0-9]+ tests' "$log" | tail -n 1 || true
+          fi
+      - name: Run the pinned rollback drill
+        if: matrix.shard == 0
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 private/ci/rollback_drill.py
+
+  check:
+    name: Build and test pinned private sources
+    needs: [plan, shards]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      release_required: ${{ needs.plan.outputs.release_required }}
+    steps:
+      - name: Require planned private checks
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          SHARDS_RESULT: ${{ needs.shards.result }}
+          RUN_MODE: ${{ needs.plan.outputs.run_mode }}
+          VERIFIED: ${{ inputs.verified }}
+        run: |
+          test "$PLAN_RESULT" = success
+          if [ "$VERIFIED" != true ] && [ "$RUN_MODE" = sharded ]; then
+            test "$SHARDS_RESULT" = success
           fi

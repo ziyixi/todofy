@@ -2,7 +2,14 @@
 
 import unittest
 
-from releases import job_name, outputs, reusable_artifacts, select, successful_main_base
+from releases import (
+    job_name,
+    outputs,
+    reusable_artifacts,
+    reusable_private_check,
+    select,
+    successful_main_base,
+)
 
 
 def release(app, kind="worker", target=None):
@@ -189,6 +196,64 @@ class ReleaseTests(unittest.TestCase):
 
         self.assertEqual(
             successful_main_base(["newer", "older"], "owner/repo", "99", get), "older"
+        )
+
+    def test_reusable_private_check_accepts_only_green_exact_sha_branch_run(self):
+        sha = "a" * 40
+
+        def get(path):
+            if path.endswith("/runs/99"):
+                return {"workflow_id": 7}
+            if "/workflows/7/runs?" in path:
+                return {
+                    "workflow_runs": [
+                        {
+                            "id": 41,
+                            "head_sha": "b" * 40,
+                            "head_branch": "feat/old",
+                            "event": "push",
+                            "workflow_id": 7,
+                            "conclusion": "success",
+                        },
+                        {
+                            "id": 99,
+                            "head_sha": sha,
+                            "head_branch": "main",
+                            "event": "push",
+                            "workflow_id": 7,
+                            "conclusion": "success",
+                        },
+                        {
+                            "id": 42,
+                            "head_sha": sha,
+                            "head_branch": "feat/ready",
+                            "event": "push",
+                            "workflow_id": 7,
+                            "conclusion": "success",
+                        },
+                    ]
+                }
+            return {
+                "jobs": [
+                    {"name": "CI gate", "status": "completed", "conclusion": "success"},
+                    {
+                        "name": "Private Bazel / Build and test pinned private sources",
+                        "status": "completed",
+                        "conclusion": "success",
+                    },
+                ]
+            }
+
+        self.assertTrue(reusable_private_check("owner/repo", "99", sha, get))
+
+        def missing_private_job(path):
+            data = get(path)
+            if "jobs" in data:
+                data["jobs"][1]["conclusion"] = "skipped"
+            return data
+
+        self.assertFalse(
+            reusable_private_check("owner/repo", "99", sha, missing_private_job)
         )
 
 

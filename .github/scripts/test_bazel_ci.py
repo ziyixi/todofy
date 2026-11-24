@@ -46,7 +46,14 @@ class BazelCI(unittest.TestCase):
         gate = self.jobs["gate"]
         self.assertEqual(
             set(gate["needs"]),
-            {"changes", "checks", "artifacts", "private", "private-home-artifact"},
+            {
+                "changes",
+                "private-prep",
+                "checks",
+                "artifacts",
+                "private",
+                "private-home-artifact",
+            },
         )
         script = gate["steps"][0]["run"]
         for checks, artifacts, private, expected in (
@@ -65,6 +72,7 @@ class BazelCI(unittest.TestCase):
                     env={
                         **os.environ,
                         "CHANGES": "success",
+                        "PRIVATE_PREP": "success",
                         "CHECKS": checks,
                         "ARTIFACTS": artifacts,
                         "HAS_CHECKS": "true",
@@ -83,6 +91,7 @@ class BazelCI(unittest.TestCase):
                 env={
                     **os.environ,
                     "CHANGES": "success",
+                    "PRIVATE_PREP": "success",
                     "CHECKS": "skipped",
                     "ARTIFACTS": "skipped",
                     "HAS_CHECKS": "false",
@@ -103,6 +112,7 @@ class BazelCI(unittest.TestCase):
                     env={
                         **os.environ,
                         "CHANGES": "success",
+                        "PRIVATE_PREP": "success",
                         "CHECKS": "success",
                         "ARTIFACTS": "success",
                         "HAS_CHECKS": "true",
@@ -115,14 +125,34 @@ class BazelCI(unittest.TestCase):
                     check=False,
                 )
                 self.assertNotEqual(result.returncode, 0)
+        self.assertNotEqual(
+            subprocess.run(
+                ["bash", "-e", "-c", script],
+                env={
+                    **os.environ,
+                    "CHANGES": "success",
+                    "PRIVATE_PREP": "failure",
+                    "CHECKS": "skipped",
+                    "ARTIFACTS": "skipped",
+                    "HAS_CHECKS": "false",
+                    "HAS_ARTIFACTS": "false",
+                    "PRIVATE": "skipped",
+                    "HAS_PRIVATE": "false",
+                    "PRIVATE_HOME_ARTIFACT": "skipped",
+                    "HAS_PRIVATE_HOME_ARTIFACT": "false",
+                },
+                check=False,
+            ).returncode,
+            0,
+        )
 
     def test_private_sources_are_pinned_and_never_saved_in_a_cache(self):
         caller = self.jobs["private"]
         self.assertIn("github.repository == 'ziyixi/todofy'", caller["if"])
         self.assertEqual(
-            caller["with"]["revision"], "${{ needs.changes.outputs.private_sha }}"
+            caller["with"]["revision"], "${{ needs.private-prep.outputs.private_sha }}"
         )
-        self.assertEqual(caller["with"]["base"], "${{ needs.changes.outputs.base }}")
+        self.assertEqual(caller["with"]["base"], "${{ needs.private-prep.outputs.base }}")
         self.assertEqual(
             caller["secrets"],
             {"private_ssh_key": "${{ secrets.TODOFY_PRIVATE_SSH_KEY }}"},
@@ -130,41 +160,42 @@ class BazelCI(unittest.TestCase):
         workflow = workflow_data(ROOT / ".github/workflows/private-check.yml")
         self.assertEqual(set(workflow["on"]), {"workflow_call"})
         self.assertEqual(workflow["permissions"], {"contents": "read"})
-        job = workflow["jobs"]["check"]
-        self.assertNotIn("environment", job)
-        steps = job["steps"]
-        checkout = next(
-            step
-            for step in steps
-            if step.get("with", {}).get("path") == "private"
-        )
-        # The quiet fetch keeps no credential and prints no private commit subject (test_private_checkout).
-        self.assertEqual(checkout["uses"], "./.github/actions/private-checkout")
-        self.assertEqual(
-            checkout["with"],
-            {
-                "revision": "${{ inputs.revision }}",
-                "path": "private",
-                "ssh-key": "${{ secrets.private_ssh_key }}",
-                "history": "ancestry",
-            },
-        )
-        self.assertEqual(steps[0]["with"]["fetch-depth"], "0")
-        cache_actions = [
-            step["uses"].split("@")[0]
-            for step in steps
-            if "cache" in step.get("uses", "")
-        ]
-        self.assertEqual(cache_actions, ["actions/cache/restore"] * 2)
-        self.assertFalse(
-            any("upload-artifact@" in step.get("uses", "") for step in steps)
-        )
+        for job_name in ("plan", "shards", "check"):
+            self.assertNotIn("environment", workflow["jobs"][job_name])
+        for job_name in ("plan", "shards"):
+            steps = workflow["jobs"][job_name]["steps"]
+            checkout = next(
+                step
+                for step in steps
+                if step.get("with", {}).get("path") == "private"
+            )
+            # The quiet fetch keeps no credential and prints no private commit subject (test_private_checkout).
+            self.assertEqual(checkout["uses"], "./.github/actions/private-checkout")
+            self.assertEqual(
+                checkout["with"],
+                {
+                    "revision": "${{ inputs.revision }}",
+                    "path": "private",
+                    "ssh-key": "${{ secrets.private_ssh_key }}",
+                    "history": "ancestry",
+                },
+            )
+            self.assertEqual(steps[0]["with"]["fetch-depth"], "0")
+            cache_actions = [
+                step["uses"].split("@")[0]
+                for step in steps
+                if "cache" in step.get("uses", "")
+            ]
+            self.assertEqual(cache_actions, ["actions/cache/restore"] * 2)
+            self.assertFalse(
+                any("upload-artifact@" in step.get("uses", "") for step in steps)
+            )
 
     def test_private_bazel_output_stays_off_the_public_log(self):
         workflow = workflow_data(ROOT / ".github/workflows/private-check.yml")
         script = next(
             step["run"]
-            for step in workflow["jobs"]["check"]["steps"]
+            for step in workflow["jobs"]["plan"]["steps"]
             if step.get("name") == "Build and test private targets"
         )
         for failing, code in (
@@ -177,6 +208,7 @@ class BazelCI(unittest.TestCase):
                 tempfile.TemporaryDirectory() as directory,
             ):
                 temporary = Path(directory)
+                (temporary / "private-targets.txt").write_text("@private//synthetic:test\n")
                 bazel = temporary / "bazel"
                 bazel.write_text(
                     "#!/bin/sh\n"
@@ -192,15 +224,21 @@ class BazelCI(unittest.TestCase):
                         "PATH": f"{temporary}{os.pathsep}{os.environ['PATH']}",
                         "RUNNER_TEMP": str(temporary),
                         "HOME": str(temporary),
+                        "BUILD_REQUIRED": "true",
                     },
                     capture_output=True,
                     text=True,
                     check=False,
                 )
                 self.assertEqual(result.returncode, 1 if code else 0)
-                self.assertEqual(
-                    result.stdout + result.stderr, f"::error::{code}\n" if code else ""
-                )
+                combined = result.stdout + result.stderr
+                self.assertNotIn("synthetic-private", combined)
+                self.assertNotIn("synthetic private test log", combined)
+                if code:
+                    self.assertIn(f"::error::{code}\n", combined)
+                else:
+                    self.assertIn("PRIVATE_BUILD_SECONDS=", combined)
+                    self.assertIn("PRIVATE_TEST_SECONDS=", combined)
                 self.assertIn(
                     "synthetic private test log",
                     (temporary / "private-bazel.log").read_text(),
@@ -210,17 +248,18 @@ class BazelCI(unittest.TestCase):
         """The private check delegates the rollback drill to private/ci/rollback_drill.py
         without exposing private paths or Bazel targets in public workflow YAML."""
         workflow = workflow_data(ROOT / ".github/workflows/private-check.yml")
-        job = workflow["jobs"]["check"]
-        self.assertEqual(job["permissions"], {"contents": "read", "packages": "read"})
         self.assertEqual(
             self.jobs["private"]["permissions"],
             {"contents": "read", "packages": "read"},
         )
-        step = next(
-            s for s in job["steps"] if s.get("name") == "Run the pinned rollback drill"
-        )
-        self.assertEqual(step["env"], {"GH_TOKEN": "${{ github.token }}"})
-        self.assertEqual(step["run"].strip(), "python3 private/ci/rollback_drill.py")
+        for job_name in ("plan", "shards"):
+            job = workflow["jobs"][job_name]
+            self.assertEqual(job["permissions"], {"contents": "read", "packages": "read"})
+            step = next(
+                s for s in job["steps"] if s.get("name") == "Run the pinned rollback drill"
+            )
+            self.assertEqual(step["env"], {"GH_TOKEN": "${{ github.token }}"})
+            self.assertEqual(step["run"].strip(), "python3 private/ci/rollback_drill.py")
 
     def test_public_planning_skips_private_submodule_initialization(self):
         step = next(
@@ -233,7 +272,12 @@ class BazelCI(unittest.TestCase):
 
     def cache_steps(self):
         private = workflow_data(ROOT / ".github/workflows/private-check.yml")
-        jobs = {**self.jobs, "private-check": private["jobs"]["check"]}
+        jobs = {
+            **self.jobs,
+            "private-plan": private["jobs"]["plan"],
+            "private-shards": private["jobs"]["shards"],
+            "private-check": private["jobs"]["check"],
+        }
         return {
             name: [
                 step
@@ -298,8 +342,13 @@ class BazelCI(unittest.TestCase):
         }
         changed = {**dependencies, "uv.lock": b"changed dependency graph"}
 
-        def render(template, *, sha, family="", files=dependencies, runner="Linux"):
-            values = {"runner.os": runner, "github.sha": sha, "matrix.cache": family}
+        def render(template, *, sha, family="", files=dependencies, runner="Linux", week="2026-W48"):
+            values = {
+                "runner.os": runner,
+                "github.sha": sha,
+                "matrix.cache": family,
+                "steps.cache-bucket.outputs.week": week,
+            }
 
             def expression(match):
                 value = match[1].strip()
@@ -313,7 +362,7 @@ class BazelCI(unittest.TestCase):
             return re.sub(r"\$\{\{(.*?)\}\}", expression, template)
 
         def first_match(
-            consumer, published, *, family="", files=dependencies, runner="Linux"
+            consumer, published, *, family="", files=dependencies, runner="Linux", week="2026-W48"
         ):
             requested = [consumer["key"], *consumer["restore-keys"].splitlines()]
             return next(
@@ -322,7 +371,7 @@ class BazelCI(unittest.TestCase):
                     for index, key in enumerate(requested)
                     if published.startswith(
                         render(
-                            key, sha="next", family=family, files=files, runner=runner
+                            key, sha="next", family=family, files=files, runner=runner, week=week
                         )
                     )
                 ),
@@ -339,7 +388,7 @@ class BazelCI(unittest.TestCase):
         repository = "~/.cache/personal-cloud-bazel/repository"
         actions = "~/.cache/personal-cloud-bazel/actions"
         published = render(restore("changes", repository)["key"], sha="previous")
-        for job in ("changes", "checks", "artifacts", "private-check"):
+        for job in ("changes", "checks", "artifacts", "private-plan", "private-shards"):
             consumer = restore(job, repository)
             with self.subTest(consumer=job, cache="repository"):
                 # Unchanged lockfiles hit main's entry exactly, so a new revision uploads no copy;
@@ -350,33 +399,40 @@ class BazelCI(unittest.TestCase):
         self.assertNotIn(actions, [step["with"]["path"] for step in steps["artifacts"]])
         producer = restore("checks", actions)
         for family in ("node", "python", "workerd", "check"):
-            published = render(producer["key"], sha="previous", family=family)
+            published = render(producer["key"], sha="previous", family=family, week="2026-W47")
             with self.subTest(consumer="checks", family=family):
-                self.assertEqual(first_match(producer, published, family=family), 1)
+                # Same week hits primary key (0); next week restores via lockfile prefix (1);
+                # changed lockfiles fall back to family prefix (2).
+                self.assertEqual(first_match(producer, published, family=family, week="2026-W47"), 0)
+                self.assertEqual(first_match(producer, published, family=family, week="2026-W48"), 1)
                 self.assertEqual(
-                    first_match(producer, published, family=family, files=changed), 2
+                    first_match(producer, published, family=family, files=changed, week="2026-W48"), 2
                 )
                 self.assertIsNone(
-                    first_match(producer, published, family="cpu", files=changed)
+                    first_match(producer, published, family="cpu", files=changed, week="2026-W48")
                 )
-        private = restore("private-check", actions)
-        for family in ("node", "python", "workerd"):
-            with self.subTest(consumer="private-check", family=family):
-                published = render(producer["key"], sha="previous", family=family)
-                self.assertIsNotNone(first_match(private, published))
-                self.assertIsNone(first_match(private, published, runner="macOS"))
+        for job in ("private-plan", "private-shards"):
+            private = restore(job, actions)
+            for family in ("node", "python", "workerd"):
+                with self.subTest(consumer=job, family=family):
+                    published = render(producer["key"], sha="previous", family=family, week="2026-W48")
+                    self.assertIsNotNone(first_match(private, published))
+                    self.assertIsNone(first_match(private, published, runner="macOS"))
 
     def test_private_selection_uses_the_pinned_entry_point_and_only_returns_a_boolean(self):
         check = workflow_data(ROOT / ".github/workflows/private-check.yml")
         self.assertEqual(set(check["on"]["workflow_call"]["outputs"]), {"release_required"})
-        job = check["jobs"]["check"]
         self.assertEqual(
             check["on"]["workflow_call"]["outputs"]["release_required"]["value"],
             "${{ jobs.check.outputs.release_required }}",
         )
+        self.assertEqual(
+            check["jobs"]["check"]["outputs"]["release_required"],
+            "${{ needs.plan.outputs.release_required }}",
+        )
+        job = check["jobs"]["plan"]
         self.assertEqual(job["outputs"]["release_required"], "${{ steps.plan.outputs.release_required }}")
-        plan = job["steps"][-1]
-        self.assertEqual(plan["id"], "plan")
+        plan = next(step for step in job["steps"] if step.get("id") == "plan")
         self.assertEqual(plan["env"]["BASE_SHA"], "${{ inputs.base }}")
         self.assertIn('python3 private/ci/plan.py --base "$BASE_SHA" --github-output "$GITHUB_OUTPUT"', plan["run"])
         self.assertIn('> "$RUNNER_TEMP/private-plan.log" 2>&1', plan["run"])

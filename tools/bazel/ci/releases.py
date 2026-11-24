@@ -111,6 +111,46 @@ def reusable_artifacts(
     return {}
 
 
+def reusable_private_check(
+    repository: str,
+    run_id: str,
+    sha: str,
+    get: Callable[[str], dict] = github_get,
+) -> bool:
+    """Reuse an exact-SHA green branch workflow run's pinned private build and tests."""
+    workflow = get(f"/repos/{repository}/actions/runs/{run_id}")["workflow_id"]
+    query = urllib.parse.urlencode({"head_sha": sha, "event": "push", "per_page": 50})
+    runs = get(f"/repos/{repository}/actions/workflows/{workflow}/runs?{query}")[
+        "workflow_runs"
+    ]
+    required = {
+        "CI gate",
+        "Private Bazel / Build and test pinned private sources",
+    }
+    candidates = [
+        run
+        for run in runs
+        if str(run["id"]) != run_id
+        and run["head_sha"] == sha
+        and run["head_branch"] != "main"
+        and run["event"] == "push"
+        and run["workflow_id"] == workflow
+        and run["conclusion"] == "success"
+    ]
+    for run in candidates[:5]:
+        jobs = get(
+            f"/repos/{repository}/actions/runs/{run['id']}/jobs?filter=latest&per_page=100"
+        )["jobs"]
+        passed = {
+            job["name"]
+            for job in jobs
+            if job["status"] == "completed" and job["conclusion"] == "success"
+        }
+        if required <= passed:
+            return True
+    return False
+
+
 def successful_main_base(
     commits: list[str], repository: str, run_id: str, get: Callable[[str], dict]
 ) -> str:
@@ -238,7 +278,22 @@ if __name__ == "__main__":
             ).returncode
             != 0
         )
-        write_outputs({"base": base, "proto_breaking": str(changed).lower()})
+        private_verified = (
+            os.environ.get("GITHUB_EVENT_NAME") == "push"
+            and os.environ.get("GITHUB_REF") == "refs/heads/main"
+            and reusable_private_check(
+                os.environ["GITHUB_REPOSITORY"],
+                os.environ["GITHUB_RUN_ID"],
+                os.environ["GITHUB_SHA"],
+            )
+        )
+        write_outputs(
+            {
+                "base": base,
+                "proto_breaking": str(changed).lower(),
+                "private_verified": str(private_verified).lower(),
+            }
+        )
     else:
         if args.plan is None:
             parser.error("--plan is required for release selection")

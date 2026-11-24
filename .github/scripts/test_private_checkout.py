@@ -156,8 +156,17 @@ class PrivateCheckout(unittest.TestCase):
                     if step.get("uses", "").startswith("actions/checkout@"):
                         self.assertEqual(step.get("with", {}).get("submodules", "false"), "false", path)
                     self.assertNotRegex(step.get("run", ""), r"submodule\s+update|(?<!no-)recurse-submodules", path)
-        self.assertEqual(sorted(name for name, _ in callers),
-                         ["action.yml", "private-check.yml", "private-check.yml", "private-release.yml"])
+        self.assertEqual(
+            sorted(name for name, _ in callers),
+            [
+                "action.yml",
+                "private-check.yml",
+                "private-check.yml",
+                "private-check.yml",
+                "private-check.yml",
+                "private-release.yml",
+            ],
+        )
         for name, values in callers:
             with self.subTest(caller=name, path=values["path"]):
                 self.assertEqual(set(values), {"revision", "path", "ssh-key", "history"})

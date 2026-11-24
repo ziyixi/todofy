@@ -234,12 +234,16 @@ class PrivateReleaseWorkflow(unittest.TestCase):
 
     def test_branch_and_document_only_changes_do_not_publish(self):
         self.context["github.ref"] = "refs/heads/codex/synthetic-review"
-        self.assertTrue(self.condition("private-home-artifact"))
+        self.assertFalse(self.condition("private-home-artifact"))
         self.assertFalse(self.condition("private-deploy"))
         self.assertFalse(self.condition("dashboard-deploy"))
         self.context["github.ref"] = "refs/heads/main"
+        self.assertTrue(self.condition("private-home-artifact"))
         self.context["needs.private.outputs.release_required"] = "false"
-        for job in ("private-home-artifact", "private-deploy", "dashboard-deploy"):
+        # private-home-artifact builds the credential-free Home archive in parallel on main,
+        # while release_required=false still prevents private and dashboard publication.
+        self.assertTrue(self.condition("private-home-artifact"))
+        for job in ("private-deploy", "dashboard-deploy"):
             self.assertFalse(self.condition(job), job)
 
     def test_dispatch_preserves_application_scope_and_excludes_resume(self):
@@ -495,7 +499,7 @@ class PrivateReleaseWorkflow(unittest.TestCase):
                     self.assertEqual((captured, left), (True, False))
 
     def test_private_history_fetches_only_pinned_ancestries_and_imports_a_divergent_base(self):
-        check = workflow_data(ROOT / ".github/workflows/private-check.yml")["jobs"]["check"]
+        check = workflow_data(ROOT / ".github/workflows/private-check.yml")["jobs"]["plan"]
         private_checkouts = [step for step in check["steps"]
                              if step.get("uses") == "./.github/actions/private-checkout"]
         self.assertEqual(len(private_checkouts), 2)

@@ -20,8 +20,10 @@ and Website site/relay inputs have independent filegroups. Test and source depen
 libraries; release groups add the execution inputs publication consumes.
 
 `releases.py` supplies the Actions decisions: cumulative successful-main base, explicit application dispatch, existing
-Newsletter/Platform pairing, held VPS resume and exact-SHA green branch artifact reuse. Reuse requires all producers
-and their unexpired artifacts. It skips neither the current cumulative check plan nor production verification.
+Newsletter/Platform pairing, held VPS resume, exact-SHA green branch artifact reuse, and exact-SHA green branch
+private verification reuse (`private_verified`). Artifact reuse requires all producers and their unexpired artifacts;
+private check reuse still recomputes cumulative `release_required`, runs `private-home-artifact` and production
+verification when selected, and never skips the cumulative public check plan.
 
 `run.py` executes one affected group with Bazel. Node, Python and generic checks (including Go) run up to four at once;
 workerd, CPU, browser and container groups run one at a time. The serial workerd leaves are dealt round-robin over three
