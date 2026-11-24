@@ -5,9 +5,9 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-Branch `fix/website-release-inactive-state` treats GitHub Deployment `inactive` following `success` as satisfied in the website release gate (`GitHubClient.latestState`) and preserves the verified release's `success` timestamp in `website/relay` (`latestReleaseState`), while updating Home website-sync blocked guidance to inspect Actions directly instead of blindly retrying against a blocked ledger. Land after branch `CI gate` passes, verify `Website relay deploy` / `Website deploy` and same-SHA reconciliation, then confirm Website sync recovers on Home.
+Branch `fix/mail-hero-status-alarm` self-heals a missing Durable Object alarm during `MailCoordinator` `GET /status` reads when pending jobs exist (`pending > 0 && next_alarm === null`), leaving idle coordinators (`pending === 0`) without an alarm. Land after branch `CI gate` passes, verify `Mail Hero deploy` and same-SHA reconciliation, then confirm coordinator status checks remain clean.
 
-Branch `feat/home-quota-plan` adds dual Cloudflare Workers Free (daily) and Workers Paid (subscription billing cycle, including `workers_cpu_ms`, cross-Worker Service Binding exclusion on `do_requests`, billing-period linear projections and spend-cap warnings without shedding daily apps, plus private `HomeService.ReadUsage` for batch headroom checks) on Home. Land only after branch `CI gate` passes with no unscheduled upstream service restarts, then verify live Workers Paid selection, billing-period refresh, and false-alert clearance together with `main` deployment and same-SHA reconciliation.
+Branch `fix/website-release-inactive-state` treats GitHub Deployment `inactive` following `success` as satisfied in the website release gate (`GitHubClient.latestState`) and preserves the verified release's `success` timestamp in `website/relay` (`latestReleaseState`), while updating Home website-sync blocked guidance to inspect Actions directly instead of blindly retrying against a blocked ledger. Main deployment and reconciliation verification are in progress.
 
 Private application follow-ups and release verification are tracked in `private/HANDOFF.md`.
 
@@ -83,8 +83,7 @@ codes generically. It changes no source, so it publishes no service and no priva
 
 ## Latest verified release
 
-Main `a790bbdf` published the pinned private application; matching reconciliation passed with zero infrastructure
-drift. See the [November 15 archive](docs/history/handoff-2026-11-15.md).
+Main `180588ac` shipped dual Workers Free / Workers Paid quota tracking, billing-cycle `workers_cpu_ms`, non-shedding projection alerts, and `HomeService.ReadUsage`; matching reconciliation passed (`45380333121`) with zero infrastructure drift and live Paid verification on Home confirmed all metrics and non-shedding behavior. See the [November 24 archive](docs/history/handoff-2026-11-24.md) and [November 15 archive](docs/history/handoff-2026-11-15.md).
 
 Shared Worker receipt recovery (`7ef001fe`) adds fixed failure stages, exact committed-result readback and a
 guarded receipt-only path without application redeployment. The old statusless Tasks receipt remains historical

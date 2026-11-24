@@ -195,7 +195,12 @@ export class MailCoordinator {
       }
       const stats=this.state.storage.sql.exec<{pending:number;failed:number;oldest:number|null}>(`SELECT sum(CASE WHEN failed=0 THEN 1 ELSE 0 END) pending,sum(failed) failed,min(created) oldest FROM jobs`).one();
       const {policy:_policy,...backup}=this.backup.status();
-      return Response.json({pending:stats.pending ?? 0,failed:stats.failed ?? 0,oldest:stats.oldest,next_alarm:await this.state.storage.getAlarm(),backup,capacity:this.capacity.snapshot()});
+      let nextAlarm=await this.state.storage.getAlarm();
+      if((stats.pending ?? 0)>0 && nextAlarm===null) {
+        await this.schedule();
+        nextAlarm=await this.state.storage.getAlarm();
+      }
+      return Response.json({pending:stats.pending ?? 0,failed:stats.failed ?? 0,oldest:stats.oldest,next_alarm:nextAlarm,backup,capacity:this.capacity.snapshot()});
     }
     return new Response(null,{status:404});
   }

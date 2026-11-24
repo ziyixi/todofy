@@ -243,3 +243,18 @@ test('control export keeps only unsettled or job-held uploads, identical to the 
   } finally {f.close();}
 });
 
+test('status read schedules a missing alarm only when pending jobs exist',async()=>{
+  const f=fixture();
+  try {
+    const empty=await (await request(f,'/status')).json();
+    assert.equal(empty.pending,0);
+    assert.equal(empty.next_alarm,null);
+
+    const due=Date.now()+60_000;
+    f.db.prepare('INSERT INTO jobs(id,payload,due,created) VALUES(?,?,?,?)').run('parse:raw/missing-alarm.eml',JSON.stringify({type:'parse',key:key1}),due,Date.now());
+    const healed=await (await request(f,'/status')).json();
+    assert.equal(healed.pending,1);
+    assert.equal(healed.next_alarm,due);
+  } finally {f.close();}
+});
+
