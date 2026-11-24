@@ -9,9 +9,11 @@ import {
   backupStep, bodyKey, newBackup, pageKey, BODIES_PER_STEP,
   type BackupEnv, type BackupComplete, type RequestRow,
 } from '../src/backup.ts';
+import { Store } from '../src/store.ts';
 import { readMetadata, restoreSql, verifyFiles } from '../../tools/backup-restore.ts';
 
 const SCHEMA = readFileSync(new URL('../../migrations/0001_router.sql', import.meta.url), 'utf8');
+const OPENAI_INDEX = readFileSync(new URL('../../migrations/0005_openai_started_index.sql', import.meta.url), 'utf8');
 const NOW = Date.parse('2026-10-28T04:47:00Z');
 const DAY = 86_400_000;
 
@@ -25,9 +27,10 @@ class Database {
     let values: (string | number | null)[] = [];
     return {
       bind(...bindings: (string | number | null)[]) { values = bindings; return this; },
-      first() {
+      first(column?: string) {
         queries.push(query);
-        return Promise.resolve(sql.prepare(query).get(...values) ?? null);
+        const result = sql.prepare(query).get(...values) as Record<string, unknown> | undefined;
+        return Promise.resolve(result ? (column ? result[column] ?? null : result) : null);
       },
       all() {
         queries.push(query);
@@ -270,4 +273,48 @@ test('restore refuses missing pages and mismatched completion counts or body byt
   assert.throws(() => verifyFiles(backup, directory), /backup_body_bytes_mismatch/);
   rmSync(join(directory, pageKey('', 0)));
   assert.throws(() => readMetadata(directory));
+});
+
+test('openaiMonthlyCost uses the OpenAI partial index and preserves exact monthly spend totals', async () => {
+  const baseline = new Database();
+  const indexed = new Database();
+  indexed.sql.exec(OPENAI_INDEX);
+  onTestFinished(() => { baseline.sql.close(); indexed.sql.close(); });
+
+  const monthNow = Date.UTC(2026, 10, 24, 12, 0, 0);
+  const inMonth = Date.UTC(2026, 10, 15, 0, 0, 0);
+  const priorMonth = Date.UTC(2026, 9, 31, 23, 59, 0);
+  const seed = (database: Database, id: string, model: string, started_ms: number, cost: number) => {
+    database.insert(row(0, {
+      id,
+      model,
+      started_ms,
+      completed_ms: started_ms,
+      generation_json: JSON.stringify({ generation: { usage: { estimated_cost_microusd: cost } } }),
+    }));
+  };
+
+  for (let i = 0; i < 40; i += 1) {
+    seed(baseline, `anth-${i}`, 'claude-haiku-5-5', inMonth + i, 50_000);
+    seed(indexed, `anth-${i}`, 'claude-haiku-5-5', inMonth + i, 50_000);
+  }
+  seed(baseline, 'oai-prev', 'openai/gpt-6.1-sol', priorMonth, 999);
+  seed(indexed, 'oai-prev', 'openai/gpt-6.1-sol', priorMonth, 999);
+  seed(baseline, 'oai-1', 'openai/gpt-6.1-sol', inMonth + 100, 1200);
+  seed(indexed, 'oai-1', 'openai/gpt-6.1-sol', inMonth + 100, 1200);
+  seed(baseline, 'oai-2', 'openai/gpt-6-astra', inMonth + 200, 3400);
+  seed(indexed, 'oai-2', 'openai/gpt-6-astra', inMonth + 200, 3400);
+
+  const baselineCost = await new Store({ DB: baseline } as never).openaiMonthlyCost(monthNow);
+  const indexedCost = await new Store({ DB: indexed } as never).openaiMonthlyCost(monthNow);
+  assert.equal(indexedCost, 4600);
+  assert.equal(indexedCost, baselineCost);
+
+  const plan = indexed.sql.prepare(
+    `EXPLAIN QUERY PLAN SELECT COALESCE(sum(json_extract(
+      COALESCE(json_extract(generation_json,'$.generation'),generation_json),
+      '$.usage.estimated_cost_microusd')),0) AS cost
+      FROM requests WHERE model GLOB 'openai/*' AND started_ms >= ? AND started_ms < ?`,
+  ).all(Date.UTC(2026, 10, 1), Date.UTC(2026, 11, 1)) as Array<{ detail: string }>;
+  assert.ok(plan.some((step) => step.detail.includes('requests_openai_started')), JSON.stringify(plan));
 });
