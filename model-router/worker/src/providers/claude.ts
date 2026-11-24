@@ -96,11 +96,16 @@ export async function generateClaude(request: GenerateRequest, context: Provider
     clearTimeout(stallTimer);
     stallTimer = setTimeout(() => { stalled = true; controller.abort(); }, STALL_MS);
   };
-  const client = new Anthropic({ apiKey: key, fetch: watchedFetch(context.fetcher, beat), maxRetries: 0, timeout: HEADER_TIMEOUT_MS, defaultHeaders: { 'anthropic-version': '2026-10-21' } });
+  const useStream = context.caller !== 'private-app'
+    && (context.deadlineMs - Date.now() > HEADER_TIMEOUT_MS || parameters.maxOutputTokens > 16_384);
+  const clientTimeoutMs = useStream
+    ? HEADER_TIMEOUT_MS
+    : Math.max(HEADER_TIMEOUT_MS, context.deadlineMs - Date.now());
+  const client = new Anthropic({ apiKey: key, fetch: watchedFetch(context.fetcher, beat), maxRetries: 0, timeout: clientTimeoutMs, defaultHeaders: { 'anthropic-version': '2026-10-21' } });
   let partialUsage: Record<string, unknown> | null = null;
   let message: BetaMessage;
   try {
-    if (context.deadlineMs - Date.now() > HEADER_TIMEOUT_MS || parameters.maxOutputTokens > 16_384) {
+    if (useStream) {
       const stream = client.beta.messages.stream(upstreamRequest, { signal: controller.signal });
       stream.on('streamEvent', event => {
         if (event.type === 'message_start') {

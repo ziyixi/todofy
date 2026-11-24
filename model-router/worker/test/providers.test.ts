@@ -184,6 +184,24 @@ describe('Claude adapter', () => {
     expect(result.error).toBeUndefined();
     expect(requestBody(fetcher)['fallbacks']).toBeUndefined();
   });
+
+  it('uses non-streaming JSON responses for stateless private callers within the output cap', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ ...claudeMessage(), model: 'claude-haiku-5-5' }));
+    const ctx = {
+      ...context('anthropic', fetcher),
+      caller: 'private-app',
+      route: routeFor('claude-haiku-5-5'),
+      deadlineMs: Date.now() + 180_000,
+    };
+    const result = await generateClaude(
+      config({ model: 'claude-haiku-5-5', maxOutputTokens: 8192, outputSchemaJson: JSON.stringify(schema) }),
+      'synthetic',
+      ctx,
+    );
+    expect(requestBody(fetcher)['stream']).toBe(false);
+    expect(result.error).toBeUndefined();
+    expect(result.output).toBe('[{"value":"synthetic"}]');
+  });
 });
 
 function createInstruction(text: string, cache = false): GenerateRequest['instructions'][number] {
