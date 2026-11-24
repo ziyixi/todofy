@@ -337,6 +337,40 @@ class _CoverClassRow:
     shares: float
 
 
+def _is_share_changing_split(
+    kind: str,
+    ratio: float,
+    old_rate: float | None = None,
+    new_rate: float | None = None,
+) -> bool:
+    """Return True for genuine splits/stock dividends; reject vendor spin-off decimal ratios."""
+    if kind == "stock_dividend":
+        return True
+    if not (math.isfinite(ratio) and ratio > 0.0):
+        return False
+    if (
+        old_rate is not None
+        and new_rate is not None
+        and math.isfinite(old_rate)
+        and math.isfinite(new_rate)
+        and old_rate > 0.0
+        and new_rate > 0.0
+    ):
+        if old_rate >= 500.0 and new_rate >= 500.0:
+            return False
+        return (
+            abs(old_rate - round(old_rate)) <= 1e-3
+            and abs(new_rate - round(new_rate)) <= 1e-3
+        )
+    inv_or_dir = ratio if ratio >= 1.0 else 1.0 / ratio
+    if abs(inv_or_dir - round(inv_or_dir)) <= 1e-4:
+        return True
+    from fractions import Fraction
+
+    frac = Fraction(ratio).limit_denominator(20)
+    return abs(ratio - float(frac)) / max(ratio, 1e-9) <= 1e-4
+
+
 def _build_split_adjuster(
     version_or_material: Any,
     asset_ids: list[str],
@@ -494,6 +528,10 @@ def _build_split_adjuster(
                         r = 1.0
                         unverified = True
                     elif r is None or r == 1.0:
+                        continue
+                    old_r = _safe_positive_decimal_float(rec.get("old_rate"))
+                    new_r = _safe_positive_decimal_float(rec.get("new_rate"))
+                    if not _is_share_changing_split(kind, r, old_r, new_r):
                         continue
                     aid = str(rec.get("asset_id") or "")
                     d = _parse_date(rec.get(date_col))
@@ -1763,7 +1801,11 @@ def valuation(
                     tolerance_days=30,
                 )
                 if prior_cover:
-                    prim_aid = active_sibs[0] if active_sibs else aid
+                    prim_aid = (
+                        aid
+                        if is_common_by_asset.get(aid, True)
+                        else (active_sibs[0] if active_sibs else aid)
+                    )
                     tot_p = 0.0
                     for pcr in prior_cover:
                         p_aid = (
@@ -1777,7 +1819,11 @@ def valuation(
 
             if prior_adj is None:
                 # Look up shares_outstanding_i state history up to decision_ns
-                prim_aid = active_sibs[0] if active_sibs else aid
+                prim_aid = (
+                    aid
+                    if is_common_by_asset.get(aid, True)
+                    else (active_sibs[0] if active_sibs else aid)
+                )
                 vis_sh = [
                     entry
                     for entry in share_states_by_cik.get(cik, [])
