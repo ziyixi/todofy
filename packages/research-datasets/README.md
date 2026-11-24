@@ -71,6 +71,8 @@ panel = ds.panel(
 - `ds.family(name, symbols, start, end, columns=...)` reads any registered family; `ds.family("events", ...)`
   filters events by security and date like `ds.events()`. A dataset that needs a newer SDK raises
   `CLIENT_TOO_OLD`; reinstall the SDK at the commit the console shows.
+- `ds.prices()` (`bars`) carries each security's current catalogue `symbol` rather than its historical ticker on
+  that session; join panels by `asset_id` and read `symbol_history` for historical ticker intervals.
 
 ### 2.0 modules and columns
 

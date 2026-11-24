@@ -166,9 +166,9 @@ class PrivateReleaseWorkflow(unittest.TestCase):
             "restore-check",
             "runtime-restart",
             "runtime-terminate",
-            "quant-v4-gates",
-            "quant-v4-gates-report",
-            "quant-v4-rehearse",
+            "private-migration-gates",
+            "private-migration-gates-report",
+            "private-migration-rehearse",
         }
         for operation in (
             *cluster_only,
@@ -179,8 +179,8 @@ class PrivateReleaseWorkflow(unittest.TestCase):
             "infra-plan",
             "infra-apply",
             "data-check",
-            "quant-v4-cutover",
-            "quant-v4-rollback",
+            "private-migration-cutover",
+            "private-migration-rollback",
             "k3s-future",
         ):
             self.context["inputs.operation"] = operation
@@ -204,17 +204,17 @@ class PrivateReleaseWorkflow(unittest.TestCase):
         self.assertIn("trap 'rm -f \"$log\"' EXIT", entry["run"])
         self.assertEqual(upload["uses"], "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a")
         self.assertEqual(upload["with"], {
-            "name": "quant-v4-gates-report",
-            "path": "${{ runner.temp }}/quant-v4-gates-report.cms",
+            "name": "private-migration-gates-report",
+            "path": "${{ runner.temp }}/private-migration-gates-report.cms",
             "retention-days": "3",
             "if-no-files-found": "ignore",
         })
         for operation in (
-            "quant-v4-gates",
-            "quant-v4-gates-report",
-            "quant-v4-rehearse",
-            "quant-v4-cutover",
-            "quant-v4-rollback",
+            "private-migration-gates",
+            "private-migration-gates-report",
+            "private-migration-rehearse",
+            "private-migration-cutover",
+            "private-migration-rollback",
             "release",
             "publish",
             "finish-worker",
@@ -228,7 +228,7 @@ class PrivateReleaseWorkflow(unittest.TestCase):
             self.context["inputs.operation"] = operation
             for cancelled in (False, True):
                 with self.subTest(operation=operation, cancelled=cancelled):
-                    expected = operation.startswith("quant-v4-") and not cancelled
+                    expected = operation.startswith("private-migration-") and not cancelled
                     # A failed gate run still uploads the partial report its operation encrypted.
                     self.assertEqual(self.condition("observer-access", upload["if"], cancelled=cancelled), expected)
 
@@ -353,11 +353,11 @@ class PrivateReleaseWorkflow(unittest.TestCase):
             "restore-check",
             "runtime-restart",
             "runtime-terminate",
-            "quant-v4-gates",
-            "quant-v4-gates-report",
-            "quant-v4-rehearse",
-            "quant-v4-cutover",
-            "quant-v4-rollback",
+            "private-migration-gates",
+            "private-migration-gates-report",
+            "private-migration-rehearse",
+            "private-migration-cutover",
+            "private-migration-rollback",
             "infra-plan",
             "infra-apply",
             "k3s-check",
@@ -582,6 +582,25 @@ class PrivateReleaseWorkflow(unittest.TestCase):
                 self.assertEqual(result.returncode, status, result.stderr)
                 self.assertEqual(output.read_text(), f"revision={expected}\n" if not status else "")
                 self.assertEqual(result.stdout + result.stderr, "PRIVATE_BASE_INVALID\n" if status else "")
+
+    def test_public_workflows_and_tools_use_no_private_app_name(self):
+        forbidden = "quan" + "t"
+        result = subprocess.run(
+            ["git", "grep", "-i", "-w", forbidden, "--", ".github", "tools"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        prefix_result = subprocess.run(
+            ["git", "grep", "-i", forbidden, "--", ".github", "tools"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual((result.returncode, result.stdout), (1, ""))
+        self.assertEqual((prefix_result.returncode, prefix_result.stdout), (1, ""))
 
 
 if __name__ == "__main__":
