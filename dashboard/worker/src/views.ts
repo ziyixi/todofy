@@ -11,7 +11,7 @@
  * are minute-rounded, so an unchanged state keeps its ETag for at least a minute.
  */
 import type { CanaryState, Digest, GuardView, QuotaRow, Usage } from './api-types.ts';
-import { HOME_QUOTA_IDS, type AppDetail, type Attention, type Badges, type CloudflareView, type Drift, type FlowsView, type HomeView, type OpsView, type Refresh, type ShellFields, type WorkerRow } from './api-types.ts';
+import { HOME_QUOTA_IDS, PAID_HOME_QUOTA_IDS, type AppDetail, type Attention, type Badges, type CloudflareView, type Drift, type FlowsView, type HomeView, type OpsView, type Refresh, type ShellFields, type WorkerRow } from './api-types.ts';
 import { CF_VIEW_WORKERS_MAX } from './idl.ts';
 import type { RegistryDef } from './registry-types.ts';
 import { resourceRows, withBreakdownResources, workerRows, historicalWorkerRows, type CfScriptsDoc } from './discovery.ts';
@@ -78,7 +78,9 @@ export function homeResponse(
   registry: RegistryDef = REGISTRY,
 ): HomeView {
   const workers = workerRows(input.scripts, input.now, registry);
-  const quota = HOME_QUOTA_IDS.flatMap((id): QuotaRow[] => {
+  const plan = usage.plan ?? 'free';
+  const ids = plan === 'paid' ? PAID_HOME_QUOTA_IDS : HOME_QUOTA_IDS;
+  const quota = ids.flatMap((id): QuotaRow[] => {
     const row = usage.rows.find((r) => r.id === id);
     // The mini bars show used / limit only: the contributors stay on the Cloudflare view.
     return row === undefined ? [] : [{ ...row, breakdown: [] }];
@@ -97,6 +99,9 @@ export function homeResponse(
       workers: workers.length,
       errors_today: workers.reduce((sum, row) => sum + row.errors, 0),
       guard_level: desired.level,
+      plan,
+      ...(usage.billing_period_start === undefined ? {} : { billing_period_start: usage.billing_period_start }),
+      ...(usage.billing_period_end === undefined ? {} : { billing_period_end: usage.billing_period_end }),
     },
     digest: { last_sent_at: isoOrNull(input.digest.last_sent_at), accepted: receipt === null ? null : receipt.stored },
     ...(websiteSync === undefined ? {} : { website_sync: websiteSync }),

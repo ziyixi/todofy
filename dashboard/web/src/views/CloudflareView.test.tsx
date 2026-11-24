@@ -536,7 +536,11 @@ describe('Cloudflare 监控', () => {
     const base = healthy()
     const calls = await showCloudflare((call) => {
       if (call.path === '/api/v1/cloudflareView:switchQuotaPlan') {
-        const paidRows = base.cloudflare.usage.alternate_rows ?? base.cloudflare.usage.rows
+        const paidRows = (base.cloudflare.usage.alternate_rows ?? base.cloudflare.usage.rows).map((r) =>
+          r.id === 'do_duration'
+            ? { ...r, used: 200_000, percent: 50, projected: 420_000, projected_percent: 105 }
+            : r,
+        )
         return {
           ...base,
           cloudflare: {
@@ -555,11 +559,17 @@ describe('Cloudflare 监控', () => {
     const quota = section('账户额度')
     const user = userEvent.setup()
     await user.click(within(quota).getByRole('button', { name: 'Workers Paid（月度含额）' }))
-    expect(within(quota).getByText('每月含额（Workers Paid 与 R2）')).toBeInTheDocument()
+    expect(within(quota).getByText('本账期含额（Workers Paid 与 R2）')).toBeInTheDocument()
+    expect(within(quota).getByText(/账期 2026-09-24 – 2026-10-23 UTC（按订阅续费日累计，跨自然月不清零）/)).toBeInTheDocument()
     expect(within(quota).getByRole('meter', { name: 'Workers 请求' })).toHaveAttribute('aria-valuetext', '已用 712 次，上限 10,000,000 次，0%')
+    expect(within(quota).getByRole('meter', { name: 'Workers CPU 时间' })).toHaveAttribute('aria-valuetext', '已用 12,000 ms，上限 30,000,000 ms，0%')
+    expect(within(quota).getByText('每天 1 万 neurons 以内免费，超出按量计费')).toBeInTheDocument()
     const activate = within(quota).getByRole('button', { name: '设为生效套餐' })
     await user.click(activate)
     await waitFor(() => expect(screen.getByText(/已将生效套餐切换为 Workers Paid/)).toBeInTheDocument())
     expect(calls.filter((call) => call.path === '/api/v1/cloudflareView:switchQuotaPlan')).toHaveLength(1)
+    expect(screen.queryByText('接近 Free 10 ms')).toBeNull()
+    expect(within(quota).getByText(/Workers \/ Durable Objects 会被消费上限全部拦截到账期结束/)).toBeInTheDocument()
+    expect(within(quota).getByText(/已按命名空间归属剔除跨 Worker 的 Service Binding 调用/)).toBeInTheDocument()
   })
 })

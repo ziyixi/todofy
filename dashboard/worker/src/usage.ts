@@ -9,8 +9,8 @@
 import { BREAKDOWN_UNCLASSIFIED, type QuotaResource, type QuotaRow } from './api-types.ts';
 import { WORKERS_QUERY_LIMIT, type StorageKind } from './api-types.ts';
 import { QUOTA_BREAKDOWN_MAX } from './idl.ts';
-import { ALLOWANCES, DO_DURATION_GB, PAID_ALLOWANCES } from './limits.ts';
-import { DAY_MS, HOUR_MS, daysInUtcMonth, isoSeconds, round1, startOfUtcDay, startOfUtcMonth, utcDay, utcMonthStart } from './time.ts';
+import { ALLOWANCES, DO_DURATION_GB, FREE_QUOTA_RESOURCES, PAID_ALLOWANCES, PAID_QUOTA_RESOURCES } from './limits.ts';
+import { DAY_MS, HOUR_MS, PAID_BILLING_ANCHOR_DAY, billingPeriod, daysInUtcMonth, isoSeconds, round1, startOfUtcDay, startOfUtcMonth, utcDay, utcMonthStart } from './time.ts';
 
 export const GRAPHQL_URL = 'https://api.cloudflare.com/client/v4/graphql';
 export const GRAPHQL_TIMEOUT_MS = 15_000;
@@ -25,21 +25,23 @@ export const GRAPHQL_MAX_BYTES = 1_000_000;
  * part of this one request, so a tick still makes a single GraphQL call. On 2026-11-02 only the `limit`
  * values of the per-resource datasets were raised above the account's resources (13 Durable Object classes
  * and 14 buckets had been cut at 10; R2 operations are one row per bucket and action, free actions
- * included); those values are not yet verified on the live account. No `orderBy` was added, as none was
- * checked there: rows stay unordered, and a dataset that fills its cap is still marked truncated.
+ * included); those values are not yet verified on the live account. On 2026-11-24 Paid billing-period
+ * variables (`$billingDay`, `$billingStart`), `workersMonth.cpuTimeUs`, `doInv.namespaceId` (limit 100),
+ * and `r2opsPaid` were added to measure Workers CPU ms and exclude cross-Worker Service Binding RPCs.
  */
-export const USAGE_QUERY = `query($a: string!, $day: Date!, $start: Time!, $end: Time!, $month: Date!, $monthStart: Time!) { viewer { accounts(filter: {accountTag: $a}) {
+export const USAGE_QUERY = `query($a: string!, $day: Date!, $start: Time!, $end: Time!, $month: Date!, $billingDay: Date!, $billingStart: Time!) { viewer { accounts(filter: {accountTag: $a}) {
   workers: workersInvocationsAdaptive(limit: 50, filter: {datetime_geq: $start, datetime_leq: $end}) { sum { requests errors subrequests } dimensions { scriptName } quantiles { cpuTimeP50 cpuTimeP99 } }
-  workersMonth: workersInvocationsAdaptive(limit: 50, filter: {datetime_geq: $monthStart, datetime_leq: $end}) { sum { requests } dimensions { scriptName } }
+  workersMonth: workersInvocationsAdaptive(limit: 50, filter: {datetime_geq: $billingStart, datetime_leq: $end}) { sum { requests cpuTimeUs } dimensions { scriptName } }
   d1: d1AnalyticsAdaptiveGroups(limit: 10, filter: {date: $day}) { sum { rowsRead rowsWritten readQueries writeQueries } dimensions { databaseId } }
-  d1Month: d1AnalyticsAdaptiveGroups(limit: 10, filter: {date_geq: $month, date_leq: $day}) { sum { rowsRead rowsWritten } dimensions { databaseId } }
+  d1Month: d1AnalyticsAdaptiveGroups(limit: 10, filter: {date_geq: $billingDay, date_leq: $day}) { sum { rowsRead rowsWritten } dimensions { databaseId } }
   d1s: d1StorageAdaptiveGroups(limit: 10, filter: {date: $day}) { max { databaseSizeBytes } dimensions { databaseId } }
-  doInv: durableObjectsInvocationsAdaptiveGroups(limit: 25, filter: {date: $day}) { sum { requests errors } dimensions { scriptName } }
-  doInvMonth: durableObjectsInvocationsAdaptiveGroups(limit: 25, filter: {date_geq: $month, date_leq: $day}) { sum { requests } dimensions { scriptName } }
+  doInv: durableObjectsInvocationsAdaptiveGroups(limit: 100, filter: {date: $day}) { sum { requests errors } dimensions { scriptName namespaceId } }
+  doInvMonth: durableObjectsInvocationsAdaptiveGroups(limit: 100, filter: {date_geq: $billingDay, date_leq: $day}) { sum { requests } dimensions { scriptName namespaceId } }
   doPer: durableObjectsPeriodicGroups(limit: 25, filter: {date: $day}) { sum { activeTime rowsRead rowsWritten cpuTime storageDeletes storageReadUnits storageWriteUnits } dimensions { namespaceId } }
-  doPerMonth: durableObjectsPeriodicGroups(limit: 25, filter: {date_geq: $month, date_leq: $day}) { sum { activeTime rowsRead rowsWritten } dimensions { namespaceId } }
+  doPerMonth: durableObjectsPeriodicGroups(limit: 25, filter: {date_geq: $billingDay, date_leq: $day}) { sum { activeTime rowsRead rowsWritten } dimensions { namespaceId } }
   doSto: durableObjectsStorageGroups(limit: 5, filter: {date: $day}) { max { storedBytes } }
   r2ops: r2OperationsAdaptiveGroups(limit: 250, filter: {date_geq: $month, date_leq: $day}) { sum { requests } dimensions { actionType bucketName } }
+  r2opsPaid: r2OperationsAdaptiveGroups(limit: 250, filter: {date_geq: $billingDay, date_leq: $day}) { sum { requests } dimensions { actionType bucketName } }
   r2sto: r2StorageAdaptiveGroups(limit: 25, filter: {date: $day}) { max { payloadSize metadataSize objectCount } dimensions { bucketName } }
   ai: aiInferenceAdaptiveGroups(limit: 20, filter: {datetime_geq: $start, datetime_leq: $end}) { sum { totalNeurons } dimensions { modelId } }
 } } }`;
@@ -49,15 +51,16 @@ export const DATASET_LIMITS = {
   workers: WORKERS_QUERY_LIMIT,
   d1: 10,
   d1s: 10,
-  doInv: 25,
+  doInv: 100,
   doPer: 25,
   doSto: 5,
   r2ops: 250,
+  r2opsPaid: 250,
   r2sto: 25,
   ai: 20,
   workersMonth: WORKERS_QUERY_LIMIT,
   d1Month: 10,
-  doInvMonth: 25,
+  doInvMonth: 100,
   doPerMonth: 25,
 } as const;
 type Dataset = keyof typeof DATASET_LIMITS;
@@ -66,7 +69,7 @@ type Dataset = keyof typeof DATASET_LIMITS;
  * that dataset, see withoutFailedOptionalDatasets), leaves only their own rows without data instead of
  * refusing the whole answer: Workers AI and monthly Paid datasets never gate the Free rows.
  */
-const OPTIONAL_DATASETS: ReadonlySet<Dataset> = new Set<Dataset>(['ai', 'workersMonth', 'd1Month', 'doInvMonth', 'doPerMonth']);
+const OPTIONAL_DATASETS: ReadonlySet<Dataset> = new Set<Dataset>(['ai', 'workersMonth', 'd1Month', 'doInvMonth', 'doPerMonth', 'r2opsPaid']);
 
 /** R2 operation classes (R2 pricing). Any other actionType counts as Class A (cautious). */
 export const R2_CLASS_A: ReadonlySet<string> = new Set([
@@ -113,12 +116,19 @@ export interface ResourceUsage {
 export interface UsageData {
   readonly rows: QuotaRow[];
   readonly paid_rows: QuotaRow[];
+  readonly billing_period_start: string;
+  readonly billing_period_end: string;
   readonly unclassified_r2_operations: number;
-  /** Scripts of `workers` or `doInv`, most requests first (at most WORKERS_QUERY_LIMIT + doInv's 25). */
+  /** Scripts of `workers` or `doInv`, most requests first (at most WORKERS_QUERY_LIMIT + doInv's 100). */
   readonly scripts: ScriptUsage[];
   /** `workers` returned WORKERS_QUERY_LIMIT rows: more scripts may have run. */
   readonly workers_truncated: boolean;
   readonly resources: ResourceUsage;
+}
+
+export interface ParseUsageOptions {
+  readonly anchorDay?: number;
+  readonly ownedDoNamespaces?: ReadonlyMap<string, string>;
 }
 
 export type UsageFetchResult =
@@ -127,11 +137,24 @@ export type UsageFetchResult =
 
 export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
-/** GraphQL variables for a query at `now`: the UTC day so far and the UTC month to date. */
-export function usageVariables(accountId: string, now: number): Record<string, string> {
+/** GraphQL variables for a query at `now`: the UTC day, calendar month (Free R2), and billing cycle (Paid). */
+export function usageVariables(
+  accountId: string,
+  now: number,
+  anchorDay: number = PAID_BILLING_ANCHOR_DAY,
+): Record<string, string> {
   const day = utcDay(now);
   const month = utcMonthStart(now);
-  return { a: accountId, day, start: `${day}T00:00:00Z`, end: isoSeconds(now), month, monthStart: `${month}T00:00:00Z` };
+  const period = billingPeriod(now, anchorDay);
+  return {
+    a: accountId,
+    day,
+    start: `${day}T00:00:00Z`,
+    end: isoSeconds(now),
+    month,
+    billingDay: period.startDay,
+    billingStart: `${period.startDay}T00:00:00Z`,
+  };
 }
 
 /** One GraphQL request; never throws. */
@@ -140,6 +163,7 @@ export async function fetchUsage(
   accountId: string,
   now: number,
   fetcher: FetchLike = (url, init) => globalThis.fetch(url, init),
+  options: ParseUsageOptions = {},
 ): Promise<UsageFetchResult> {
   const bearer = (token ?? '').trim();
   if (bearer === '') return { ok: false, code: 'not_configured', http_status: null };
@@ -149,7 +173,7 @@ export async function fetchUsage(
       method: 'POST',
       redirect: 'manual',
       headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json', accept: 'application/json' },
-      body: JSON.stringify({ query: USAGE_QUERY, variables: usageVariables(accountId, now) }),
+      body: JSON.stringify({ query: USAGE_QUERY, variables: usageVariables(accountId, now, options.anchorDay) }),
       signal: AbortSignal.timeout(GRAPHQL_TIMEOUT_MS),
     });
   } catch (error) {
@@ -179,7 +203,7 @@ export async function fetchUsage(
     if (partial === null) return { ok: false, code: 'graphql_error', http_status: 200 };
     body = partial;
   }
-  const data = parseUsage(body, now);
+  const data = parseUsage(body, now, options);
   return data === null ? { ok: false, code: 'invalid_response', http_status: 200 } : { ok: true, data };
 }
 
@@ -278,26 +302,48 @@ function sumBy(rows: readonly unknown[], dataset: Dataset, value: (row: unknown)
 /** Daily rows are not projected in the first hours of the UTC day, where one early job dominates. */
 export const DAILY_PROJECTION_AFTER_MS = 3 * HOUR_MS;
 
+export interface ProjectionWindow {
+  readonly startMs: number;
+  readonly endExclusiveMs: number;
+  readonly minElapsedMs?: number;
+}
+
 /**
  * Linear end-of-period projection (design.md §5.2): used / elapsed × period, a straight-line estimate,
  * not a forecast; null when too little of the period has passed.
  */
-export function projection(period: QuotaRow['period'], used: number | null, now: number): number | null {
+export function projection(
+  period: QuotaRow['period'],
+  used: number | null,
+  now: number,
+  window?: ProjectionWindow,
+): number | null {
   if (used === null) return null;
   if (period === 'daily') {
     const elapsed = now - startOfUtcDay(now);
     return elapsed < DAILY_PROJECTION_AFTER_MS ? null : round1((used * DAY_MS) / elapsed);
   }
   if (period === 'monthly') {
+    if (window !== undefined) {
+      const elapsed = now - window.startMs;
+      const minElapsed = window.minElapsedMs ?? DAY_MS;
+      return elapsed < minElapsed ? null : round1((used * (window.endExclusiveMs - window.startMs)) / elapsed);
+    }
     const elapsedDays = (now - startOfUtcMonth(now)) / DAY_MS;
     return elapsedDays < 1 ? null : round1((used * daysInUtcMonth(now)) / elapsedDays);
   }
   return null;
 }
 
-function quotaRow(id: QuotaResource, measured: Measured, now: number, allowance = ALLOWANCES[id]): QuotaRow {
+function quotaRow(
+  id: QuotaResource,
+  measured: Measured,
+  now: number,
+  allowance = ALLOWANCES[id as keyof typeof ALLOWANCES],
+  window?: ProjectionWindow,
+): QuotaRow {
   const used = measured.used === null ? null : round1(measured.used);
-  const projected = projection(allowance.period, used, now);
+  const projected = projection(allowance.period, used, now, window);
   const percentOf = (value: number | null): number | null => (value === null ? null : round1((value / allowance.limit) * 100));
   return {
     id,
@@ -318,8 +364,49 @@ function quotaRow(id: QuotaResource, measured: Measured, now: number, allowance 
   };
 }
 
+/** Excludes cross-Worker Service Binding RPC rows whose DO namespace belongs to another defining script. */
+function isOwnDoInvocation(row: unknown, owned?: ReadonlyMap<string, string>): boolean {
+  if (owned === undefined) return true;
+  const ns = dimension(row, 'namespaceId');
+  if (ns === UNKNOWN_DIMENSION) return true;
+  const owner = owned.get(ns);
+  return owner === undefined || owner === dimension(row, 'scriptName');
+}
+
+function classifyR2Ops(rows: readonly unknown[], limit: number): {
+  readonly classA: Measured;
+  readonly classB: Measured;
+  readonly unclassified: number;
+} {
+  let unclassified = 0;
+  const classA = new Map<string, number>();
+  const classB = new Map<string, number>();
+  let sumA = 0;
+  let sumB = 0;
+  for (const row of rows) {
+    const action = isObject(row) && isObject(row.dimensions) ? row.dimensions.actionType : undefined;
+    const requests = field(row, 'sum', 'requests');
+    const name = dimension(row, 'bucketName');
+    if (typeof action === 'string' && R2_FREE.has(action)) continue;
+    if (typeof action === 'string' && R2_CLASS_B.has(action)) {
+      sumB += requests;
+      classB.set(name, (classB.get(name) ?? 0) + requests);
+      continue;
+    }
+    if (typeof action !== 'string' || !(R2_CLASS_A.has(action) || R2_ASSUMED_CLASS_A.has(action))) unclassified += requests;
+    sumA += requests;
+    classA.set(name, (classA.get(name) ?? 0) + requests);
+  }
+  const truncated = rows.length >= limit;
+  return {
+    classA: { used: sumA, truncated, breakdown: classA },
+    classB: { used: sumB, truncated, breakdown: classB },
+    unclassified,
+  };
+}
+
 /** The quota rows of a GraphQL response body (design.md §7.3); null when its shape is wrong. */
-export function parseUsage(body: unknown, now: number): UsageData | null {
+export function parseUsage(body: unknown, now: number, options: ParseUsageOptions = {}): UsageData | null {
   if (!isObject(body) || !isObject(body.data) || !isObject(body.data.viewer)) return null;
   const accounts = body.data.viewer.accounts;
   if (!Array.isArray(accounts) || !isObject(accounts[0])) return null;
@@ -337,6 +424,7 @@ export function parseUsage(body: unknown, now: number): UsageData | null {
     sets[name] = value as unknown[];
   }
 
+  const period = billingPeriod(now, options.anchorDay ?? PAID_BILLING_ANCHOR_DAY);
   const measured = new Map<QuotaResource, Measured>();
   const script = (row: unknown): string => dimension(row, 'scriptName');
   const database = (row: unknown): string => dimension(row, 'databaseId');
@@ -353,7 +441,11 @@ export function parseUsage(body: unknown, now: number): UsageData | null {
     ...d1Storage,
     used: sets.d1s.length === 0 ? null : Math.max(...d1Storage.breakdown.values()),
   });
-  measured.set('do_requests', sumBy(sets.doInv, 'doInv', (r) => field(r, 'sum', 'requests'), script));
+  const ownDoInv = sets.doInv.filter((r) => isOwnDoInvocation(r, options.ownedDoNamespaces));
+  measured.set('do_requests', {
+    ...sumBy(ownDoInv, 'doInv', (r) => field(r, 'sum', 'requests'), script),
+    truncated: sets.doInv.length >= DATASET_LIMITS.doInv,
+  });
   measured.set(
     'do_duration',
     sumBy(sets.doPer, 'doPer', (r) => (field(r, 'sum', 'activeTime') / 1e6) * DO_DURATION_GB, namespace),
@@ -370,45 +462,25 @@ export function parseUsage(body: unknown, now: number): UsageData | null {
     breakdown: new Map(),
   });
 
-  let unclassified = 0;
-  const classA = new Map<string, number>();
-  const classB = new Map<string, number>();
-  let sumA = 0;
-  let sumB = 0;
-  for (const row of sets.r2ops) {
-    const action = isObject(row) && isObject(row.dimensions) ? row.dimensions.actionType : undefined;
-    const requests = field(row, 'sum', 'requests');
-    const name = bucket(row);
-    if (typeof action === 'string' && R2_FREE.has(action)) continue;
-    if (typeof action === 'string' && R2_CLASS_B.has(action)) {
-      sumB += requests;
-      classB.set(name, (classB.get(name) ?? 0) + requests);
-      continue;
-    }
-    if (typeof action !== 'string' || !(R2_CLASS_A.has(action) || R2_ASSUMED_CLASS_A.has(action))) unclassified += requests;
-    sumA += requests;
-    classA.set(name, (classA.get(name) ?? 0) + requests);
-  }
-  const r2Truncated = sets.r2ops.length >= DATASET_LIMITS.r2ops;
-  measured.set('r2_class_a', { used: sumA, truncated: r2Truncated, breakdown: classA });
-  measured.set('r2_class_b', { used: sumB, truncated: r2Truncated, breakdown: classB });
+  const r2Free = classifyR2Ops(sets.r2ops, DATASET_LIMITS.r2ops);
+  measured.set('r2_class_a', r2Free.classA);
+  measured.set('r2_class_b', r2Free.classB);
   const r2Storage = sumBy(sets.r2sto, 'r2sto', (r) => field(r, 'max', 'payloadSize') + field(r, 'max', 'metadataSize'), bucket);
   measured.set('r2_storage', storageEmpty(r2Storage, sets.r2sto));
 
-  const order: readonly QuotaResource[] = [
-    'workers_requests', 'd1_rows_read', 'd1_rows_written', 'do_requests', 'do_duration', 'do_rows_read',
-    'do_rows_written', 'ai_neurons', 'r2_class_a', 'r2_class_b', 'd1_storage', 'd1_database_max', 'do_storage', 'r2_storage',
-  ];
-  const rows = order.map((id) => {
-    const m = measured.get(id);
-    return quotaRow(id, m ?? { used: null, truncated: false, breakdown: new Map() }, now);
-  });
   const missingMeasured = (): Measured => ({ used: null, truncated: false, breakdown: new Map() });
-  const paidMeasured = new Map<QuotaResource, Measured>(measured);
-  paidMeasured.set(
-    'workers_requests',
-    missing.has('workersMonth') ? missingMeasured() : sumBy(sets.workersMonth, 'workersMonth', (r) => field(r, 'sum', 'requests'), script),
+  const rows = FREE_QUOTA_RESOURCES.map((id) =>
+    quotaRow(id, measured.get(id) ?? missingMeasured(), now, ALLOWANCES[id]),
   );
+
+  const paidMeasured = new Map<QuotaResource, Measured>(measured);
+  if (missing.has('workersMonth')) {
+    paidMeasured.set('workers_requests', missingMeasured());
+    paidMeasured.set('workers_cpu_ms', missingMeasured());
+  } else {
+    paidMeasured.set('workers_requests', sumBy(sets.workersMonth, 'workersMonth', (r) => field(r, 'sum', 'requests'), script));
+    paidMeasured.set('workers_cpu_ms', sumBy(sets.workersMonth, 'workersMonth', (r) => field(r, 'sum', 'cpuTimeUs') / 1000, script));
+  }
   if (missing.has('d1Month')) {
     paidMeasured.set('d1_rows_read', missingMeasured());
     paidMeasured.set('d1_rows_written', missingMeasured());
@@ -416,9 +488,15 @@ export function parseUsage(body: unknown, now: number): UsageData | null {
     paidMeasured.set('d1_rows_read', sumBy(sets.d1Month, 'd1Month', (r) => field(r, 'sum', 'rowsRead'), database));
     paidMeasured.set('d1_rows_written', sumBy(sets.d1Month, 'd1Month', (r) => field(r, 'sum', 'rowsWritten'), database));
   }
+  const ownDoInvMonth = sets.doInvMonth.filter((r) => isOwnDoInvocation(r, options.ownedDoNamespaces));
   paidMeasured.set(
     'do_requests',
-    missing.has('doInvMonth') ? missingMeasured() : sumBy(sets.doInvMonth, 'doInvMonth', (r) => field(r, 'sum', 'requests'), script),
+    missing.has('doInvMonth')
+      ? missingMeasured()
+      : {
+          ...sumBy(ownDoInvMonth, 'doInvMonth', (r) => field(r, 'sum', 'requests'), script),
+          truncated: sets.doInvMonth.length >= DATASET_LIMITS.doInvMonth,
+        },
   );
   if (missing.has('doPerMonth')) {
     paidMeasured.set('do_duration', missingMeasured());
@@ -429,12 +507,25 @@ export function parseUsage(body: unknown, now: number): UsageData | null {
     paidMeasured.set('do_rows_read', sumBy(sets.doPerMonth, 'doPerMonth', (r) => field(r, 'sum', 'rowsRead'), namespace));
     paidMeasured.set('do_rows_written', sumBy(sets.doPerMonth, 'doPerMonth', (r) => field(r, 'sum', 'rowsWritten'), namespace));
   }
-  const paid_rows = order.map((id) => quotaRow(id, paidMeasured.get(id) ?? missingMeasured(), now, PAID_ALLOWANCES[id]));
+  if (missing.has('r2opsPaid')) {
+    paidMeasured.set('r2_class_a', missingMeasured());
+    paidMeasured.set('r2_class_b', missingMeasured());
+  } else {
+    const r2Paid = classifyR2Ops(sets.r2opsPaid, DATASET_LIMITS.r2opsPaid);
+    paidMeasured.set('r2_class_a', r2Paid.classA);
+    paidMeasured.set('r2_class_b', r2Paid.classB);
+  }
+  const billingWindow: ProjectionWindow = { startMs: period.startMs, endExclusiveMs: period.endExclusiveMs, minElapsedMs: DAILY_PROJECTION_AFTER_MS };
+  const paid_rows = PAID_QUOTA_RESOURCES.map((id) =>
+    quotaRow(id, paidMeasured.get(id) ?? missingMeasured(), now, PAID_ALLOWANCES[id], billingWindow),
+  );
   return {
     rows,
     paid_rows,
-    unclassified_r2_operations: round1(unclassified),
-    scripts: parseScripts(sets.workers, sets.doInv),
+    billing_period_start: period.startDay,
+    billing_period_end: period.endDay,
+    unclassified_r2_operations: round1(r2Free.unclassified),
+    scripts: parseScripts(sets.workers, ownDoInv),
     workers_truncated: sets.workers.length >= DATASET_LIMITS.workers,
     resources: parseResources(sets),
   };

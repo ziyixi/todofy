@@ -1,11 +1,11 @@
 # Handoff
 
-Updated 2026-11-22 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
+Updated 2026-11-24 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
 Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-Branch `feat/home-quota-plan` adds dual Cloudflare Workers Free (daily) and Workers Paid (monthly included) quota views plus `SwitchQuotaPlan` persistence on Home so alerts and guard thresholds follow the active plan while both plan views stay inspectable. Land only after branch `CI gate` passes, then verify live Workers Paid selection, monthly usage refresh, and false-alert clearance together with `main` deployment and same-SHA reconciliation.
+Branch `feat/home-quota-plan` adds dual Cloudflare Workers Free (daily) and Workers Paid (subscription billing cycle, including `workers_cpu_ms`, cross-Worker Service Binding exclusion on `do_requests`, billing-period linear projections and spend-cap warnings without shedding daily apps, plus private `HomeService.ReadUsage` for batch headroom checks) on Home. Land only after branch `CI gate` passes with no unscheduled upstream service restarts, then verify live Workers Paid selection, billing-period refresh, and false-alert clearance together with `main` deployment and same-SHA reconciliation.
 
 Private application follow-ups and release verification are tracked in `private/HANDOFF.md`.
 

@@ -419,7 +419,7 @@ describe('GetFlowsView, GetOpsView and the mutations', () => {
 
   it('switches between Free and Paid quota plans, clears Free alerts and shed, and preserves idempotency', async () => {
     h = await startFlows({
-      usage: { ...REALISTIC_USAGE, doNamespaces: [{ id: SYNTHETIC_NS[0], activeTimeUs: 90_000_000_000, rowsRead: 12_100, rowsWritten: 1040 }], monthFactor: 2 },
+      usage: { ...REALISTIC_USAGE, doNamespaces: [{ id: SYNTHETIC_NS[0], activeTimeUs: 90_000_000_000, rowsRead: 12_100, rowsWritten: 1040 }], workersCpuUs: 6_000_000_000, monthFactor: 2 },
       bindings: { CANARY_UTC_HOUR: '23' },
     });
     answerProbes(h);
@@ -427,8 +427,10 @@ describe('GetFlowsView, GetOpsView and the mutations', () => {
 
     const freeCf = await view<CloudflareView>(h, 'cloudflare');
     expect(freeCf.usage.plan).toBe('free');
+    expect(freeCf.usage.rows).toHaveLength(14);
     expect(freeCf.usage.rows.find((r) => r.id === 'do_duration')?.limit).toBe(13_000);
     expect(freeCf.usage.alternate_rows?.find((r) => r.id === 'do_duration')?.limit).toBe(400_000);
+    expect(freeCf.usage.alternate_rows?.find((r) => r.id === 'workers_cpu_ms')?.limit).toBe(30_000_000);
     expect(freeCf.guard.desired.level).toBe('shed');
     expect(freeCf.attention.items.some((item) => item.code === 'do_namespace_duration_high')).toBe(true);
 
@@ -437,6 +439,11 @@ describe('GetFlowsView, GetOpsView and the mutations', () => {
     expect(switched.status).toBe(200);
     const paidView = (await switched.json()) as CloudflareView;
     expect(paidView.usage.plan).toBe('paid');
+    expect(paidView.usage.rows).toHaveLength(15);
+    expect(paidView.usage.billing_period_start).toBe('2026-09-24');
+    expect(paidView.usage.billing_period_end).toBe('2026-10-23');
+    expect(paidView.usage.rows.every((r) => !r.guard_trigger)).toBe(true);
+    expect(paidView.usage.rows.find((r) => r.id === 'workers_cpu_ms')).toMatchObject({ period: 'monthly', unit: 'milliseconds', used: 6_000_000, limit: 30_000_000 });
     expect(paidView.usage.rows.find((r) => r.id === 'do_duration')).toMatchObject({ period: 'monthly', limit: 400_000 });
     expect(paidView.usage.alternate_rows?.find((r) => r.id === 'do_duration')).toMatchObject({ period: 'daily', limit: 13_000 });
     expect(paidView.guard.desired.level).toBe('normal');
@@ -447,7 +454,11 @@ describe('GetFlowsView, GetOpsView and the mutations', () => {
     expect(replay.status).toBe(200);
     expect((await h.post('/api/v1/cloudflareView:switchQuotaPlan', { plan: 'free', request_id: requestId })).status).toBe(400);
     const home = await view<HomeView>(h, 'home');
+    expect(home.cloudflare.plan).toBe('paid');
+    expect(home.cloudflare.billing_period_start).toBe('2026-09-24');
+    expect(home.cloudflare.billing_period_end).toBe('2026-10-23');
     expect(home.cloudflare.guard_level).toBe('normal');
+    expect(home.cloudflare.quota.map((r) => r.id)).toEqual(['workers_requests', 'workers_cpu_ms', 'do_duration', 'd1_rows_read']);
     expect(home.cloudflare.quota.find((r) => r.id === 'workers_requests')).toMatchObject({ period: 'monthly', limit: 10_000_000 });
   });
 });

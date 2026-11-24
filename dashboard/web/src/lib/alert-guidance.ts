@@ -69,6 +69,18 @@ export function alertGuidance(code: string, source?: string): AlertGuidance {
     case 'endpoint_blocked':
       return { explanation: '邮件处理或目标投递出现了需要处理的记录。', next: '打开 Mail Hero 查看具体邮件和尝试记录，修复解析或目标配置后重试对应事件。' }
     default:
+      if (code.endsWith('_projected_high')) {
+        return {
+          explanation: '按当前速度线性估算，本账期结束前该项用量将达到或超过 Workers Paid 套餐包含量（100%）。超出套餐包含量后，Workers / Durable Objects 会被消费上限全部拦截到账期结束。',
+          next: '打开 Cloudflare 监控页查看主要来源与账期余量，先暂停或限速批量任务，确保日常服务留有余量。',
+        }
+      }
+      if (source === 'cloudflare' && code.endsWith('_high')) {
+        return {
+          explanation: '该项配额已用达到或超过 80%（95% 为严重）。Workers Paid 下若超出套餐包含量，Workers / Durable Objects 会被消费上限全部拦截到账期结束；Workers Free 下日常配额超 80% 会触发自动降载。',
+          next: '打开 Cloudflare 监控页核对主要来源与账期余量，必要时暂停批量任务。',
+        }
+      }
       return code.startsWith('daemon_')
         ? { explanation: '最新主机报告显示该系统服务状态异常或尚未确认。', next: '打开 Fleet 查看具体服务状态，处理对应服务后刷新观测。' }
         : { explanation: '监控发现了当前这项异常；详情中的时间、状态和计数说明已观察到的事实。', next: '先查看对应应用或流程详情；已处理或暂不需要跟进时，可以关闭当前提醒。' }

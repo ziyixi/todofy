@@ -60,13 +60,19 @@ function CloudflareToday({ home }: { home: HomeViewData }) {
   const summary = home.cloudflare
   const usage = USAGE_STATUS[summary.usage_status]
   const shed = summary.guard_level === 'shed'
+  const isPaid = summary.plan === 'paid'
   return (
     <section className="home-block" aria-labelledby="home-cf-title">
       <div className="block-head">
-        <h2 id="home-cf-title">Cloudflare 今日</h2>
+        <h2 id="home-cf-title">{isPaid ? 'Cloudflare 本账期' : 'Cloudflare 今日'}</h2>
         <a href={routeHash({ view: 'cloudflare' })}>详细监控 →</a>
       </div>
       <div className="panel cf-today">
+        {isPaid && summary.billing_period_start && summary.billing_period_end ? (
+          <p className="small muted cf-today-note">
+            账期 {summary.billing_period_start} – {summary.billing_period_end} UTC（跨自然月不清零 · 超额将被消费上限拦截至账期结束）
+          </p>
+        ) : null}
         {summary.usage_status !== 'ok' ? (
           <p className="small cf-today-note">
             <LevelMark level={summary.usage_status === 'stale' ? 'warning' : 'unknown'} word={`用量${usage.label}`} size={10} />
@@ -89,7 +95,7 @@ function CloudflareToday({ home }: { home: HomeViewData }) {
               ? 'Worker 暂无数据 ·'
               : `${formatNumber(summary.workers)} 个 Worker · 今日错误 ${formatNumber(summary.errors_today)} ·`}{' '}
           </span>
-          {shed ? <LevelMark level="held" word="降载中" size={10} /> : <LevelMark level="ok" word="未降载" size={10} />}
+          {shed ? <LevelMark level="held" word="降载中" size={10} /> : isPaid ? <LevelMark level="ok" word="Paid 提醒生效" size={10} /> : <LevelMark level="ok" word="未降载" size={10} />}
           <ChevronRight className="chevron" size={16} aria-hidden="true" />
         </a>
       </div>

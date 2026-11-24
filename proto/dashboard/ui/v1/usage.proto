@@ -64,7 +64,7 @@ message Usage {
   ];
   // Failed reads since the last success.
   int32 consecutive_failures = 7 [(google.api.field_behavior) = REQUIRED];
-  // One row per quota, in the order of QuotaResource.
+  // One row per quota of the active plan, in the order of QuotaResource.
   repeated QuotaRow rows = 8 [(google.api.field_behavior) = REQUIRED];
   // R2 operations whose actionType is in neither documented class; counted as Class A.
   double unclassified_r2_operations = 9 [(google.api.field_behavior) = REQUIRED];
@@ -72,6 +72,16 @@ message Usage {
   QuotaPlan plan = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
   // Comparison rows evaluated against the other plan's allowances.
   repeated QuotaRow alternate_rows = 11 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // First UTC day (YYYY-MM-DD) of the Workers Paid subscription billing period.
+  optional string billing_period_start = 12 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).format = "Day"
+  ];
+  // Last UTC day (YYYY-MM-DD, inclusive) of the Workers Paid subscription billing period.
+  optional string billing_period_end = 13 [
+    (google.api.field_behavior) = OUTPUT_ONLY,
+    (common.wire.v1.field).format = "Day"
+  ];
 
   // What the read of the usage achieved.
   enum State {
@@ -176,6 +186,8 @@ enum QuotaResource {
   QUOTA_RESOURCE_DO_STORAGE = 13;
   // R2 storage of the account.
   QUOTA_RESOURCE_R2_STORAGE = 14;
+  // Workers CPU milliseconds a billing month (Workers Paid).
+  QUOTA_RESOURCE_WORKERS_CPU_MS = 15;
 }
 
 // When a quota resets.
@@ -206,6 +218,8 @@ enum QuotaUnit {
   QUOTA_UNIT_BYTES = 5;
   // Workers AI neurons.
   QUOTA_UNIT_NEURONS = 6;
+  // CPU milliseconds.
+  QUOTA_UNIT_MILLISECONDS = 7;
 }
 
 // A kind of storage resource.

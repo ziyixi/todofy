@@ -1,7 +1,7 @@
 /** Private service-binding read. No owner HTTP route or operation that refreshes a source. */
 import { WorkerEntrypoint } from 'cloudflare:workers';
-import type { HomeService, ReadHomeRequest, ReadHomeResponse } from '@ziyixi/proto/dashboard/mcp/v1/home_service_wire';
-import { ReadHomeRequestSchema } from '@ziyixi/proto/dashboard/mcp/v1/home_service_pb';
+import type { HomeService, ReadHomeRequest, ReadHomeResponse, ReadUsageRequest, ReadUsageResponse } from '@ziyixi/proto/dashboard/mcp/v1/home_service_wire';
+import { ReadHomeRequestSchema, ReadUsageRequestSchema } from '@ziyixi/proto/dashboard/mcp/v1/home_service_pb';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
 import type { Env } from './env.ts';
 import { HOME_OBJECT } from './state.ts';
@@ -13,5 +13,12 @@ export class HomeApi extends WorkerEntrypoint<Env> implements HomeService {
     catch { throw new Error('invalid_input'); }
     const stub = this.env.HOME.get(this.env.HOME.idFromName(HOME_OBJECT));
     return stub.readHome(request.after_occurrence_seq);
+  }
+
+  async readUsage(input: ReadUsageRequest): Promise<ReadUsageResponse> {
+    try { toWire(ReadUsageRequestSchema, fromWire(ReadUsageRequestSchema, input, { strict: true }).message); }
+    catch { throw new Error('invalid_input'); }
+    const stub = this.env.HOME.get(this.env.HOME.idFromName(HOME_OBJECT));
+    return stub.readUsage();
   }
 }

@@ -49,7 +49,7 @@ import {
   type DesiredGuard,
   type GuardOverrideDoc,
 } from './guard.ts';
-import { mergeScripts, workerRows, withLiveInventory, type CfScriptsDoc } from './discovery.ts';
+import { mergeScripts, workerRows, withBreakdownResources, withLiveInventory, type CfScriptsDoc } from './discovery.ts';
 import {
   advanceRun,
   attemptsExhausted,
@@ -69,8 +69,8 @@ import {
 } from './drift.ts';
 import { attentionView, freshStatus, targetOf, type EvalInput } from './evaluate.ts';
 import { ATTENTION_ROW_LIMIT, ATTENTION_SCHEMA, AttentionState, NEWSLETTER_BATCH_CODES, migrateAttentionSequence, type AttentionCondition } from './attention-state.ts';
-import type { ReadHomeResponse } from '@ziyixi/proto/dashboard/mcp/v1/home_service_wire';
-import { ReadHomeResponseSchema } from '@ziyixi/proto/dashboard/mcp/v1/home_service_pb';
+import type { ReadHomeResponse, ReadUsageResponse } from '@ziyixi/proto/dashboard/mcp/v1/home_service_wire';
+import { ReadHomeResponseSchema, ReadUsageResponseSchema } from '@ziyixi/proto/dashboard/mcp/v1/home_service_pb';
 import { fromWire, toWire } from '@ziyixi/proto/wire-json';
 import type { HomeView } from './api-types.ts';
 import type { Attention, AttentionItem, Badges } from './api-types.ts';
@@ -78,11 +78,11 @@ import { OPS_APPS, createInboxTask, opsCanaryDelivery, opsCanaryResult, opsSetGu
 import { callWebsiteRequest, callWebsiteSyncStatus, unconfirmedWebsiteRequest } from './website-sync.ts';
 import type { WebsiteSyncRequestResult } from './api-types.ts';
 import { PROBE_ERRORS, nextProbeDoc, probeDue, probeUrl, type ProbeTarget } from './probe.ts';
-import { REGISTRY, entryProbe } from './registry.ts';
+import { REGISTRY, entryProbe, ownedDoNamespaces } from './registry.ts';
 import { homeCatalog } from './private-catalog.ts';
 import type { RegistryDef } from './registry-types.ts';
 import type { DesiredState } from './drift.ts';
-import { HOUR_MS, MINUTE_MS, iso, isoOrNull, utcDay, utcMonthStart } from './time.ts';
+import { HOUR_MS, MINUTE_MS, PAID_BILLING_ANCHOR_DAY, billingPeriod, iso, isoOrNull, utcDay, utcMonthStart } from './time.ts';
 import { fetchUsage, type UsageErrorCode } from './usage.ts';
 import type { ViewBody } from './view-body.ts';
 import { cloudflareResponse, flowsResponse, fnv1a, homeResponse, opsResponse, serializeView, shell } from './views.ts';
@@ -291,6 +291,7 @@ export class HomeState extends DurableObject<Env> {
   private readonly desired: DesiredState;
   private readonly desiredHash: string;
   private readonly probed: readonly (ProbeTarget & { readonly id: string })[];
+  private readonly ownedDo: ReadonlyMap<string, string>;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -299,6 +300,7 @@ export class HomeState extends DurableObject<Env> {
     this.desired = catalog.desired;
     this.desiredHash = fnv1a(JSON.stringify(this.desired));
     this.probed = probeTargets(this.registry);
+    this.ownedDo = ownedDoNamespaces(this.registry);
     this.attentionState = new AttentionState(ctx.storage, <T extends Record<string, SqlStorageValue>>(query: string, ...bindings: SqlStorageValue[]) => this.rows<T>(query, ...bindings));
     void ctx.blockConcurrencyWhile(() => {
       for (const statement of SCHEMA) ctx.storage.sql.exec(statement);
@@ -329,6 +331,25 @@ export class HomeState extends DurableObject<Env> {
         control_unavailable_count: home.attention.control_unavailable_count ?? 0,
       };
       return toWire(ReadHomeResponseSchema, fromWire(ReadHomeResponseSchema, response).message);
+    });
+  }
+
+  /** Private service-binding read: current cached Usage projection (never triggers GraphQL). */
+  readUsage(at: number | null = null): Promise<ReadUsageResponse> {
+    return this.serialize(() => {
+      const now = at ?? Date.now();
+      this.readCache = new Map();
+      try {
+        const raw = this.usageView(now);
+        const usage: Usage = {
+          ...raw,
+          rows: withBreakdownResources(raw.rows, this.registry),
+          ...(raw.alternate_rows === undefined ? {} : { alternate_rows: withBreakdownResources(raw.alternate_rows, this.registry) }),
+        };
+        return toWire(ReadUsageResponseSchema, fromWire(ReadUsageResponseSchema, { usage }).message);
+      } finally {
+        this.readCache = null;
+      }
     });
   }
 
@@ -474,18 +495,32 @@ export class HomeState extends DurableObject<Env> {
   }
 
   /**
-   * SwitchQuotaPlan: persists the active billing plan (`free` or `paid`), re-evaluates automatic guard & digest
-   * against the selected plan's allowances, and answers the updated serialized CloudflareView.
+   * SwitchQuotaPlan: persists the active billing plan (`free` or `paid`) and optional renewal anchor day,
+   * re-evaluates automatic guard & digest against the selected plan's allowances, and answers the updated CloudflareView.
    */
-  switchQuotaPlan(plan: QuotaPlan, at: number | null = null, requestId: string | null = null): Promise<SwitchQuotaPlanOutcome> {
+  switchQuotaPlan(
+    plan: QuotaPlan,
+    at: number | null = null,
+    requestId: string | null = null,
+    billingAnchorDay: number | null = null,
+  ): Promise<SwitchQuotaPlanOutcome> {
     return this.serialize(async (): Promise<SwitchQuotaPlanOutcome> => {
       const now = at ?? Date.now();
-      const inputKey = JSON.stringify([plan]);
+      const inputKey = JSON.stringify([plan, billingAnchorDay]);
       const replay = this.replay(requestId, 'switch_quota_plan', now, inputKey);
       if (replay === 'reused') return { ok: false, code: 'request_id_reused' };
       if (replay !== null) return { ok: true, ...(replay as { body: string; etag: string }) };
       const meta = this.doc<MetaDoc>('meta') ?? NO_META;
-      this.putDoc('meta', { ...meta, quota_plan: plan, rev: (meta.rev ?? 0) + 1 }, now);
+      this.putDoc(
+        'meta',
+        {
+          ...meta,
+          quota_plan: plan,
+          ...(billingAnchorDay === null ? {} : { billing_anchor_day: billingAnchorDay }),
+          rev: (meta.rev ?? 0) + 1,
+        },
+        now,
+      );
       const guard = await this.runGuard(now, perApp((app) => this.statusDoc(app).status));
       await this.runDigest(now, false, meta.last_tick_at);
       console.log(JSON.stringify({ event: 'quota_plan', plan, guard: guard.desired.level, guard_calls: guard.calls }));
@@ -590,7 +625,10 @@ export class HomeState extends DurableObject<Env> {
   /** One GraphQL request (or none without a token); returns the error code, null on success. */
   private async pollUsage(now: number): Promise<UsageErrorCode | null> {
     const previous = this.doc<UsageDoc>('usage') ?? NO_USAGE;
-    const result = await fetchUsage(this.env.CF_ANALYTICS_TOKEN, this.env.ACCOUNT_ID, now);
+    const result = await fetchUsage(this.env.CF_ANALYTICS_TOKEN, this.env.ACCOUNT_ID, now, undefined, {
+      anchorDay: this.billingAnchorDay(),
+      ownedDoNamespaces: this.ownedDo,
+    });
     let doc: UsageDoc;
     if (result.ok) {
       doc = {
@@ -599,6 +637,8 @@ export class HomeState extends DurableObject<Env> {
         month: utcMonthStart(now),
         rows: result.data.rows,
         paid_rows: result.data.paid_rows,
+        billing_period_start: result.data.billing_period_start,
+        billing_period_end: result.data.billing_period_end,
         unclassified_r2_operations: result.data.unclassified_r2_operations,
         resources: result.data.resources,
         last_error: null,
@@ -713,6 +753,10 @@ export class HomeState extends DurableObject<Env> {
     return (this.doc<MetaDoc>('meta') ?? NO_META).quota_plan ?? 'free';
   }
 
+  private billingAnchorDay(): number {
+    return (this.doc<MetaDoc>('meta') ?? NO_META).billing_anchor_day ?? PAID_BILLING_ANCHOR_DAY;
+  }
+
   private activeRows(usage: UsageDoc): QuotaRow[] {
     return this.activePlan() === 'paid' && usage.paid_rows !== undefined ? usage.paid_rows : usage.rows;
   }
@@ -813,6 +857,7 @@ export class HomeState extends DurableObject<Env> {
         fetched_at: usage.fetched_at,
         consecutive_failures: usage.consecutive_failures,
         last_http_status: usage.last_http_status,
+        plan: this.activePlan(),
       },
       desired: this.summaryDesired(now),
       guardFailures: perApp((app) => this.applied(app).consecutive_failures),
@@ -1083,6 +1128,7 @@ export class HomeState extends DurableObject<Env> {
     const plan = this.activePlan();
     const rows = this.activeRows(usage);
     const alternateRows = plan === 'paid' ? usage.rows : (usage.paid_rows ?? []);
+    const period = billingPeriod(now, this.billingAnchorDay());
     const status: Usage['status'] = !analyticsConfigured(this.env)
       ? 'not_configured'
       : usage.fetched_at === null
@@ -1102,6 +1148,8 @@ export class HomeState extends DurableObject<Env> {
       unclassified_r2_operations: usage.unclassified_r2_operations,
       plan,
       ...(alternateRows.length > 0 ? { alternate_rows: alternateRows } : {}),
+      billing_period_start: usage.billing_period_start ?? period.startDay,
+      billing_period_end: usage.billing_period_end ?? period.endDay,
     };
   }
 

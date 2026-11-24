@@ -366,7 +366,46 @@ describe("the day's task", () => {
       severity: 'warning',
       metrics: { used: 2_500, percent: 19.2, limit: 1_950, namespaces: 1 },
     });
-    const underPaid = candidates(input({ usage: { configured: true, fresh: true, rows: [paidRow], fetched_at: NOW, consecutive_failures: 0, last_http_status: 200 } }));
+    const underPaid = candidates(
+      input({
+        usage: { configured: true, fresh: true, plan: 'paid', rows: [paidRow], fetched_at: NOW, consecutive_failures: 0, last_http_status: 200 },
+      }),
+    );
     expect(underPaid.find((item) => item.code === 'do_namespace_duration_high')).toBeUndefined();
+  });
+
+  it('warns under Paid when a monthly quota projects to >= 100 % even while current usage is < 80 %', () => {
+    const projectedRow = {
+      id: 'workers_cpu_ms' as const,
+      period: 'monthly' as const,
+      unit: 'milliseconds' as const,
+      used: 6_000_000,
+      limit: 30_000_000,
+      percent: 20,
+      projected: 36_000_000,
+      projected_percent: 120,
+      guard_trigger: false,
+      truncated: false,
+      breakdown: [],
+      source: 'https://developers.cloudflare.com/workers/platform/pricing/',
+    };
+    const paid = candidates(
+      input({
+        usage: { configured: true, fresh: true, plan: 'paid', rows: [projectedRow], fetched_at: NOW, consecutive_failures: 0, last_http_status: 200 },
+      }),
+    );
+    expect(paid.find((item) => item.code === 'workers_cpu_ms_projected_high')).toEqual({
+      source: 'cloudflare',
+      code: 'workers_cpu_ms_projected_high',
+      severity: 'warning',
+      metrics: { percent: 20, used: 6_000_000, limit: 30_000_000, projected: 36_000_000, projected_percent: 120 },
+    });
+    // Under Free, monthly rows do not emit _projected_high.
+    const free = candidates(
+      input({
+        usage: { configured: true, fresh: true, plan: 'free', rows: [projectedRow], fetched_at: NOW, consecutive_failures: 0, last_http_status: 200 },
+      }),
+    );
+    expect(free.find((item) => item.code === 'workers_cpu_ms_projected_high')).toBeUndefined();
   });
 });

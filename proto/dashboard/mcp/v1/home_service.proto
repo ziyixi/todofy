@@ -20,6 +20,7 @@ package dashboard.mcp.v1;
 import "common/wire/v1/wire.proto";
 import "dashboard/ui/v1/attention.proto";
 import "dashboard/ui/v1/home_view.proto";
+import "dashboard/ui/v1/usage.proto";
 import "google/api/field_behavior.proto";
 
 option java_multiple_files = true;
@@ -30,6 +31,20 @@ option java_package = "science.ziyixi.dashboard.mcp.v1";
 service HomeService {
   // Current service states and undismissed attention episodes after the caller's cursor.
   rpc ReadHome(ReadHomeRequest) returns (ReadHomeResponse);
+  // Current cached account usage projection across Free and Paid quota windows.
+  rpc ReadUsage(ReadUsageRequest) returns (ReadUsageResponse);
+}
+
+// Empty input for ReadUsage.
+message ReadUsageRequest {}
+
+// Cached usage projection from HomeState.
+message ReadUsageResponse {
+  // Current account usage rows and active billing window.
+  dashboard.ui.v1.Usage usage = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (common.wire.v1.field).non_null = true
+  ];
 }
 
 // A cursor over episode creation, independent of owner dismiss and restore operations.

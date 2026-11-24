@@ -31,7 +31,9 @@ export interface SyntheticUsage {
   /** The `workers` rows; default: mail-hero and todofy sharing workersRequests 3:1. */
   readonly scripts?: readonly SyntheticScript[];
   /** The `doInv` rows; default: one mail-hero row with doRequests. */
-  readonly doScripts?: readonly { readonly script: string; readonly requests: number; readonly errors: number }[];
+  readonly doScripts?: readonly { readonly script: string; readonly requests: number; readonly errors: number; readonly namespaceId?: string }[];
+  /** Microseconds of Workers CPU time for `workersMonth`. */
+  readonly workersCpuUs?: number;
   /** The `d1` rows; default: one database with d1RowsRead/d1RowsWritten. */
   readonly d1Databases?: readonly { readonly id: string; readonly rowsRead: number; readonly rowsWritten: number }[];
   /** The `doPer` rows; default: one namespace with the doActiveTimeUs/doRowsRead/doRowsWritten. */
@@ -138,7 +140,7 @@ export function graphqlBody(usage: SyntheticUsage = {}): unknown {
   }));
   const doInvRows = (usage.doScripts ?? [{ script: 'mail-hero', requests: usage.doRequests ?? 800, errors: 0 }]).map((d) => ({
     sum: { requests: d.requests, errors: d.errors },
-    dimensions: { scriptName: d.script },
+    dimensions: { scriptName: d.script, namespaceId: d.namespaceId ?? 'ns-synthetic-1' },
   }));
   const doPerRows = usage.doNamespaces
     ? usage.doNamespaces.map((ns) => ({
@@ -165,7 +167,18 @@ export function graphqlBody(usage: SyntheticUsage = {}): unknown {
         accounts: [
           {
             workers: workerRows,
-            workersMonth: workerRows.map((row) => ({ sum: { requests: Math.round(row.sum.requests * factor) }, dimensions: row.dimensions })),
+            workersMonth: workerRows.map((row, index) => ({
+              sum: {
+                requests: Math.round(row.sum.requests * factor),
+                cpuTimeUs:
+                  usage.workersCpuUs !== undefined
+                    ? index === 0
+                      ? usage.workersCpuUs
+                      : 0
+                    : Math.round(row.quantiles.cpuTimeP50 * row.sum.requests * factor),
+              },
+              dimensions: row.dimensions,
+            })),
             d1: d1Rows,
             d1Month: d1Rows.map((row) => ({
               sum: { rowsRead: Math.round(row.sum.rowsRead * factor), rowsWritten: Math.round(row.sum.rowsWritten * factor) },
@@ -188,6 +201,13 @@ export function graphqlBody(usage: SyntheticUsage = {}): unknown {
             })),
             doSto: (usage.doStoredBytes ?? []).map((bytes) => ({ max: { storedBytes: bytes } })),
             r2ops: (
+              usage.r2Ops ?? [
+                { actionType: 'PutObject', bucketName: 'bucket-synthetic', requests: 3000 },
+                { actionType: 'GetObject', bucketName: 'bucket-synthetic', requests: 9000 },
+                { actionType: 'DeleteObject', bucketName: 'bucket-synthetic', requests: 500 },
+              ]
+            ).map((op) => ({ sum: { requests: op.requests }, dimensions: { actionType: op.actionType, bucketName: op.bucketName } })),
+            r2opsPaid: (
               usage.r2Ops ?? [
                 { actionType: 'PutObject', bucketName: 'bucket-synthetic', requests: 3000 },
                 { actionType: 'GetObject', bucketName: 'bucket-synthetic', requests: 9000 },

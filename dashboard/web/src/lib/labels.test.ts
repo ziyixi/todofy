@@ -38,7 +38,9 @@ describe('labels', () => {
   it('names every quota resource', () => {
     for (const id of QUOTA_RESOURCES) expect(QUOTA[id]).toBeTruthy()
     expect(signalLabel('d1_rows_read_high')).toBe('D1 读取行数用量高')
+    expect(signalLabel('workers_cpu_ms_projected_high')).toBe('Workers CPU 时间预计本账期将超出上限')
     expect(signalLabel('ai_neurons_high')).toBe('Workers AI neurons 用量高')
+    expect(alertGuidance('workers_cpu_ms_projected_high', 'cloudflare').explanation).toContain('Workers / Durable Objects 会被消费上限全部拦截到账期结束')
     expect(signalLabel('do_namespace_duration_high')).toBe('单个 Durable Object 命名空间时长偏高')
     expect(signalLabel('collector_off_track')).toBe('collector off track')
     expect(signalLabel('collector_off_track_low_rate')).toBe('collector off track (low_rate)')

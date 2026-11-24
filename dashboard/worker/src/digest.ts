@@ -4,7 +4,7 @@
  */
 import type { OpsReportItem } from '@ziyixi/proto/ops/v1/ops_wire';
 import type { CreateInboxTaskRequest } from '@ziyixi/proto/tasks/inbox/v1/task_inbox_wire';
-import { DIGEST_TASK_ATTEMPTS, GUARD_SHED_PERCENT, QUOTA_CRITICAL_PERCENT, type AppErrorCode, type CanaryStage, type OpsApp, type OpsSeverity, type OpsStatus, type QuotaRow } from './api-types.ts';
+import { DIGEST_TASK_ATTEMPTS, GUARD_SHED_PERCENT, QUOTA_CRITICAL_PERCENT, type AppErrorCode, type CanaryStage, type OpsApp, type OpsSeverity, type OpsStatus, type QuotaPlan, type QuotaRow } from './api-types.ts';
 import { DRIFT_UNAVAILABLE_AFTER_DAYS } from './api-types.ts';
 import { CANARY_DISABLED_CODE, type CanaryRecord } from './canary.ts';
 import type { DigestDoc } from './docs.ts';
@@ -46,6 +46,7 @@ export interface DigestInput {
     readonly fetched_at: number | null;
     readonly consecutive_failures: number;
     readonly last_http_status: number | null;
+    readonly plan?: QuotaPlan;
   };
   readonly desired: DesiredGuard;
   readonly guardFailures: Readonly<Record<OpsApp, number>>;
@@ -127,9 +128,10 @@ export function candidates(input: DigestInput): Candidate[] {
       metrics: { consecutive_failures: usage.consecutive_failures, http_status: usage.last_http_status ?? 0 },
     });
   }
+  const activePlan: QuotaPlan = usage.plan ?? 'free';
   if (usage.fresh) {
     for (const row of usage.rows) {
-      if (row.id === 'do_duration' && row.breakdown.length > 0 && row.limit > 0) {
+      if (activePlan === 'free' && row.id === 'do_duration' && row.breakdown.length > 0 && row.limit > 0) {
         const threshold = (row.limit * DO_NAMESPACE_WARN_PERCENT) / 100;
         const above = row.breakdown.filter((b) => b.value > threshold);
         const top = above[0];
@@ -147,15 +149,40 @@ export function candidates(input: DigestInput): Candidate[] {
           });
         }
       }
-      if (row.percent === null || row.used === null || !reachesPercent(row, GUARD_SHED_PERCENT)) continue;
-      const metrics: Record<string, number> = { percent: row.percent, used: row.used, limit: row.limit };
-      if (row.projected_percent !== null) metrics.projected_percent = row.projected_percent;
-      out.push({
-        source: 'cloudflare',
-        code: `${row.id}_high`,
-        severity: reachesPercent(row, QUOTA_CRITICAL_PERCENT) ? 'critical' : 'warning',
-        metrics,
-      });
+      if (row.percent !== null && row.used !== null && reachesPercent(row, GUARD_SHED_PERCENT)) {
+        const metrics: Record<string, number> = { percent: row.percent, used: row.used, limit: row.limit };
+        if (row.projected_percent !== null) metrics.projected_percent = row.projected_percent;
+        out.push({
+          source: 'cloudflare',
+          code: `${row.id}_high`,
+          severity: reachesPercent(row, QUOTA_CRITICAL_PERCENT) ? 'critical' : 'warning',
+          metrics,
+        });
+        continue;
+      }
+      if (
+        activePlan === 'paid' &&
+        row.period === 'monthly' &&
+        row.used !== null &&
+        row.percent !== null &&
+        row.projected !== null &&
+        row.projected_percent !== null &&
+        row.limit > 0 &&
+        row.projected >= row.limit
+      ) {
+        out.push({
+          source: 'cloudflare',
+          code: `${row.id}_projected_high`,
+          severity: 'warning',
+          metrics: {
+            percent: row.percent,
+            used: row.used,
+            limit: row.limit,
+            projected: row.projected,
+            projected_percent: row.projected_percent,
+          },
+        });
+      }
     }
   }
 

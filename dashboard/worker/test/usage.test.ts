@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import reviewedQuery from './fixtures/usage-query-reviewed.graphql?raw';
 import { type QuotaRow } from '../src/api-types.ts';
-import { QUOTA_RESOURCES } from '../src/idl.ts';
-import { ALLOWANCES } from '../src/limits.ts';
+import { ALLOWANCES, FREE_QUOTA_RESOURCES, PAID_ALLOWANCES, PAID_QUOTA_RESOURCES } from '../src/limits.ts';
+import { billingPeriod } from '../src/time.ts';
 import limitsDoc from '../../docs/limits.md?raw';
 import {
   DATASET_LIMITS,
@@ -43,22 +43,50 @@ describe('the usage query', () => {
     expect(asked).toEqual(DATASET_LIMITS);
   });
 
-  it('asks for the UTC day so far and the UTC month to date', () => {
+  it('asks for the UTC day so far, calendar month, and Paid billing period', () => {
     expect(usageVariables(ACCOUNT, Date.parse('2026-09-29T12:34:56.789Z'))).toEqual({
       a: ACCOUNT,
       day: '2026-09-29',
       start: '2026-09-29T00:00:00Z',
       end: '2026-09-29T12:34:56Z',
       month: '2026-09-01',
-      monthStart: '2026-09-01T00:00:00Z',
+      billingDay: '2026-09-24',
+      billingStart: '2026-09-24T00:00:00Z',
+    });
+  });
+
+  it('tracks subscription billing periods across calendar months without resetting on the 1st', () => {
+    expect(billingPeriod(Date.parse('2026-11-24T10:00:00Z'))).toMatchObject({
+      startDay: '2026-11-24',
+      endDay: '2026-12-23',
+    });
+    // Across Dec 1 UTC: still stays in the 11-24 .. 12-23 billing cycle (no early reset).
+    expect(billingPeriod(Date.parse('2026-12-01T12:00:00Z'))).toMatchObject({
+      startDay: '2026-11-24',
+      endDay: '2026-12-23',
+    });
+    // Next cycle starts on Dec 24 00:00 UTC.
+    expect(billingPeriod(Date.parse('2026-12-24T00:00:00Z'))).toMatchObject({
+      startDay: '2026-12-24',
+      endDay: '2027-01-23',
+    });
+    // Even with a higher anchor day (e.g. 28), the initial Nov-24 upgrade period never includes pre-upgrade days.
+    expect(billingPeriod(Date.parse('2026-11-25T12:00:00Z'), 28)).toMatchObject({
+      startDay: '2026-11-24',
+      endDay: '2026-11-27',
     });
   });
 
   it('has one allowance per resource, with a Cloudflare docs source', () => {
-    for (const id of QUOTA_RESOURCES) {
+    for (const id of FREE_QUOTA_RESOURCES) {
       expect(ALLOWANCES[id].source).toMatch(/^https:\/\/developers\.cloudflare\.com\//);
-      // Workers AI is the one daily row that never sheds (limits.md §1).
+      // Workers AI is the one daily row that never sheds under Free (limits.md §1).
       expect(ALLOWANCES[id].guardTrigger).toBe(ALLOWANCES[id].period !== 'storage' && id !== 'ai_neurons');
+    }
+    for (const id of PAID_QUOTA_RESOURCES) {
+      expect(PAID_ALLOWANCES[id].source).toMatch(/^https:\/\/developers\.cloudflare\.com\//);
+      // Paid monthly quotas alert instead of shedding daily apps.
+      expect(PAID_ALLOWANCES[id].guardTrigger).toBe(false);
     }
   });
 });
@@ -92,7 +120,7 @@ describe('parseUsage', () => {
     );
     expect(data).not.toBeNull();
     const rows = data?.rows ?? [];
-    expect(rows.map((r) => r.id)).toEqual(QUOTA_RESOURCES);
+    expect(rows.map((r) => r.id)).toEqual(FREE_QUOTA_RESOURCES);
     expect(row(rows, 'workers_requests')).toMatchObject({ used: 81_000, limit: 100_000, percent: 81, period: 'daily', guard_trigger: true });
     expect(row(rows, 'workers_requests').breakdown).toEqual([
       { name: 'mail-hero', value: 60_750 },
@@ -175,8 +203,8 @@ describe('parseUsage', () => {
     expect(row(rows, 'r2_class_b')).toMatchObject({ used: 28, truncated: false });
     expect(row(rows, 'r2_storage')).toMatchObject({ used: 14_000, truncated: false });
     // A full page of the new cap is still a lower bound.
-    const full = parseUsage(graphqlBody({ doScripts: Array.from({ length: 25 }, (_, i) => ({ script: `do-${String(i)}`, requests: 1, errors: 0 })) }), NOW)?.rows ?? [];
-    expect(row(full, 'do_requests')).toMatchObject({ used: 25, truncated: true });
+    const full = parseUsage(graphqlBody({ doScripts: Array.from({ length: 100 }, (_, i) => ({ script: `do-${String(i)}`, requests: 1, errors: 0 })) }), NOW)?.rows ?? [];
+    expect(row(full, 'do_requests')).toMatchObject({ used: 100, truncated: true });
   });
 
   it('reads empty storage datasets as no data, never 0', () => {
@@ -414,19 +442,49 @@ describe('fetchUsage', () => {
     }
   });
 
-  it('builds paid_rows with monthly allowances and 10 GB D1 per-database limit', () => {
-    const data = parseUsage(graphqlBody({ ...REALISTIC_USAGE, monthFactor: 10 }), NOW);
+  it('builds paid_rows with monthly allowances, workers_cpu_ms, billing window, and cross-Worker DO RPC filtering', () => {
+    const ownedDoNamespaces = new Map<string, string>([['ns-caller-do', 'todofy-core']]);
+    const now = Date.parse('2026-12-01T12:00:00Z');
+    const data = parseUsage(
+      graphqlBody({
+        ...REALISTIC_USAGE,
+        monthFactor: 10,
+        workersCpuUs: 1_500_000_000,
+        doScripts: [
+          { script: 'mail-hero', requests: 612, errors: 0, namespaceId: 'ns-other' },
+          { script: 'todofy-core', requests: 632, errors: 0, namespaceId: 'ns-caller-do' },
+          // Cross-Worker stateless WorkerEntrypoint call attributed to todofy-core's DO namespace: must be excluded.
+          { script: 'model-router', requests: 1_500, errors: 0, namespaceId: 'ns-caller-do' },
+        ],
+      }),
+      now,
+      { ownedDoNamespaces },
+    );
     expect(data).not.toBeNull();
     if (data === null) return;
-    expect(row(data.paid_rows, 'workers_requests')).toMatchObject({ period: 'monthly', used: 7120, limit: 10_000_000 });
-    expect(row(data.paid_rows, 'd1_rows_read')).toMatchObject({ period: 'monthly', used: 71_420, limit: 25_000_000_000 });
-    expect(row(data.paid_rows, 'd1_rows_written')).toMatchObject({ period: 'monthly', used: 4860, limit: 50_000_000 });
-    expect(row(data.paid_rows, 'do_requests')).toMatchObject({ period: 'monthly', used: 13_800, limit: 1_000_000 });
-    expect(row(data.paid_rows, 'do_duration')).toMatchObject({ period: 'monthly', limit: 400_000 });
-    expect(row(data.paid_rows, 'do_rows_read')).toMatchObject({ period: 'monthly', used: 214_000, limit: 25_000_000_000 });
-    expect(row(data.paid_rows, 'do_rows_written')).toMatchObject({ period: 'monthly', used: 19_200, limit: 50_000_000 });
-    expect(row(data.paid_rows, 'd1_database_max')).toMatchObject({ period: 'storage', limit: 10_000_000_000 });
-    expect(row(data.paid_rows, 'ai_neurons')).toMatchObject({ period: 'daily', limit: 10_000 });
+    expect(data.billing_period_start).toBe('2026-11-24');
+    expect(data.billing_period_end).toBe('2026-12-23');
+    expect(data.paid_rows.map((r) => r.id)).toEqual(PAID_QUOTA_RESOURCES);
+    expect(row(data.rows, 'do_requests')).toMatchObject({ used: 1244, breakdown: [{ name: 'todofy-core', value: 632 }, { name: 'mail-hero', value: 612 }] });
+    expect(row(data.paid_rows, 'workers_requests')).toMatchObject({ period: 'monthly', used: 7120, limit: 10_000_000, guard_trigger: false });
+    expect(row(data.paid_rows, 'workers_cpu_ms')).toMatchObject({
+      period: 'monthly',
+      unit: 'milliseconds',
+      used: 1_500_000,
+      limit: 30_000_000,
+      percent: 5,
+      guard_trigger: false,
+    });
+    expect(row(data.paid_rows, 'd1_rows_read')).toMatchObject({ period: 'monthly', used: 71_420, limit: 25_000_000_000, guard_trigger: false });
+    expect(row(data.paid_rows, 'd1_rows_written')).toMatchObject({ period: 'monthly', used: 4860, limit: 50_000_000, guard_trigger: false });
+    expect(row(data.paid_rows, 'do_requests')).toMatchObject({ period: 'monthly', used: 12_440, limit: 1_000_000, guard_trigger: false });
+    expect(row(data.paid_rows, 'do_duration')).toMatchObject({ period: 'monthly', limit: 400_000, guard_trigger: false });
+    expect(row(data.paid_rows, 'do_rows_read')).toMatchObject({ period: 'monthly', used: 214_000, limit: 25_000_000_000, guard_trigger: false });
+    expect(row(data.paid_rows, 'do_rows_written')).toMatchObject({ period: 'monthly', used: 19_200, limit: 50_000_000, guard_trigger: false });
+    expect(row(data.paid_rows, 'd1_database_max')).toMatchObject({ period: 'storage', limit: 10_000_000_000, guard_trigger: false });
+    expect(row(data.paid_rows, 'ai_neurons')).toMatchObject({ period: 'daily', limit: 10_000, guard_trigger: false });
+    // Linear projection over the 30-day billing period (11-24 00:00Z -> 12-01 12:00Z = 7.5 days = 1/4 of 30 days).
+    expect(row(data.paid_rows, 'workers_cpu_ms')).toMatchObject({ projected: 6_000_000, projected_percent: 20 });
   });
 
   it('treats absent monthly datasets as null used values without failing Free rows', () => {
@@ -438,11 +496,15 @@ describe('fetchUsage', () => {
     delete account.d1Month;
     delete account.doInvMonth;
     delete account.doPerMonth;
+    delete account.r2opsPaid;
     const data = parseUsage(body, NOW);
     expect(data).not.toBeNull();
     if (data === null) return;
     expect(row(data.rows, 'workers_requests').used).toBe(712);
+    expect(row(data.rows, 'r2_class_a').used).toBe(17_110);
     expect(row(data.paid_rows, 'workers_requests').used).toBeNull();
+    expect(row(data.paid_rows, 'workers_cpu_ms').used).toBeNull();
     expect(row(data.paid_rows, 'do_duration').used).toBeNull();
+    expect(row(data.paid_rows, 'r2_class_a').used).toBeNull();
   });
 });

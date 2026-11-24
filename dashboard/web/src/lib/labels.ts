@@ -209,11 +209,16 @@ const SIGNALS: Readonly<Record<string, string>> = {
   do_namespace_duration_high: '单个 Durable Object 命名空间时长偏高',
 }
 
-/** Signal, digest item or banner code → Chinese; `<quota id>_high` → "<resource> 用量高". */
+/** Signal, digest item or banner code → Chinese; `<quota id>_high` / `_projected_high` → Chinese. */
 export function signalLabel(code: string): string {
   if (Object.hasOwn(SIGNALS, code)) return SIGNALS[code] as string
   const offTrack = /^collector_off_track(?:_([a-z0-9_]+))?$/.exec(code)
   if (offTrack) return offTrack[1] ? `collector off track (${offTrack[1]})` : 'collector off track'
+  const projected = /^(.+)_projected_high$/.exec(code)
+  if (projected && isQuotaId(projected[1] as string)) {
+    const name = QUOTA[projected[1] as QuotaResource]
+    return `${name}${/[A-Za-z]$/.test(name) ? ' ' : ''}预计本账期将超出上限`
+  }
   const quota = /^(.+)_high$/.exec(code)
   if (quota && isQuotaId(quota[1] as string)) {
     const name = QUOTA[quota[1] as QuotaResource]
@@ -225,6 +230,7 @@ export function signalLabel(code: string): string {
 
 export const QUOTA: Readonly<Record<QuotaResource, string>> = {
   workers_requests: 'Workers 请求',
+  workers_cpu_ms: 'Workers CPU 时间',
   d1_rows_read: 'D1 读取行数',
   d1_rows_written: 'D1 写入行数',
   do_requests: 'Durable Objects 请求',

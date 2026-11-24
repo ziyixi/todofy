@@ -4,7 +4,7 @@
 
 ## 范围与存储
 
-- 保持 Workers Free、D1、私有 R2、SQLite Durable Object Alarm 和同 Worker 的 React Assets。只有一个固定收信地址；不恢复 Go/PostgreSQL、VPS collector、邮箱轮询或多租户平台。
+- 运行在 owner 授权的 Workers Paid 账户下，但代码仍保持 Workers Free 级别的轻量预算：D1、私有 R2、SQLite Durable Object Alarm 与同 Worker 的 React Assets，只有一个固定收信地址；不恢复 Go/PostgreSQL、VPS collector、邮箱轮询或多租户平台。
 - Email handler 精确校验 envelope 与原件上限，先持久登记任务并完成流式 R2 保存，再结束接管。MIME 解析放在 DO Alarm，普通 Worker 不整件缓冲或解析。
 - D1 保存索引、不可变目标 revision、事件身份、attempt 和 UI 幂等记录；R2 保存原件、解析内容、附件和冻结 payload。三种存储之间没有跨服务事务，每一步都要可恢复、可去重，删除不能被晚到解析复活。
 - SQLite DO 使用持久任务和 Alarm；不能依赖内存 timer。后台、盘点、清理与恢复查询必须有界并走索引。D1 的 50-byte LIKE/GLOB 模式边界要有显式回归，键前缀使用范围查询。

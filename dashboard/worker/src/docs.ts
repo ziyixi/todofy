@@ -31,6 +31,8 @@ export interface UsageDoc {
   readonly rows: QuotaRow[];
   /** Present when fetched after dual-plan support; absent in earlier stored documents. */
   readonly paid_rows?: QuotaRow[];
+  readonly billing_period_start?: string | null;
+  readonly billing_period_end?: string | null;
   readonly unclassified_r2_operations: number;
   /** Absent in documents written before v2. */
   readonly resources?: ResourceUsage;
@@ -81,6 +83,8 @@ export interface MetaDoc {
   readonly last_refresh_cloudflare_at?: number | null;
   /** Active billing plan ('free' when absent). */
   readonly quota_plan?: 'free' | 'paid';
+  /** UTC day-of-month (1-31) when Workers Paid renews; defaults to 24. */
+  readonly billing_anchor_day?: number;
 }
 
 /** `probe:<entry>`: the last public_http probe of an entry (status code, outcome and latency only). */

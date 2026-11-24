@@ -5,7 +5,7 @@
  * Object storage (60-day canary retention, 14 recent runs).
  */
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { QUOTA_RESOURCES } from '../../src/idl.ts';
+import { FREE_QUOTA_RESOURCES } from '../../src/limits.ts';
 import { type HomeView, type OpsView } from '../../src/api-types.ts';
 import { accessClaims, testIssuer, type TestIssuer } from '../jwt.ts';
 import { expectValid, NOW, PATHS, startFlows, SYNTHETIC_BINDINGS, type FlowHarness } from './flows.ts';
@@ -91,7 +91,7 @@ describe('the ops and cloudflare views', () => {
     expect(after.ops.build).toBe('test');
     expect(after.overall.level).toBe('ok');
     expect(after.usage.status).toBe('ok');
-    expect(after.usage.rows.map((row) => row.id)).toEqual(QUOTA_RESOURCES);
+    expect(after.usage.rows.map((row) => row.id)).toEqual(FREE_QUOTA_RESOURCES);
     // The fake GraphQL answers `ai: []` like the live account: no AI calls today reads 0, not 无数据.
     expect(after.usage.rows.find((row) => row.id === 'ai_neurons')).toMatchObject({ used: 0, percent: 0, limit: 10_000, breakdown: [] });
     for (const row of after.usage.rows) expect(row.source).toMatch(/^https:\/\/developers\.cloudflare\.com\//);

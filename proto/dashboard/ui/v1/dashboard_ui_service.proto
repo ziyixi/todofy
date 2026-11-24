@@ -410,6 +410,14 @@ message SwitchQuotaPlanRequest {
     (google.api.field_info).format = UUID4,
     (google.api.field_behavior) = OPTIONAL
   ];
+  // Optional UTC day-of-month (1-31) when the Workers Paid subscription renews; defaults to 24.
+  optional int32 billing_anchor_day = 4 [
+    (google.api.field_behavior) = OPTIONAL,
+    (common.wire.v1.field) = {
+      minimum: 1
+      maximum: 31
+    }
+  ];
 }
 
 // Output of OverrideGuard.

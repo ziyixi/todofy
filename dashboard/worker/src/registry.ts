@@ -609,6 +609,20 @@ export function resourceByMatch(kind: ResourceDef['kind'], id: string, registry:
 }
 
 /**
+ * Durable Object namespace ID -> defining Worker script name (`resource.script`, or its entry's primary script).
+ * Used to exclude cross-Worker `WorkerEntrypoint` RPC calls that Cloudflare attributes to the caller's DO namespace.
+ */
+export function ownedDoNamespaces(registry: RegistryDef = REGISTRY): ReadonlyMap<string, string> {
+  const map = new Map<string, string>();
+  for (const resource of registry.resources) {
+    if (resource.kind !== 'do' || resource.match === null) continue;
+    const owner = resource.script ?? registry.workers.find((worker) => worker.entry === resource.entry)?.script;
+    if (owner !== undefined) map.set(resource.match, owner);
+  }
+  return map;
+}
+
+/**
  * Outbound calls of one tick computed from the registry (design-v2.md §5): status() per ops_v1 entry (and the
  * website relay's getSyncStatus with notion-publish's), one GET per probe (entryProbe), the GraphQL query,
  * setGuard per guarded entry, two canary calls per canary, one createInboxTask (the digest's daily task) and the

@@ -35,6 +35,46 @@ export function daysInUtcMonth(ms: number): number {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
 }
 
+/** Default monthly renewal day of the owner's Workers Paid subscription (2026-11-24 UTC upgrade). */
+export const PAID_BILLING_ANCHOR_DAY = 24;
+export const PAID_UPGRADE_DAY = '2026-11-24';
+export const PAID_UPGRADE_MS = Date.parse(`${PAID_UPGRADE_DAY}T00:00:00Z`);
+
+export interface BillingPeriod {
+  readonly startDay: string;
+  readonly endDay: string;
+  readonly startMs: number;
+  readonly endExclusiveMs: number;
+}
+
+function anchorStartMs(year: number, monthIndex: number, anchorDay: number): number {
+  const days = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+  const clamped = Math.min(Math.max(1, Math.trunc(anchorDay)), days);
+  return Date.UTC(year, monthIndex, clamped);
+}
+
+/**
+ * Subscription billing cycle containing `now` (half-open `[startMs, endExclusiveMs)`), anchored on `anchorDay` UTC.
+ * On and after `PAID_UPGRADE_DAY` (2026-11-24), the initial cycle never reaches back into pre-upgrade Free days.
+ */
+export function billingPeriod(now: number, anchorDay: number = PAID_BILLING_ANCHOR_DAY): BillingPeriod {
+  const date = new Date(now);
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth();
+  const thisAnchor = anchorStartMs(year, month, anchorDay);
+  let startMs = now >= thisAnchor ? thisAnchor : anchorStartMs(year, month - 1, anchorDay);
+  const endExclusiveMs = now >= thisAnchor ? anchorStartMs(year, month + 1, anchorDay) : thisAnchor;
+  if (now >= PAID_UPGRADE_MS && startMs < PAID_UPGRADE_MS && endExclusiveMs > PAID_UPGRADE_MS) {
+    startMs = PAID_UPGRADE_MS;
+  }
+  return {
+    startDay: utcDay(startMs),
+    endDay: utcDay(endExclusiveMs - DAY_MS),
+    startMs,
+    endExclusiveMs,
+  };
+}
+
 /** RFC 3339 UTC with milliseconds (`2026-09-29T16:00:00.000Z`). */
 export function iso(ms: number): string {
   return new Date(ms).toISOString();

@@ -167,8 +167,9 @@ export const handlers: ServiceHandlers<ShapeOf<typeof DashboardUiService>, ApiCo
     if (request.name !== 'cloudflareView') throw dashboardError('NOT_FOUND');
     const plan = QUOTA_PLANS.name(request.plan);
     if (plan === null) throw dashboardError('BAD_REQUEST');
+    const anchorDay = request.billingAnchorDay ?? null;
     const result = await callHome(
-      () => home(ctx.env).switchQuotaPlan(plan, ctx.at, requestIdOf(request.requestId)) as unknown as Promise<SwitchQuotaPlanOutcome>,
+      () => home(ctx.env).switchQuotaPlan(plan, ctx.at, requestIdOf(request.requestId), anchorDay) as unknown as Promise<SwitchQuotaPlanOutcome>,
     );
     if (!result.ok) throw dashboardError('BAD_REQUEST');
     return new PreEncoded(result.body, { etag: result.etag });

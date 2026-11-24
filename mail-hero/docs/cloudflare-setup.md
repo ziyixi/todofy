@@ -1,16 +1,16 @@
 # Mail Hero 配置、预算与恢复
 
-应用只使用 Workers Free、D1、私有 R2、SQLite Durable Object Alarm、Assets 与 Access。当前权威配置是 [`wrangler.toml`](../wrangler.toml) 顶层；个人值与开关经[发布包装器](ci-cd.md)注入。资源由根 `infra/` 的受控流程管理，现有部署不重新创建资源或生成新密钥。
+应用使用 D1、私有 R2、SQLite Durable Object Alarm、Assets 与 Access；账户运行在 owner 授权的 Workers Paid 套餐下（并设接近 0 的账户消费上限），Mail Hero 本身仍按低成本、轻量 Free 级预算运行。当前权威配置是 [`wrangler.toml`](../wrangler.toml) 顶层；个人值与开关经[发布包装器](ci-cd.md)注入。资源由根 `infra/` 的受控流程管理，现有部署不重新创建资源或生成新密钥。
 
-## 1. Free 运行边界
+## 1. 运行边界
 
-普通 email/fetch handler 只做短小校验与流式保存，MIME 解析交给 Alarm。代码保留原件、parts、头部、嵌套、正文和附件预算，不能靠增加 Paid CPU 配置规避边界。25 MiB 是原件接受上限，复杂 MIME 的实际 CPU/内存仍须验证。
+普通 email/fetch handler 仍按 Workers Free 的轻量预算设计，只做短小校验与流式保存，MIME 解析交给 Alarm。代码保留原件、parts、头部、嵌套、正文和附件预算，不因账户升级而放松请求内 CPU/内存边界。25 MiB 是原件接受上限，复杂 MIME 的实际 CPU/内存仍须验证。
 
 本地检查使用 `bazel test //mail-hero:check`，发布归档用 `bazel build //mail-hero`。CPU 回归保持独占，所有 fixture 是合成邮件。官方平台限额与计费以 [Workers](https://developers.cloudflare.com/workers/platform/limits/)、[DO](https://developers.cloudflare.com/durable-objects/platform/limits/)、[D1](https://developers.cloudflare.com/d1/platform/limits/)和[R2](https://developers.cloudflare.com/r2/pricing/)的当前说明为准。
 
 ## 2. 预算保护
 
-保持 Free；未经 owner 决定不升级或新增收费产品。账户免费量共享，容量与预算提醒都不是账单硬上限。
+账户按低成本运行，不引入新的收费产品；容量与预算提醒不能替代账户消费上限或实测核对。
 
 - 默认逻辑容量 5 GiB、每 UTC 日 300 封和 256 MiB 原件。DO 在写 R2 前原子预留额度，D1 故障时仍生效；超过预算暂时拒绝接收，不能据此保证上游重投。
 - 正文只索引 UTF-8 前16 KiB，UI 必须显示搜索范围；详情仍读取实际保留的内容。
@@ -61,7 +61,7 @@ UI 在固定 Custom Domain，Worker 另行校验 Access JWT。owner/alias 是同
 
 ## 6. 验收与消费者
 
-先用合成邮件验证持久接管、中文/MIME、截断/省略、25 MiB边界、故障重试、重复Alarm、删除不复活和鉴权。来源自动转发、实际 Free 用量和真实消费者业务另外验收，不能由本地构建或一次HTTP 2xx推断。
+先用合成邮件验证持久接管、中文/MIME、截断/省略、25 MiB边界、故障重试、重复Alarm、删除不复活和鉴权。来源自动转发、实际账户用量和真实消费者业务另外验收，不能由本地构建或一次HTTP 2xx推断。
 
 消费者只允许精确公网 HTTPS 目标；Access service identity与业务 Bearer/Basic 各自独立。相同事件/bytes必须持久去重。Mail Hero“已交付”只表示消费者接管；当前 Todofy/Tasks 边界见[接入合同](todofy-integration.md)。
 

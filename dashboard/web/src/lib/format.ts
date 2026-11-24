@@ -55,6 +55,8 @@ export function formatQuantity(value: number, unit: QuotaUnit): string {
     case 'requests':
     case 'operations':
       return `${formatNumber(Math.round(value))} 次`
+    case 'milliseconds':
+      return `${formatNumber(Math.round(value))} ms`
     case 'neurons':
       // Fractional (Workers AI bills per request in fractions of a neuron): one decimal at most.
       return `${formatNumber(value)} neurons`
@@ -226,6 +228,9 @@ export function utcDayBefore(day: string, offset: number): string {
 export function formatLimitShort(value: number, unit: QuotaUnit): string {
   if (unit === 'bytes') return formatBytesDecimal(value)
   if (unit === 'gb_seconds') return `${formatNumber(value)} GB·s`
+  if (unit === 'milliseconds') {
+    return value >= 10_000 && value % 10_000 === 0 ? `${formatNumber(value / 10_000)} 万 ms` : `${formatNumber(Math.round(value))} ms`
+  }
   if (value >= 10_000 && value % 10_000 === 0) return `${formatNumber(value / 10_000)} 万`
   return formatNumber(value)
 }
@@ -234,6 +239,7 @@ export function formatLimitShort(value: number, unit: QuotaUnit): string {
 export function formatAmountShort(value: number, unit: QuotaUnit): string {
   if (unit === 'bytes') return formatBytesDecimal(value)
   if (unit === 'gb_seconds') return `${formatNumber(value)} GB·s`
+  if (unit === 'milliseconds') return `${formatNumber(Math.round(value))} ms`
   return formatNumber(Math.round(value))
 }
 

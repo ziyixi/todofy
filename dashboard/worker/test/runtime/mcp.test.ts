@@ -1,7 +1,7 @@
 /** Cached private read over the real HomeState SQL store; all source statuses are synthetic. */
 import { afterEach, describe, expect, it } from 'vitest';
-import type { ReadHomeResponse } from '@ziyixi/proto/dashboard/mcp/v1/home_service_wire';
-import { ReadHomeResponseSchema } from '@ziyixi/proto/dashboard/mcp/v1/home_service_pb';
+import type { ReadHomeResponse, ReadUsageResponse } from '@ziyixi/proto/dashboard/mcp/v1/home_service_wire';
+import { ReadHomeResponseSchema, ReadUsageResponseSchema } from '@ziyixi/proto/dashboard/mcp/v1/home_service_pb';
 import { expectWire } from '../wire-conformance.ts';
 import type { AttentionItem, OpsApp } from '../../src/api-types.ts';
 import { REGISTRY } from '../../src/registry.ts';
@@ -54,5 +54,21 @@ describe('private Home snapshot', () => {
     expect(h.outboundLog.length).toBe(outboundBefore);
     await h.redeploy({ BUILD_SHA: 'synthetic-home-restart' });
     expect((await read()).attention.find(row => row.item.code === 'delivery_failed')?.occurrence_seq).toBe(episode?.occurrence_seq);
+  });
+
+  it('serves cached Free and Paid usage over HomeService.ReadUsage without outbound calls', async () => {
+    h = await startFlows({ bindings: { CANARY_ENABLED: 'false' } });
+    answerProbes(h);
+    await h.tick(NOW);
+    const outboundBefore = h.outboundLog.length;
+    const namespace = await h.mf.getDurableObjectNamespace('HOME', 'home');
+    const stub = namespace.get(namespace.idFromName('home-v1')) as unknown as { readUsage(at: number): Promise<ReadUsageResponse> };
+    const result = await stub.readUsage(NOW);
+    expectWire(ReadUsageResponseSchema, result);
+    expect(result.usage.plan).toBe('free');
+    expect(result.usage.billing_period_start).toBe('2026-09-24');
+    expect(result.usage.billing_period_end).toBe('2026-10-23');
+    expect(result.usage.alternate_rows?.find((r) => r.id === 'workers_cpu_ms')?.limit).toBe(30_000_000);
+    expect(h.outboundLog.length).toBe(outboundBefore);
   });
 });

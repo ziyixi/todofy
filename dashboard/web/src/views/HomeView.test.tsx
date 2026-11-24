@@ -185,6 +185,33 @@ describe('首页', () => {
     expect(within(cf).getByRole('link', { name: /5 个 Worker · 今日错误 3/ })).toHaveTextContent('未降载')
   })
 
+  it('shows billing-period title, 4 Paid mini bars, and Paid alert copy on 首页 when Paid is active', async () => {
+    const base = healthy()
+    const paidRows = base.cloudflare.usage.alternate_rows ?? []
+    const paidSummaryQuota = ['workers_requests', 'workers_cpu_ms', 'do_duration', 'd1_rows_read']
+      .map((id) => paidRows.find((r) => r.id === id))
+      .filter((r): r is NonNullable<typeof r> => r !== undefined)
+      .map((r) => ({ ...r, breakdown: [] }))
+    await showHome({
+      ...base,
+      home: {
+        ...base.home,
+        cloudflare: {
+          ...base.home.cloudflare,
+          plan: 'paid',
+          billing_period_start: '2026-09-24',
+          billing_period_end: '2026-10-23',
+          quota: paidSummaryQuota,
+        },
+      },
+    })
+    const cf = screen.getByRole('region', { name: 'Cloudflare 本账期' })
+    expect(within(cf).getByText(/账期 2026-09-24 – 2026-10-23 UTC/)).toBeInTheDocument()
+    expect(within(cf).getByRole('meter', { name: 'Workers CPU 时间' })).toHaveAttribute('aria-valuetext', '已用 12,000 ms，上限 30,000,000 ms，0%')
+    expect(within(cf).getByText('3,000 万 ms ·', { exact: false })).toBeInTheDocument()
+    expect(within(cf).getByRole('link', { name: /5 个 Worker · 今日错误 3/ })).toHaveTextContent('Paid 提醒生效')
+  })
+
   it('shows one warning on its tile, its flow and the strip', async () => {
     await showHome(oneWarning())
     const strip = screen.getByRole('region', { name: '1 项需关注' })

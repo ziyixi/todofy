@@ -254,16 +254,41 @@ export function quotaRows(overrides: Partial<Record<QuotaRow['id'], Partial<Quot
 }
 
 function usage(patch: Partial<Usage> = {}): Usage {
-  const paidRows = quotaRows({
-    workers_requests: { period: 'monthly', limit: 10_000_000, used: 712, percent: 0, source: 'https://developers.cloudflare.com/workers/platform/pricing/' },
-    d1_rows_read: { period: 'monthly', limit: 25_000_000_000, used: 7_142, percent: 0 },
-    d1_rows_written: { period: 'monthly', limit: 50_000_000, used: 486, percent: 0 },
-    do_requests: { period: 'monthly', limit: 1_000_000, used: 1_380, percent: 0.1 },
-    do_duration: { period: 'monthly', limit: 400_000, used: 212, percent: 0.1 },
-    do_rows_read: { period: 'monthly', limit: 25_000_000_000, used: 21_400, percent: 0 },
-    do_rows_written: { period: 'monthly', limit: 50_000_000, used: 1_920, percent: 0 },
-    d1_database_max: { limit: 10_000_000_000, used: 38_900_000, percent: 0.4 },
-  })
+  const paidRows = [
+    row({
+      id: 'workers_requests',
+      period: 'monthly',
+      unit: 'requests',
+      limit: 10_000_000,
+      used: 712,
+      percent: 0,
+      guard_trigger: false,
+      source: 'https://developers.cloudflare.com/workers/platform/pricing/',
+    }),
+    row({
+      id: 'workers_cpu_ms',
+      period: 'monthly',
+      unit: 'milliseconds',
+      limit: 30_000_000,
+      used: 12_000,
+      percent: 0,
+      projected: 600_000,
+      projected_percent: 2,
+      guard_trigger: false,
+      source: 'https://developers.cloudflare.com/workers/platform/pricing/',
+    }),
+    ...quotaRows({
+      d1_rows_read: { period: 'monthly', limit: 25_000_000_000, used: 7_142, percent: 0, guard_trigger: false },
+      d1_rows_written: { period: 'monthly', limit: 50_000_000, used: 486, percent: 0, guard_trigger: false },
+      do_requests: { period: 'monthly', limit: 1_000_000, used: 1_380, percent: 0.1, guard_trigger: false },
+      do_duration: { period: 'monthly', limit: 400_000, used: 212, percent: 0.1, guard_trigger: false },
+      do_rows_read: { period: 'monthly', limit: 25_000_000_000, used: 21_400, percent: 0, guard_trigger: false },
+      do_rows_written: { period: 'monthly', limit: 50_000_000, used: 1_920, percent: 0, guard_trigger: false },
+      r2_class_a: { guard_trigger: false },
+      r2_class_b: { guard_trigger: false },
+      d1_database_max: { limit: 10_000_000_000, used: 38_900_000, percent: 0.4 },
+    }).filter((r) => r.id !== 'workers_requests'),
+  ]
   return {
     status: 'ok',
     fetched_at: '2026-09-29T16:30:02.000Z',
@@ -276,6 +301,8 @@ function usage(patch: Partial<Usage> = {}): Usage {
     unclassified_r2_operations: 0,
     plan: 'free',
     alternate_rows: paidRows,
+    billing_period_start: '2026-09-24',
+    billing_period_end: '2026-10-23',
     ...patch,
   }
 }
@@ -658,6 +685,9 @@ function scenario(
         workers: workers.length,
         errors_today: workers.reduce((sum, item) => sum + item.errors, 0),
         guard_level: guard.desired.level,
+        plan: use.plan ?? 'free',
+        ...(use.billing_period_start === undefined ? {} : { billing_period_start: use.billing_period_start }),
+        ...(use.billing_period_end === undefined ? {} : { billing_period_end: use.billing_period_end }),
       },
       digest: { last_sent_at: '2026-09-29T15:00:03.000Z', accepted: true },
     },

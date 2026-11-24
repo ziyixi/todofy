@@ -17,8 +17,10 @@ import { Pill } from './ui'
 
 /** Phone labels of the mini bars (the full name stays the meter's accessible name). */
 const QUOTA_SHORT: Partial<Record<QuotaRow['id'], string>> = {
+  workers_cpu_ms: 'CPU 时间',
   d1_rows_read: 'D1 读取',
   do_requests: 'DO 请求',
+  do_duration: 'DO 时长',
   ai_neurons: 'AI neurons',
 }
 
@@ -72,7 +74,7 @@ function Meter({ row, labelId, compact = false }: { row: QuotaRow; labelId: stri
     >
       {!compact && projected !== null && projected > width ? <span className="meter-projection" style={{ width: `${projected}%` }} /> : null}
       {row.used !== null ? <span className="meter-fill" style={{ width: `${width}%` }} /> : null}
-      <span className="meter-mark" style={{ left: `${GUARD_SHED_PERCENT}%` }} title="自动降载" aria-hidden="true" />
+      <span className="meter-mark" style={{ left: `${GUARD_SHED_PERCENT}%` }} title={row.guard_trigger ? '自动降载' : '80% 提醒线'} aria-hidden="true" />
       <span className="meter-mark" style={{ left: `${QUOTA_CRITICAL_PERCENT}%` }} title="严重" aria-hidden="true" />
     </div>
   )
@@ -125,19 +127,24 @@ function BreakdownName({ reg, item }: { reg: Reg; item: QuotaBreakdownItem }) {
 
 /**
  * One quota: value and bar on one compact row; the linear estimate and the top-5 breakdown behind one
- * disclosure, except an estimate reaching the 80 % guard line, which stays visible (design §3.5:
+ * disclosure, except an estimate reaching the 80 % line, which stays visible (design §3.5:
  * compact rows, the forecast on demand).
  */
-export function QuotaItem({ row, reg }: { row: QuotaRow; reg: Reg }) {
+export function QuotaItem({ row, reg, plan = 'free' }: { row: QuotaRow; reg: Reg; plan?: QuotaPlan }) {
   const labelId = useId()
   const label = QUOTA[row.id] ?? row.id
   const tone = quotaTone(row)
   const source = httpsUrl(row.source)
+  const isPaidMonthly = plan === 'paid' && row.period === 'monthly'
+  const periodWord = row.period === 'daily' ? '本 UTC 日' : isPaidMonthly ? '本账期' : '本月'
+  const exceedText = isPaidMonthly
+    ? '，按此速度将超出包含量；超出后 Workers / Durable Objects 会被消费上限全部拦截到账期结束'
+    : '，按此速度将超出上限'
   const forecast =
     row.projected !== null && row.projected_percent !== null ? (
       <span className={row.projected_percent >= 100 ? 'text-warn' : 'muted'}>
-        按当前速度线性估算，{row.period === 'daily' ? '本 UTC 日' : '本月'}结束约 {formatQuantity(row.projected, row.unit)}（
-        {formatPercent(row.projected_percent)}）{row.projected_percent >= 100 ? '，按此速度将超出上限' : ''}
+        按当前速度线性估算，{periodWord}结束约 {formatQuantity(row.projected, row.unit)}（
+        {formatPercent(row.projected_percent)}）{row.projected_percent >= 100 ? exceedText : ''}
       </span>
     ) : null
   const urgent = row.projected_percent !== null && row.projected_percent >= GUARD_SHED_PERCENT
@@ -153,6 +160,9 @@ export function QuotaItem({ row, reg }: { row: QuotaRow; reg: Reg }) {
         <span className="quota-percent">
           {row.percent === null ? '无数据' : formatPercent(row.percent)}
           {row.percent !== null && tone.tone !== 'ok' ? <Pill tone={tone.tone}>{tone.label}</Pill> : null}
+          {row.percent !== null && tone.tone === 'ok' && isPaidMonthly && row.projected_percent !== null && row.projected_percent >= 100 ? (
+            <Pill tone="warn">预计超额</Pill>
+          ) : null}
         </span>
       </div>
       <Meter row={row} labelId={labelId} />
@@ -163,6 +173,10 @@ export function QuotaItem({ row, reg }: { row: QuotaRow; reg: Reg }) {
         </span>
         {/* Its own line: the headroom is the number that matters (the group note says it never sheds). */}
         {remaining !== null ? <strong className="quota-remaining">剩余 {formatQuantity(remaining, row.unit)}</strong> : null}
+        {plan === 'paid' && row.id === 'ai_neurons' ? <span className="muted">每天 1 万 neurons 以内免费，超出按量计费</span> : null}
+        {plan === 'paid' && row.id === 'do_requests' ? (
+          <span className="muted">已按命名空间归属剔除跨 Worker 的 Service Binding 调用；分析接口按 RPC 调用与闹钟计，账单按会话计</span>
+        ) : null}
         {urgent ? forecast : null}
       </div>
       {row.breakdown.length > 0 || hidden || source ? (
@@ -203,22 +217,44 @@ function groupGuardNote(items: readonly QuotaRow[]): string {
 }
 
 /** The account allowances in three groups (每日 / 每月 / 存储), each with its reset rule. */
-export function QuotaGroups({ rows, reg, plan = 'free' }: { rows: readonly QuotaRow[]; reg: Reg; plan?: QuotaPlan }) {
+export function QuotaGroups({
+  rows,
+  reg,
+  plan = 'free',
+  billingStart,
+  billingEnd,
+}: {
+  rows: readonly QuotaRow[]
+  reg: Reg
+  plan?: QuotaPlan
+  billingStart?: string | null
+  billingEnd?: string | null
+}) {
   const groups = PERIOD_ORDER.map((period) => ({ period, rows: rows.filter((row) => row.period === period) })).filter(
     (group) => group.rows.length > 0,
   )
+  const groupTitle = (period: QuotaPeriod): string =>
+    period === 'monthly' && plan === 'paid' ? '本账期含额（Workers Paid 与 R2）' : PERIODS[period].title
+  const groupNote = (period: QuotaPeriod, items: readonly QuotaRow[]): string => {
+    if (plan === 'paid' && period === 'monthly') {
+      const windowText =
+        billingStart && billingEnd ? `账期 ${billingStart} – ${billingEnd} UTC（按订阅续费日累计，跨自然月不清零）` : '按 Workers Paid 订阅账期累计，跨自然月不清零'
+      return `${windowText}，已用 ≥ 80% 或预计 ≥ 100% 提醒，不触发日常服务降载`
+    }
+    if (plan === 'paid' && period === 'daily') {
+      return '每天 00:00 UTC 重置 · 每天 1 万 neurons 以内免费，超出按量计费，不触发降载'
+    }
+    return `${PERIODS[period].note}${groupGuardNote(items)}`
+  }
   return (
     <div className="quota-columns">
       {groups.map(({ period, rows: items }) => (
         <section key={period} className="panel quota-group" aria-labelledby={`quota-${period}`}>
-          <h4 id={`quota-${period}`}>{period === 'monthly' && plan === 'paid' ? '每月含额（Workers Paid 与 R2）' : PERIODS[period].title}</h4>
-          <p className="small muted">
-            {period === 'monthly' && plan === 'paid' ? 'UTC 自然月累计，每月 1 日 00:00 重置' : PERIODS[period].note}
-            {groupGuardNote(items)}
-          </p>
+          <h4 id={`quota-${period}`}>{groupTitle(period)}</h4>
+          <p className="small muted">{groupNote(period, items)}</p>
           <ul className="quota-list">
             {items.map((row) => (
-              <QuotaItem key={row.id} row={row} reg={reg} />
+              <QuotaItem key={row.id} row={row} reg={reg} plan={plan} />
             ))}
           </ul>
         </section>

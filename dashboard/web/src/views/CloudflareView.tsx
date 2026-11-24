@@ -603,7 +603,7 @@ function ResourceTable({ reg, kind, rows, doStorage }: { reg: Reg; kind: Resourc
   )
 }
 
-function GuardLine({ reg, data }: { reg: Reg; data: CloudflareViewData }) {
+function GuardLine({ reg, data, plan }: { reg: Reg; data: CloudflareViewData; plan: QuotaPlan }) {
   const { desired, thresholds } = data.guard
   const top = data.usage.rows
     .filter((row) => row.guard_trigger && row.percent !== null)
@@ -619,7 +619,9 @@ function GuardLine({ reg, data }: { reg: Reg; data: CloudflareViewData }) {
         </span>
       ) : null}
       <span>
-        · {thresholds.shed_percent}% 自动降载 / {thresholds.clear_percent}% 解除
+        {plan === 'paid'
+          ? '· Workers Paid 月度含额只提醒（≥ 80% 或预计超额），不自动降载日常服务'
+          : `· ${thresholds.shed_percent}% 自动降载 / ${thresholds.clear_percent}% 解除`}
       </span>
       {guardedEntries(reg, data.guard).map((id) => {
         const app = data.guard.apps[id]
@@ -665,6 +667,9 @@ export function CloudflareView({ registry, cloudflare, focus, now }: { registry:
             ) : (
               '还没有成功获取过用量数据'
             )}{' '}
+            {activePlan === 'paid' && usage.billing_period_start && usage.billing_period_end ? (
+              <span className="muted">· 当前账期 {usage.billing_period_start} – {usage.billing_period_end} UTC </span>
+            ) : null}
             · <LevelMark level={statusLevel} word={status.label} size={10} />
           </p>
           <p className="small muted">用量按整个账户统计，其他项目也算在内。</p>
@@ -703,7 +708,11 @@ export function CloudflareView({ registry, cloudflare, focus, now }: { registry:
             </div>
             <span className="small muted">
               当前生效：<strong>{activePlan === 'paid' ? 'Workers Paid（月度含额）' : 'Workers Free（每日限额）'}</strong>
-              {viewingPlan !== activePlan ? '（正在预览另一视图，告警与自动降载仍按生效套餐计算）' : '（告警与自动降载按此计算）'}
+              {viewingPlan !== activePlan
+                ? '（正在预览另一视图，告警与规则仍按生效套餐计算）'
+                : activePlan === 'paid'
+                  ? '（账期月度含额只提醒、不自动降载日常服务）'
+                  : '（告警与自动降载按此计算）'}
             </span>
           </div>
           {viewingPlan !== activePlan ? (
@@ -714,7 +723,7 @@ export function CloudflareView({ registry, cloudflare, focus, now }: { registry:
                   onSuccess: (fresh) => {
                     setPreviewPlan(null)
                     const next = fresh.usage.plan ?? viewingPlan
-                    setPlanMessage(`已将生效套餐切换为 ${next === 'paid' ? 'Workers Paid（月度含额）' : 'Workers Free（每日限额）'}，告警与自动降载已重新计算。`)
+                    setPlanMessage(`已将生效套餐切换为 ${next === 'paid' ? 'Workers Paid（月度含额）' : 'Workers Free（每日限额）'}，告警与降载状态已重新计算。`)
                   },
                   onError: (error) => setPlanMessage(`切换套餐失败：${errorText(error)}`),
                 })
@@ -732,12 +741,18 @@ export function CloudflareView({ registry, cloudflare, focus, now }: { registry:
           </p>
         ) : null}
         <p className="small muted">
-          达到 80% 的计费周期配额（Free 为每日项目与每月 R2，Paid 为每月含额）会让应用自动降载；Workers AI neurons 除外：超出每日免费额度只会让 AI
-          调用失败到 00:00 UTC，降载也减少不了它，所以只提醒并显示剩余量。“按当前速度线性估算”只是把已用量按已过时间等比放大，不是预测：每日项目在 00:00 UTC
-          后 3 小时内、每月项目在每月第 1 个 UTC 日内不估算。
+          {viewingPlan === 'paid'
+            ? `Workers Paid 按订阅账期累计（${usage.billing_period_start && usage.billing_period_end ? `${usage.billing_period_start} – ${usage.billing_period_end} UTC，` : ''}跨自然月不清零）。月度包含量已用 ≥ 80% 或线性估算 ≥ 100% 时出提醒，不让日常应用降载；超出套餐包含量后，Workers / Durable Objects 会被账户消费上限全部拦截到账期结束。Workers AI 每天 1 万 neurons 以内免费，超出按量计费。`
+            : 'Workers Free 达到 80% 的每日项目或每月 R2 配额会让应用自动降载；Workers AI neurons 除外：超出每日免费额度只会让 AI 调用失败到 00:00 UTC，降载也减少不了它，所以只提醒并显示剩余量。“按当前速度线性估算”只是把已用量按已过时间等比放大，不是预测：每日项目与 Paid 账期前 3 小时内不估算，自然月项目在第 1 个 UTC 日内不估算。'}
         </p>
         {displayedRows.length > 0 ? (
-          <QuotaGroups rows={displayedRows} reg={registry} plan={viewingPlan} />
+          <QuotaGroups
+            rows={displayedRows}
+            reg={registry}
+            plan={viewingPlan}
+            billingStart={usage.billing_period_start}
+            billingEnd={usage.billing_period_end}
+          />
         ) : (
           <p className="empty">还没有用量数据。</p>
         )}
@@ -759,7 +774,7 @@ export function CloudflareView({ registry, cloudflare, focus, now }: { registry:
         <p className="small muted">名称来自注册表；找不到对应登记的资源显示“未登记”和 ID 前 8 位。</p>
       </section>
 
-      <GuardLine reg={registry} data={cloudflare} />
+      <GuardLine reg={registry} data={cloudflare} plan={activePlan} />
     </div>
   )
 }

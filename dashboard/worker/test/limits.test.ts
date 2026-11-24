@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import limitsDoc from '../../docs/limits.md?raw';
 import { QUOTA_RESOURCES } from '../src/idl.ts';
-import { ALLOWANCES, PAID_ALLOWANCES } from '../src/limits.ts';
+import { ALLOWANCES, FREE_QUOTA_RESOURCES, PAID_ALLOWANCES } from '../src/limits.ts';
 
 /** A §1 table of docs/limits.md: resource id → its cells. */
 function documentedRows(sectionHeading: string): Map<string, string[]> {
@@ -21,7 +21,7 @@ describe('docs/limits.md and limits.ts', () => {
   const paidRows = documentedRows('### 1.2 Workers Paid');
 
   it('documents every quota resource and nothing else for both plans', () => {
-    expect([...freeRows.keys()].sort()).toEqual([...QUOTA_RESOURCES].sort());
+    expect([...freeRows.keys()].sort()).toEqual([...FREE_QUOTA_RESOURCES].sort());
     expect([...paidRows.keys()].sort()).toEqual([...QUOTA_RESOURCES].sort());
   });
 

@@ -391,6 +391,8 @@ export const LEVEL_RANK: Readonly<Record<RollupLevel, number>> = { ok: 0, held: 
  * only on the Cloudflare view, where DO requests stay.
  */
 export const HOME_QUOTA_IDS: readonly QuotaResource[] = ['workers_requests', 'd1_rows_read', 'ai_neurons', 'r2_storage'];
+/** The four mini bars of 首页 under Workers Paid (bounded by HOME_QUOTA_MAX = 4). */
+export const PAID_HOME_QUOTA_IDS: readonly QuotaResource[] = ['workers_requests', 'workers_cpu_ms', 'do_duration', 'd1_rows_read'];
 // HOME_QUOTA_IDS.length is CloudflareSummary.quota's max_items (idl.ts HOME_QUOTA_MAX; test/idl.test.ts).
 
 /** The strip level of an item: the observed level, else the digest severity. */
