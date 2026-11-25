@@ -379,6 +379,16 @@ def build_price_liquidity_shock(
     vwap_r = prices.channel("vwap_raw").astype(np.float64)
     tc_r = prices.channel("trade_count_raw").astype(np.float64)
     ret = prices.channel("ret_1d").astype(np.float64)
+    if "bar_invalid" in prices.channels:
+        inv = prices.channel("bar_invalid").astype(np.float64)
+        bad = np.isfinite(inv) & (inv > 0.5)
+        ret = np.where(bad, np.nan, ret)
+        close_r = np.where(bad, np.nan, close_r)
+        vol_r = np.where(bad, np.nan, vol_r)
+        hi_r = np.where(bad, np.nan, hi_r)
+        lo_r = np.where(bad, np.nan, lo_r)
+        vwap_r = np.where(bad, np.nan, vwap_r)
+        tc_r = np.where(bad, np.nan, tc_r)
 
     ok_dv = np.isfinite(close_r) & (close_r > 0) & np.isfinite(vol_r) & (vol_r >= 0)
     dvol = np.where(ok_dv, close_r * vol_r, np.nan)

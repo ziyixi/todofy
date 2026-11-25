@@ -296,11 +296,15 @@ def build_peer_spillover(
             for members in ind_groups.values():
                 if len(members) >= 3:
                     sub_b = blk[members]
-                    with np.errstate(invalid="ignore"):
-                        ind_mean = np.nanmean(sub_b, axis=0, keepdims=True)
-                    blk[members] = np.where(
-                        np.isfinite(ind_mean), sub_b - ind_mean, sub_b
-                    )
+                    col_any = np.any(np.isfinite(sub_b), axis=0)
+                    if col_any.any():
+                        ind_mean = np.full(
+                            (1, sub_b.shape[1]), np.nan, dtype=np.float64
+                        )
+                        ind_mean[0, col_any] = np.nanmean(sub_b[:, col_any], axis=0)
+                        blk[members] = np.where(
+                            np.isfinite(ind_mean), sub_b - ind_mean, sub_b
+                        )
             return blk
 
         # 63d window (min 20d overlap -> supports newly listed IPOs)
