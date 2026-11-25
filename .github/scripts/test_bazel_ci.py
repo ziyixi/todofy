@@ -506,7 +506,10 @@ class BazelCI(unittest.TestCase):
         self.assertEqual(publisher["concurrency"], {"group": "private-production", "cancel-in-progress": "false"})
         self.assertEqual(publisher["jobs"]["release"]["environment"], "production")
         # The private rollout may wait out its whole startup window before observation and checks begin.
-        self.assertEqual(publisher["jobs"]["release"]["timeout-minutes"], "45")
+        self.assertEqual(
+            publisher["jobs"]["release"]["timeout-minutes"],
+            "${{ inputs.operation == 'restore-check' && 75 || 45 }}",
+        )
 
     def test_ci_triggers_are_only_push_and_dispatch(self):
         # With no other trigger, a job that checks for main runs only for a main push or a dispatch on main.
