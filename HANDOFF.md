@@ -7,6 +7,13 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 Private application follow-ups and release verification are tracked in `private/HANDOFF.md`.
 
+Branch `feat/research-datasets-v2.6` (based on `main` `28b1a3e9`) upgrades `packages/research-datasets` to `2.6.0`:
+- `FundStore` drives `IssuerStateMachine` across all duration/instant channels (concept-name fixes, Q1–Q4 & `FY - Q1..Q3` Q4 derivation, causal split adjustment for per-share and share-count channels).
+- `EventStore` adopts 48 fine-grained SEC `event_kinds`, stores `event_date_ordinals`, disables `alpaca_news`/`finnhub_news` by default (`include_news=False`), fixes the 1-session reaction window offset with market-adjusted benchmark residuals, and filters `extraction_facts` by `default_extractor_version` and date-bounded verified `issuer_history` intervals.
+- `PriceStore` separates `bar_invalid` from `bar_extreme` and adds split-safe `log_dollar_volume` / `hl_range_ratio` / `open_close_ratio`; `MacroStore` appends causal raw FRED level series and daily reference ETF/GLD returns.
+- `labels.py` adds Welch 252d beta, 63d floored residual vol, cross-sectional `GaussRank`, and cutoff-clamped dense forward risk targets; `groups/signals.py` adds `peer_spillover`, `sec_shock_interaction`, and `macro_sensitivity_crisis`; `materialize()` adds optional `max_date` physical cutoff (`Stores.assert_cutoff`) and dual-class same-CIK deduplication (`deduplicate_issuers=True`); `default_training_recipe.yaml` disables `news_intensity`, adds `504` momentum window and `10` horizon, and enables the three new signal groups.
+- Local verification: all unit tests across `packages/research-datasets` plus `ruff==0.16.9` check and format pass. Next: pass branch `CI gate`, fast-forward `main`, and verify `Personal cloud reconcile` on the same SHA.
+
 `packages/research-datasets` `2.5.0` (untruncated multi-clock `Stores`, pluggable 15-group feature registry, declarative YAML `materialize`, and `load_local`) is pinned to public `main` (`f7840d90c7cbd104be71901c9406a4b03b54ae43`) and cleanly verified in an isolated Python 3.14 environment (`2.5.0`, 20 registered groups).
 
 `packages/research-datasets` memory, indexing, coverage-slice, period-anchor, panel-benchmark, earnings-projection,

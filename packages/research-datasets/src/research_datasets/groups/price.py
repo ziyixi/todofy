@@ -31,7 +31,10 @@ def _effective_level(prices: PriceStore) -> np.ndarray:
 
 
 def _suspect_prefix(prices: PriceStore) -> np.ndarray:
-    susp = prices.channel("tr_suspect").astype(np.float64)
+    if "bar_invalid" in prices.channels:
+        susp = prices.channel("bar_invalid").astype(np.float64)
+    else:
+        susp = prices.channel("tr_suspect").astype(np.float64)
     is_susp = (np.isfinite(susp) & (susp > 0.5)).astype(np.int32)
     csus = np.zeros((is_susp.shape[0], is_susp.shape[1] + 1), dtype=np.int32)
     np.cumsum(is_susp, axis=1, out=csus[:, 1:])
@@ -224,6 +227,9 @@ def build_price_vol_beta(
     anchors = ctx.stores.anchors
     wins = [int(w) for w in params.get("windows", (5, 21, 63))]
     ret = prices.channel("ret_1d").astype(np.float64)
+    if "bar_invalid" in prices.channels:
+        inv = prices.channel("bar_invalid").astype(np.float64)
+        ret = np.where(np.isfinite(inv) & (inv > 0.5), np.nan, ret)
     n_assets, n_sess = ret.shape
     data: dict[str, np.ndarray] = {}
     for w in wins:

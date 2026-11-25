@@ -299,3 +299,23 @@ panel = ds.panel(
   `materialize`) compile projected feature matrices (`X`, optional `y`, `Anchors`, `Stores`, `bridge_columns`, and
   provenance report with `anchor_order_sha256` verification) with incremental per-group Parquet caching (`Dataset.materialize(...)`
   / `Dataset.recipe_yaml(...)`) and offline archive loading (`load_local`, `LocalClient`).
+
+### 2.6.0
+
+- `FundStore` now drives `IssuerStateMachine` directly across all duration and balance-sheet channels, fixing concept
+  mappings (`eps_diluted`, `equity_parent`, `shares_outstanding_cover`), deriving Q2–Q4 quarters (including `FY - Q1..Q3`
+  Q4 derivation), and applying causal point-in-time split adjustments to per-share and share-count channels.
+- `EventStore` switches SEC events to the 48 fine-grained `event_kinds`, records `event_date_ordinals`, excludes news
+  sources (`alpaca_news`, `finnhub_news`) by default (`include_news=False`), fixes the 1-session post-event reaction
+  offset with market-adjusted benchmark residuals, and scopes `extraction_facts` by `default_extractor_version` and
+  verified date-bounded `issuer_history` intervals.
+- `PriceStore` adds dual quality masks (`bar_invalid`, `bar_extreme`) plus split-safe `log_dollar_volume`,
+  `hl_range_ratio`, and `open_close_ratio` channels; `MacroStore` appends raw causal FRED level columns and daily
+  reference ETF/gold return channels.
+- `labels.py` adds Welch 252-day slope-winsorized beta (`welch_beta_252d`), 63-day cross-sectionally floored residual
+  volatility (`residual_vol_63d`), `gauss_rank_cross_section`, and `attach_risk_adjusted_labels` (real `DTB3`/`DGS3MO`
+  risk-free rate plus cutoff-clamped dense forward risk targets).
+- Registers three new feature groups (`peer_spillover`, `sec_shock_interaction`, `macro_sensitivity_crisis`), disables
+  `news_intensity` in `default_training_recipe.yaml`, extends momentum windows to `504` sessions and horizons to
+  `[5, 10, 21, 63, 126]`, and adds optional `max_date` physical cutoff enforcement (`Stores.assert_cutoff`) and
+  dual-class same-CIK deduplication (`deduplicate_issuers=True`) to `materialize(...)`.

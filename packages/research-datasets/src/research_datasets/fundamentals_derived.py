@@ -854,12 +854,27 @@ def _extract_split_events(
         if isinstance(families, Mapping) and "corporate_actions" in families:
             has_ca = True
             ca_fn = getattr(version_or_material, "corporate_actions", None)
-            ca_df = ca_fn(aids or None) if callable(ca_fn) else pd.DataFrame()
+            if callable(ca_fn):
+                ca_df = ca_fn(aids or None)
+            else:
+                fam_fn = getattr(version_or_material, "family", None)
+                ca_df = (
+                    fam_fn("corporate_actions", aids or None)
+                    if callable(fam_fn)
+                    else pd.DataFrame()
+                )
         elif isinstance(families, Mapping) and "daily_returns" in families:
             has_dr = True
             tr_fn = getattr(version_or_material, "total_returns", None)
             if callable(tr_fn):
                 dr_df = tr_fn(aids or None)
+            else:
+                fam_fn = getattr(version_or_material, "family", None)
+                dr_df = (
+                    fam_fn("daily_returns", aids or None)
+                    if callable(fam_fn)
+                    else pd.DataFrame()
+                )
 
     out: dict[str, list[tuple[date, float]]] = {}
     if has_ca and not ca_df.empty and "asset_id" in ca_df.columns:
@@ -1032,9 +1047,19 @@ class IssuerStateMachine:
         target_views: Sequence[str] | None = None,
         record_quarters: Collection[str] = (),
         split_factor_fn: Callable[[date | None, date | None], float] | None = None,
+        snapshot_callback: Callable[
+            [
+                int,
+                Mapping[str, Mapping[tuple[date, int], PeriodValue]],
+                Mapping[str, Mapping[tuple[date | None, date], PeriodValue]],
+            ],
+            None,
+        ]
+        | None = None,
     ) -> None:
         self.cik = cik
         self._split_factor_fn = split_factor_fn
+        self._snapshot_callback = snapshot_callback
         if target_views is None:
             views_list: list[str] = []
             for name, spec in ALL_CONCEPTS.items():
@@ -2260,6 +2285,9 @@ class IssuerStateMachine:
                                 ),
                             )
                 quarters_by_concept[c_name] = comp_q
+
+        if self._snapshot_callback is not None:
+            self._snapshot_callback(batch_clock, quarters_by_concept, concept_periods)
 
         self._update_quarter_ledger(
             batch_clock, slots_list, concept_periods, quarters_by_concept

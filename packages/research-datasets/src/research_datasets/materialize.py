@@ -26,6 +26,7 @@ from . import fundamentals_derived as _fund
 from . import labels as _labels
 from .client import DatasetError
 from .constants import DEFAULT_HORIZONS, KEYS
+from .extra_features import risk_free_daily as _risk_free_daily
 from .feature_groups import (
     FEATURE_GROUPS,
     GroupBuildContext,
@@ -364,6 +365,50 @@ def _read_verified_part(
     return table.to_pandas()
 
 
+def _trailing_dvol_21d(
+    price_store: PriceStore,
+    asset_idxs: np.ndarray,
+    sess_idxs: np.ndarray,
+) -> np.ndarray:
+    """Trailing 21-session mean dollar volume at each ``(asset_idx, session_idx)``."""
+    n = len(asset_idxs)
+    out = np.full(n, -1.0, dtype=np.float64)
+    if n == 0 or price_store.data.shape[1] == 0:
+        return out
+    close_r = price_store.channel("close_raw").astype(np.float64)
+    vol_r = price_store.channel("volume_raw").astype(np.float64)
+    inv_r = price_store.channel("bar_invalid").astype(np.float64)
+    bad = np.isfinite(inv_r) & (inv_r > 0.5)
+    ok = (
+        ~bad
+        & np.isfinite(close_r)
+        & (close_r > 0.0)
+        & np.isfinite(vol_r)
+        & (vol_r >= 0.0)
+    )
+    dv = np.where(ok, close_r * vol_r, 0.0)
+    n_a, n_s = dv.shape
+    csum = np.zeros((n_a, n_s + 1), dtype=np.float64)
+    ccnt = np.zeros((n_a, n_s + 1), dtype=np.int32)
+    np.cumsum(dv, axis=1, out=csum[:, 1:])
+    np.cumsum(ok.astype(np.int32), axis=1, out=ccnt[:, 1:])
+    valid = (
+        (asset_idxs >= 0) & (asset_idxs < n_a) & (sess_idxs >= 0) & (sess_idxs < n_s)
+    )
+    if not valid.any():
+        return out
+    va = asset_idxs[valid]
+    vs = sess_idxs[valid]
+    lo = np.maximum(0, vs - 20)
+    cnt = ccnt[va, vs + 1] - ccnt[va, lo]
+    tot = csum[va, vs + 1] - csum[va, lo]
+    pos = cnt > 0
+    vals = np.full(len(va), -1.0, dtype=np.float64)
+    vals[pos] = tot[pos] / cnt[pos]
+    out[valid] = vals
+    return out
+
+
 def _build_anchors(
     version: Any,
     *,
@@ -379,7 +424,8 @@ def _build_anchors(
     price_store: PriceStore,
     fund_store: FundStore,
     event_store: EventStore,
-) -> Anchors:
+    deduplicate_issuers: bool = True,
+) -> tuple[Anchors, int]:
     cands = _candidates.build_candidates(
         version,
         symbols,
@@ -400,10 +446,49 @@ def _build_anchors(
     sig_days = [clocks.day(d) for d in cands["signal_session"].tolist()]
     asset_idxs = np.array([asset_pos.get(a, -1) for a in aids], dtype=np.int32)
     sess_idxs = np.array([day_pos.get(d, -1) for d in sig_days], dtype=np.int32)
+    ciks_s = _fund.cik_at(version, aids, sig_days).astype(str).tolist()
+    is_bench_raw = (
+        cands["is_benchmark"].fillna(False).to_numpy(dtype=bool)
+        if "is_benchmark" in cands.columns
+        else np.zeros(len(cands), dtype=bool)
+    )
+
+    dedup_dropped = 0
+    if deduplicate_issuers and len(cands) > 1:
+        dv21 = _trailing_dvol_21d(price_store, asset_idxs, sess_idxs)
+        best_by_key: dict[tuple[date, str], tuple[float, str, int]] = {}
+        keep_mask = np.ones(len(cands), dtype=bool)
+        for i in range(len(cands)):
+            cik = ciks_s[i]
+            if not cik or cik == "nan" or is_bench_raw[i]:
+                continue
+            key = (sig_days[i], cik)
+            score = float(dv21[i])
+            aid_i = aids[i]
+            prev = best_by_key.get(key)
+            if prev is None:
+                best_by_key[key] = (score, aid_i, i)
+            else:
+                prev_score, prev_aid, prev_idx = prev
+                # Higher 21d dollar volume wins; deterministic asset_id tie-breaker
+                if (score > prev_score) or (score == prev_score and aid_i < prev_aid):
+                    keep_mask[prev_idx] = False
+                    best_by_key[key] = (score, aid_i, i)
+                else:
+                    keep_mask[i] = False
+        dedup_dropped = int((~keep_mask).sum())
+        if dedup_dropped > 0:
+            cands = cands.loc[keep_mask].reset_index(drop=True)
+            keep_list = np.flatnonzero(keep_mask).tolist()
+            aids = [aids[i] for i in keep_list]
+            sig_days = [sig_days[i] for i in keep_list]
+            ciks_s = [ciks_s[i] for i in keep_list]
+            asset_idxs = asset_idxs[keep_mask]
+            sess_idxs = sess_idxs[keep_mask]
+
     dec_ns = clocks.instants(cands["decision_at"].to_numpy(dtype=object))
 
     # PIT fund_snap_id & causal event cursors per anchor row
-    ciks_s = _fund.cik_at(version, aids, sig_days).astype(str).tolist()
     n = len(cands)
     snap_ids = np.full(n, -1, dtype=np.int32)
     ev_starts = np.zeros(n, dtype=np.int64)
@@ -412,7 +497,7 @@ def _build_anchors(
     ev_avail = event_store.available_at_ns
     for i in range(n):
         d_ns = int(dec_ns[i])
-        if ciks_s[i] and d_ns != clocks.NAT:
+        if ciks_s[i] and ciks_s[i] != "nan" and d_ns != clocks.NAT:
             snap_ids[i] = fund_store.lookup_snap_id(ciks_s[i], d_ns)
         a_i = int(asset_idxs[i])
         if 0 <= a_i < len(offsets) - 1 and d_ns != clocks.NAT:
@@ -457,28 +542,33 @@ def _build_anchors(
         }
     )
     order_sha = compute_anchor_order_sha256(df)
-    del price_store
-    return Anchors(
-        frame=df,
-        order_sha256=order_sha,
-        assets=tuple(asset_list),
-        sessions=tuple(cal.days),
-        time_policy=time_policy,
-        sampling=sampling,
-        benchmark_id=None,
+    return (
+        Anchors(
+            frame=df,
+            order_sha256=order_sha,
+            assets=tuple(asset_list),
+            sessions=tuple(cal.days),
+            time_policy=time_policy,
+            sampling=sampling,
+            benchmark_id=None,
+        ),
+        dedup_dropped,
     )
 
 
 def _compute_labels(
     version: Any,
     anchors: Anchors,
+    stores: Stores,
     *,
+    cal: clocks.Calendar,
     horizons: Sequence[int],
     benchmark: str,
     universe: str,
+    time_policy: str,
+    max_date: date | None = None,
 ) -> pd.DataFrame:
     af = anchors.frame
-    cal = _candidates.calendar(version, version.calendar)
     horizon_list, single = _labels.horizons(horizons)
     policy = _labels.terminal_policy(None)
     rule = _candidates.membership_rule(
@@ -496,6 +586,8 @@ def _compute_labels(
         if len(signal_pos)
         else None
     )
+    if max_date is not None and last is not None:
+        last = min(last, max_date)
     inputs = _return_inputs(
         version,
         [*asset_ids, *([bench_id] if bench_id else [])],
@@ -507,17 +599,42 @@ def _compute_labels(
         cal.days,
         list(dict.fromkeys([*asset_ids, *([bench_id] if bench_id else [])])),
     )
-    return _labels.label_frame(
+    manifest_cutoff = clocks.day(version.manifest["cutoff_date"])
+    eff_cutoff = (
+        min(manifest_cutoff, max_date) if max_date is not None else manifest_cutoff
+    )
+    y_base = _labels.label_frame(
         af[[*KEYS, "decision_at"]],
         series,
         cal,
         horizon_list=horizon_list,
         single=single,
         benchmark_id=bench_id or asset_ids[0],
-        cutoff=clocks.day(version.manifest["cutoff_date"]),
+        cutoff=eff_cutoff,
         policy=policy,
         in_universe=af["in_universe"],
         static=rule is None,
+    )
+    rf_arr: np.ndarray | None = None
+    if "reference_series" in _candidates.families(version):
+        rf_s = _risk_free_daily(
+            version, series="DTB3", time_policy=time_policy
+        ).reindex(list(cal.days))
+        if rf_s.isna().any():
+            rf_alt = _risk_free_daily(
+                version, series="DGS3MO", time_policy=time_policy
+            ).reindex(list(cal.days))
+            rf_s = rf_s.combine_first(rf_alt)
+        rf_arr = rf_s.to_numpy(dtype=np.float64)
+    return _labels.attach_risk_adjusted_labels(
+        y_base,
+        af,
+        stores.prices,
+        cal=cal,
+        horizons=horizon_list,
+        rf_daily=rf_arr,
+        cutoff_date=eff_cutoff,
+        benchmark_idx=stores.prices.benchmark_idx,
     )
 
 
@@ -539,10 +656,13 @@ def materialize(
     symbols: str | Sequence[str] | None = None,
     start: str | date | None = None,
     end: str | date | None = None,
+    max_date: str | date | None = None,
     sampling: str | None = None,
     time_policy: str | None = None,
     universe: str = "pit",
     benchmark: str = "SPY",
+    deduplicate_issuers: bool = True,
+    include_news_events: bool = False,
     include_stores: bool = True,
     include_labels: bool = True,
 ) -> MaterializedDataset:
@@ -558,6 +678,10 @@ def materialize(
     horizons = tuple(
         int(h) for h in recipe.get("horizons_trading_days", DEFAULT_HORIZONS)
     )
+    max_d = clocks.day(max_date) if max_date is not None else None
+    eff_end: str | date | None = end
+    if max_d is not None:
+        eff_end = min(clocks.day(end), max_d) if end is not None else max_d
 
     universe_records = _candidates.records(version.universe)
     all_assets = list(
@@ -579,11 +703,14 @@ def materialize(
             if (symbols is not None and symbols != "all")
             else "default",
             "start": str(start) if start is not None else "",
-            "end": str(end) if end is not None else "",
+            "end": str(eff_end) if eff_end is not None else "",
+            "max_date": max_d.isoformat() if max_d is not None else "",
             "sampling": eff_sampling,
             "time_policy": eff_policy,
             "universe": universe,
             "benchmark": bench_id or "",
+            "deduplicate_issuers": bool(deduplicate_issuers),
+            "include_news_events": bool(include_news_events),
         },
         sort_keys=True,
     )
@@ -592,14 +719,22 @@ def materialize(
     stores_dir = mat_root / "stores"
     parts_dir = mat_root / "parts"
 
-    cal = _candidates.calendar(version, version.calendar)
+    cal_sessions = (
+        [d for d in version.calendar if clocks.day(d) <= max_d]
+        if max_d is not None
+        else version.calendar
+    )
+    cal = _candidates.calendar(version, cal_sessions)
+    dedup_dropped = 0
     if (stores_dir / "anchors.meta.json").is_file() and (
         stores_dir / "price_store.meta.json"
     ).is_file():
         stores = Stores.load(stores_dir, mmap=True)
         anchors = stores.anchors
     else:
-        pstore = build_price_store(version, all_assets, cal.days, benchmark_id=bench_id)
+        pstore = build_price_store(
+            version, all_assets, cal.days, benchmark_id=bench_id, max_date=max_d
+        )
         asset_pos = {aid: idx for idx, aid in enumerate(pstore.assets)}
         # Map each CIK to its primary active asset_idx for Event-Time Cross-Binding
         primary_cik_asset: dict[str, int] = {}
@@ -628,6 +763,7 @@ def materialize(
             cal=cal,
             price_store=pstore,
             primary_asset_of_cik=primary_cik_asset,
+            max_date=max_d,
         )
         estore = build_event_store(
             version,
@@ -635,13 +771,22 @@ def materialize(
             time_policy=eff_policy,
             cal=cal,
             price_store=pstore,
+            include_news=include_news_events,
+            max_date=max_d,
         )
-        mstore = build_macro_store(version, cal.days, time_policy=eff_policy, cal=cal)
-        anchors = _build_anchors(
+        mstore = build_macro_store(
+            version,
+            cal.days,
+            time_policy=eff_policy,
+            cal=cal,
+            price_store=pstore,
+            max_date=max_d,
+        )
+        anchors, dedup_dropped = _build_anchors(
             version,
             symbols=symbols,
             start=start,
-            end=end,
+            end=eff_end,
             sampling=eff_sampling,
             universe=universe,
             benchmark=benchmark,
@@ -651,6 +796,7 @@ def materialize(
             price_store=pstore,
             fund_store=fstore,
             event_store=estore,
+            deduplicate_issuers=deduplicate_issuers,
         )
         anchors.benchmark_id = bench_id
         stores = Stores(
@@ -660,12 +806,17 @@ def materialize(
             events=estore,
             macro=mstore,
         )
+        if max_d is not None:
+            stores.assert_cutoff(max_d)
         stores.save(stores_dir)
         # Re-open PriceStore memory-mapped to drop eager write buffer RSS
         del pstore, fstore, estore, mstore, anchors, stores
         gc.collect()
         stores = Stores.load(stores_dir, mmap=True)
         anchors = stores.anchors
+
+    if max_d is not None:
+        stores.assert_cutoff(max_d)
 
     exclude_set = {str(c) for c in (recipe.get("exclude_columns") or ())}
     ctx: GroupBuildContext | None = None
@@ -787,9 +938,13 @@ def materialize(
             y_df = _compute_labels(
                 version,
                 anchors,
+                stores,
+                cal=cal,
                 horizons=horizons,
                 benchmark=benchmark,
                 universe=universe,
+                time_policy=eff_policy,
+                max_date=max_d,
             )
             y_serializable = y_df.copy()
             for c in y_serializable.columns:
@@ -810,6 +965,10 @@ def materialize(
         "group_columns": declared_by_group,
         "bridge_columns": list(recipe.get("bridge_columns") or ()),
         "exclude_columns": sorted(exclude_set),
+        "max_date": max_d.isoformat() if max_d is not None else None,
+        "deduplicate_issuers": bool(deduplicate_issuers),
+        "dedup_dropped_rows": dedup_dropped,
+        "include_news_events": bool(include_news_events),
         "audit_passed": True,
         "rows": len(anchors.frame),
         "columns": len(X.columns),

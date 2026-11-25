@@ -18,8 +18,14 @@ import pandas as pd
 from . import candidates as _candidates
 from . import clocks
 from . import fundamentals_derived as _fund
+from . import sec_events as _sec_events
 from .clocks import NAT, NEVER
+from .concepts import required_base_concepts
 from .constants import REFERENCE_ETFS, SOURCE_CONTRACTS
+from .extra_features import (
+    _prepare_reference_series,
+    _series_snapshot_at,
+)
 from .extra_features import (
     market_etf_features as _market_etf_features,
 )
@@ -27,6 +33,7 @@ from .extra_features import (
     reference_features as _reference_features,
 )
 from .price_reader import projected_prices as _project_prices
+from .release_features import default_extractor_version as _default_extractor_version
 
 PRICE_CHANNELS: tuple[str, ...] = (
     "open_raw",
@@ -43,6 +50,11 @@ PRICE_CHANNELS: tuple[str, ...] = (
     "intraday_ret",
     "tr_suspect",
     "split_index",
+    "bar_invalid",
+    "bar_extreme",
+    "log_dollar_volume",
+    "hl_range_ratio",
+    "open_close_ratio",
 )
 
 
@@ -75,28 +87,34 @@ FUND_CHANNELS: tuple[str, ...] = (
     "shares_outstanding",
 )
 _FUND_INDEX = {name: idx for idx, name in enumerate(FUND_CHANNELS)}
-_FUND_DURATION_CONCEPTS = (
-    "revenue",
-    "gross_profit",
-    "operating_income",
-    "net_income",
-    "operating_cash_flow",
-    "capex",
-    "diluted_eps",
-    "ebitda",
-    "fcf",
+_FUND_DURATION_CONCEPT_MAP: tuple[tuple[str, str], ...] = (
+    ("revenue", "revenue"),
+    ("gross_profit", "gross_profit"),
+    ("operating_income", "operating_income"),
+    ("net_income", "net_income"),
+    ("operating_cash_flow", "operating_cash_flow"),
+    ("capex", "capex"),
+    ("diluted_eps", "eps_diluted"),
+    ("ebitda", "ebitda"),
+    ("fcf", "fcf"),
 )
-_FUND_INSTANT_CONCEPTS = (
-    "cash",
-    "total_assets",
-    "total_liabilities",
-    "equity",
-    "total_debt",
-    "shares_outstanding",
+_FUND_INSTANT_CONCEPT_MAP: tuple[tuple[str, str], ...] = (
+    ("cash", "cash"),
+    ("total_assets", "total_assets"),
+    ("total_liabilities", "total_liabilities"),
+    ("equity", "equity"),
+    ("total_debt", "total_debt"),
+    ("shares_outstanding", "shares_outstanding"),
+)
+_FUND_QUARTER_CONCEPTS: tuple[str, ...] = tuple(
+    c for _, c in _FUND_DURATION_CONCEPT_MAP
+)
+_FUND_ALL_TARGET_CONCEPTS: tuple[str, ...] = (
+    *_FUND_QUARTER_CONCEPTS,
+    *(c for _, c in _FUND_INSTANT_CONCEPT_MAP),
 )
 _FUND_NORMALIZE_CONCEPTS = frozenset(
-    set(_FUND_DURATION_CONCEPTS)
-    | set(_FUND_INSTANT_CONCEPTS)
+    required_base_concepts(list(_FUND_ALL_TARGET_CONCEPTS))
     | {
         "revenue_total",
         "revenue_contracts",
@@ -116,8 +134,50 @@ _FUND_NORMALIZE_CONCEPTS = frozenset(
         "short_term_borrowings",
         "long_term_debt_noncurrent",
         "long_term_debt",
+        "shares_outstanding_cover",
+        "shares_outstanding_bs",
+        "eps_diluted",
     }
 )
+_RAW_MACRO_SERIES: tuple[str, ...] = (
+    "DTB3",
+    "DGS3MO",
+    "DGS1",
+    "DGS2",
+    "DGS5",
+    "DGS10",
+    "DGS30",
+    "DFII10",
+    "T10YIE",
+    "BAA10Y",
+    "AAA10Y",
+    "VIXCLS",
+    "VXVCLS",
+    "DTWEXBGS",
+    "DCOILWTICO",
+)
+_MACRO_ETF_SYMBOLS: tuple[str, ...] = (
+    "SPY",
+    "QQQ",
+    "IWB",
+    "IWM",
+    "RSP",
+    "IWD",
+    "IWF",
+    "GLD",
+    "XLB",
+    "XLC",
+    "XLE",
+    "XLF",
+    "XLI",
+    "XLK",
+    "XLP",
+    "XLRE",
+    "XLU",
+    "XLV",
+    "XLY",
+)
+_NEWS_SOURCES: frozenset[str] = frozenset({"alpaca_news", "finnhub_news"})
 
 _ANCHOR_META_COLS = (
     "row_id",
@@ -370,8 +430,12 @@ def build_price_store(
     sessions: Sequence[date],
     *,
     benchmark_id: str | None = None,
+    max_date: str | date | None = None,
 ) -> PriceStore:
     """Build compact ``float32 [N_assets, T_sessions, C_price]`` store without wide pivots."""
+    if max_date is not None:
+        cutoff_d = clocks.day(max_date)
+        sessions = [d for d in sessions if clocks.day(d) <= cutoff_d]
     asset_list = list(
         dict.fromkeys(
             [*map(str, assets), *([str(benchmark_id)] if benchmark_id else [])]
@@ -409,8 +473,17 @@ def build_price_store(
         _fill_price_channels(tensor, adj_df, asset_pos, day_pos, fields={"close": 7})
         del adj_df
 
+    disputed_mat = np.zeros((n_assets, n_sessions), dtype=bool)
     if "daily_returns" in _candidates.families(version):
-        wanted_dr = ["asset_id", "date", "row_kind", "tr_index", "split_index", "flags"]
+        wanted_dr = [
+            "asset_id",
+            "date",
+            "row_kind",
+            "tr_index",
+            "split_index",
+            "flags",
+            "tr_status",
+        ]
         if hasattr(version, "_read_family"):
             dr_df = version._read_family(
                 "daily_returns",
@@ -446,6 +519,15 @@ def build_price_store(
             _fill_price_channels(
                 tensor, work_dr, asset_pos, day_pos, fields={"_tr_suspect": 12}
             )
+            if "tr_status" in dr_df.columns:
+                work_dr["_tr_disputed"] = (
+                    dr_df["tr_status"].fillna("").astype(str) == "disputed"
+                ).astype(np.float32)
+                tmp_disp = np.zeros((n_assets, n_sessions, 1), dtype=np.float32)
+                _fill_price_channels(
+                    tmp_disp, work_dr, asset_pos, day_pos, fields={"_tr_disputed": 0}
+                )
+                disputed_mat = tmp_disp[:, :, 0] > 0.5
         del dr_df
 
     # Derive causal daily total return + intraday/overnight decomposition.
@@ -464,7 +546,10 @@ def build_price_store(
     tensor[:, :, 9] = ret_1d.astype(np.float32)
 
     open_raw = tensor[:, :, 0].astype(np.float64)
+    high_raw = tensor[:, :, 1].astype(np.float64)
+    low_raw = tensor[:, :, 2].astype(np.float64)
     close_raw = tensor[:, :, 3].astype(np.float64)
+    vol_raw = tensor[:, :, 4].astype(np.float64)
     ok_intra = (
         np.isfinite(open_raw)
         & (open_raw > 0)
@@ -479,6 +564,45 @@ def build_price_store(
     overnight = np.full((n_assets, n_sessions), np.nan, dtype=np.float64)
     overnight[ok_over] = (1.0 + ret_1d[ok_over]) / (1.0 + intraday[ok_over]) - 1.0
     tensor[:, :, 10] = overnight.astype(np.float32)
+
+    # Dual quality masks:
+    # - bar_invalid: adjustment_suspect, missing/non-positive price level, or zero-volume zombie bar
+    # - bar_extreme: disputed-but-kept or genuine >50% single-day move (retained for risk modeling)
+    zero_vol = np.isfinite(vol_raw) & (vol_raw <= 0.0)
+    missing_lvl = ~(np.isfinite(base_lvl) & (base_lvl > 0.0))
+    bar_invalid = suspect_mask | zero_vol | missing_lvl
+    bar_extreme = (~bar_invalid) & (
+        disputed_mat | (np.isfinite(ret_1d) & (np.abs(ret_1d) > 0.50))
+    )
+    tensor[:, :, 14] = bar_invalid.astype(np.float32)
+    tensor[:, :, 15] = bar_extreme.astype(np.float32)
+
+    # Split-invariant channels: log_dollar_volume, hl_range_ratio, open_close_ratio
+    dvol = np.full((n_assets, n_sessions), np.nan, dtype=np.float64)
+    ok_dv = (
+        np.isfinite(close_raw)
+        & (close_raw > 0.0)
+        & np.isfinite(vol_raw)
+        & (vol_raw >= 0.0)
+    )
+    dvol[ok_dv] = np.log1p(close_raw[ok_dv] * vol_raw[ok_dv])
+    tensor[:, :, 16] = dvol.astype(np.float32)
+
+    hl_ratio = np.full((n_assets, n_sessions), np.nan, dtype=np.float64)
+    ok_hl = (
+        np.isfinite(high_raw)
+        & np.isfinite(low_raw)
+        & np.isfinite(close_raw)
+        & (close_raw > 0.0)
+        & (low_raw > 0.0)
+        & (high_raw >= low_raw)
+    )
+    hl_ratio[ok_hl] = (high_raw[ok_hl] - low_raw[ok_hl]) / close_raw[ok_hl]
+    tensor[:, :, 17] = hl_ratio.astype(np.float32)
+
+    oc_ratio = np.full((n_assets, n_sessions), np.nan, dtype=np.float64)
+    oc_ratio[ok_intra] = np.log(close_raw[ok_intra] / open_raw[ok_intra])
+    tensor[:, :, 18] = oc_ratio.astype(np.float32)
 
     bench_idx = asset_pos.get(str(benchmark_id), -1) if benchmark_id else -1
     return PriceStore(
@@ -641,65 +765,123 @@ class FundStore:
         )
 
 
+def _cutoff_close_ns(cal: clocks.Calendar, max_date: str | date | None) -> int | None:
+    """Return latest session close instant in ``cal`` with session <= ``max_date``."""
+    if max_date is None:
+        return None
+    max_d = clocks.day(max_date)
+    if not len(cal.days):
+        return int(clocks.wall_instants([max_d], clocks.LABEL_CLOSE_TIME)[0])
+    pos = (
+        int(np.searchsorted(np.array(cal.days, dtype=object), max_d, side="right")) - 1
+    )
+    if pos < 0:
+        return int(clocks.wall_instants([max_d], clocks.LABEL_CLOSE_TIME)[0])
+    return int(cal.closes[pos])
+
+
 def _reaction_window_metrics(
     asset_idx: int,
     public_ns: int,
     price_store: PriceStore | None,
     cal: clocks.Calendar,
+    *,
+    max_decision_ns: int | None = None,
 ) -> tuple[float, float, float, int, int]:
-    """Return ``(pre_ret_21d, post_1d_ret, post_3d_ret, ready_1d_ns, ready_3d_ns)``."""
+    """Return market-adjusted ``(pre_ret_21d, post_1d_ret, post_3d_ret, ready_1d_ns, ready_3d_ns)``."""
     if price_store is None or asset_idx < 0 or public_ns == NAT or not len(cal.days):
+        return (float("nan"), float("nan"), float("nan"), NEVER, NEVER)
+    n_sess = min(len(cal.days), price_store.data.shape[1])
+    if n_sess <= 0:
         return (float("nan"), float("nan"), float("nan"), NEVER, NEVER)
     close_adj = price_store.channel("close_adj")[asset_idx]
     tr_lvl = price_store.channel("tr_index")[asset_idx]
-    has_tr = bool(np.any(np.isfinite(tr_lvl) & (tr_lvl > 0)))
+    has_tr = bool(np.any(np.isfinite(tr_lvl[:n_sess]) & (tr_lvl[:n_sess] > 0)))
     lvl = tr_lvl if has_tr else close_adj
-    r0_idx = int(np.searchsorted(cal.closes, int(public_ns), side="right"))
+    inv_ch = price_store.channel("bar_invalid")[asset_idx]
+    inv = np.isfinite(inv_ch) & (inv_ch > 0.5)
+
+    bench_idx = price_store.benchmark_idx
+    use_bench = (
+        bench_idx >= 0
+        and bench_idx < price_store.data.shape[0]
+        and bench_idx != asset_idx
+    )
+    b_lvl: np.ndarray | None = None
+    b_inv: np.ndarray | None = None
+    if use_bench:
+        b_tr = price_store.channel("tr_index")[bench_idx]
+        b_adj = price_store.channel("close_adj")[bench_idx]
+        b_has_tr = bool(np.any(np.isfinite(b_tr[:n_sess]) & (b_tr[:n_sess] > 0)))
+        b_lvl = b_tr if b_has_tr else b_adj
+        b_inv_ch = price_store.channel("bar_invalid")[bench_idx]
+        b_inv = np.isfinite(b_inv_ch) & (b_inv_ch > 0.5)
+
+    def _valid_at(arr: np.ndarray, bad: np.ndarray, i: int) -> bool:
+        return bool(
+            0 <= i < n_sess and not bad[i] and np.isfinite(arr[i]) and arr[i] > 0
+        )
+
+    r0_idx = int(np.searchsorted(cal.closes[:n_sess], int(public_ns), side="right"))
     pre_idx = r0_idx - 1
-    while pre_idx >= 0 and not (np.isfinite(lvl[pre_idx]) and lvl[pre_idx] > 0):
+    while pre_idx >= 0 and not _valid_at(lvl, inv, pre_idx):
         pre_idx -= 1
     pre_ret = float("nan")
-    if pre_idx >= 21:
-        p0 = float(lvl[pre_idx - 21])
-        p1 = float(lvl[pre_idx])
-        if np.isfinite(p0) and p0 > 0 and np.isfinite(p1) and p1 > 0:
-            pre_ret = p1 / p0 - 1.0
+    if (
+        pre_idx >= 21
+        and _valid_at(lvl, inv, pre_idx - 21)
+        and _valid_at(lvl, inv, pre_idx)
+    ):
+        pre_ret = float(lvl[pre_idx]) / float(lvl[pre_idx - 21]) - 1.0
+        if (
+            b_lvl is not None
+            and b_inv is not None
+            and _valid_at(b_lvl, b_inv, pre_idx - 21)
+            and _valid_at(b_lvl, b_inv, pre_idx)
+        ):
+            pre_ret -= float(b_lvl[pre_idx]) / float(b_lvl[pre_idx - 21]) - 1.0
 
     def _post(k: int) -> tuple[float, int]:
-        idx = r0_idx + k
-        while idx < len(cal.days) and not (np.isfinite(lvl[idx]) and lvl[idx] > 0):
+        # r0_idx is the 1st reaction session close after public_ns (k=1 -> r0_idx, k=3 -> r0_idx+2).
+        idx = r0_idx + k - 1
+        while idx < n_sess and not _valid_at(lvl, inv, idx):
             idx += 1
-        if idx >= len(cal.days):
+        if idx >= n_sess:
             return float("nan"), NEVER
         ready_ns = int(cal.closes[idx])
-        if pre_idx < 0 or not (np.isfinite(lvl[pre_idx]) and lvl[pre_idx] > 0):
+        if max_decision_ns is not None and ready_ns > max_decision_ns:
+            return float("nan"), NEVER
+        if pre_idx < 0 or not _valid_at(lvl, inv, pre_idx):
             return float("nan"), ready_ns
-        return float(lvl[idx]) / float(lvl[pre_idx]) - 1.0, ready_ns
+        ret = float(lvl[idx]) / float(lvl[pre_idx]) - 1.0
+        if (
+            b_lvl is not None
+            and b_inv is not None
+            and _valid_at(b_lvl, b_inv, pre_idx)
+            and _valid_at(b_lvl, b_inv, idx)
+        ):
+            ret -= float(b_lvl[idx]) / float(b_lvl[pre_idx]) - 1.0
+        return ret, ready_ns
 
     p1_ret, r1_ns = _post(1)
     p3_ret, r3_ns = _post(3)
     return pre_ret, p1_ret, p3_ret, r1_ns, r3_ns
 
 
-def _best_concept_value(versions: list[_fund.FactVersion]) -> float:
-    if not versions:
-        return float("nan")
-    max_order = max(v.order_key for v in versions)
-    at_order = [v for v in versions if v.order_key == max_order]
-    best_rank = min(v.tag_rank for v in at_order)
-    cands = [v for v in at_order if v.tag_rank == best_rank]
-    currencies = {v.currency for v in cands}
-    if len(currencies) > 1:
-        chosen = "USD" if "USD" in currencies else min(currencies)
-        cands = [v for v in cands if v.currency == chosen]
-    vals = {v.decimal_value for v in cands}
-    if len(vals) != 1:
-        return float("nan")
-    val = next(iter(vals))
-    if val is None:
-        return float("nan")
-    num = float(val)
-    return num if math.isfinite(num) else float("nan")
+def _parse_optional_iso_day(value: Any) -> date | None:
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return None
+    if isinstance(value, pd.Timestamp):
+        return None if pd.isna(value) else value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    if len(text) >= 10:
+        try:
+            return date.fromisoformat(text[:10])
+        except ValueError:
+            return None
+    return None
 
 
 def build_fund_store(
@@ -710,8 +892,9 @@ def build_fund_store(
     cal: clocks.Calendar,
     price_store: PriceStore | None = None,
     primary_asset_of_cik: Mapping[str, int] | None = None,
+    max_date: str | date | None = None,
 ) -> FundStore:
-    """Build restatement-proof PIT CSR ``FundStore`` storing all visible historical quarters."""
+    """Build restatement-proof PIT CSR ``FundStore`` using ``IssuerStateMachine`` derivation."""
     clocks.policy(time_policy)
     unique_ciks = sorted({c for c in ciks if c})
     if not unique_ciks or "fundamentals" not in _candidates.families(version):
@@ -733,6 +916,7 @@ def build_fund_store(
             time_policy=time_policy,
         )
 
+    max_ns = _cutoff_close_ns(cal, max_date)
     manifest, frames = _fund._iter_fact_frames(version, unique_ciks)
     zones = (
         manifest.get("source_timezones", {}) if isinstance(manifest, Mapping) else {}
@@ -756,7 +940,11 @@ def build_fund_store(
         for k, cnt in stats.items():
             totals[k] = totals.get(k, 0) + cnt
         for v in versions:
+            if max_ns is not None and int(v.available_ns) > max_ns:
+                continue
             by_cik.setdefault(v.cik, []).append(v)
+
+    cik_splits = _fund._cik_split_events(version, unique_ciks)
 
     snap_cik_idx: list[int] = []
     snap_epoch_ns: list[int] = []
@@ -775,180 +963,147 @@ def build_fund_store(
     for c_idx, cik in enumerate(unique_ciks):
         cik_starts[c_idx] = len(snap_epoch_ns)
         versions = by_cik.pop(cik, [])
+        if not versions:
+            cik_ends[c_idx] = len(snap_epoch_ns)
+            continue
         versions.sort(key=lambda v: (v.available_ns, v.observation_sequence))
-        active: dict[str, _fund.FactVersion] = {}
         primary_aid = (primary_asset_of_cik or {}).get(cik, -1)
+        raw_splits = cik_splits.get(cik, ())
+        cur_snap_day: list[date | None] = [None]
 
-        idx = 0
-        total_v = len(versions)
-        while idx < total_v:
-            start_idx = idx
-            epoch_ns = int(versions[idx].available_ns)
-            end_idx = idx + 1
-            while end_idx < total_v and int(versions[end_idx].available_ns) == epoch_ns:
-                end_idx += 1
-            snap_pub_ns = max(
-                (
-                    int(v.public_ns)
-                    for v in versions[start_idx:end_idx]
-                    if v.public_ns != NAT
-                ),
-                default=epoch_ns,
-            )
-            for v in versions[start_idx:end_idx]:
-                if v.is_retracted:
-                    active.pop(v.fact_id, None)
-                else:
-                    active[v.fact_id] = v
-            idx = end_idx
+        def _causal_split_fn(
+            d_from: date | None,
+            d_to: date | None,
+            *,
+            _evs: Sequence[tuple[date, float]] = raw_splits,
+            _day_box: list[date | None] = cur_snap_day,
+        ) -> float:
+            if not _evs or d_from is None or d_to is None:
+                return 1.0
+            cap_day = _day_box[0]
+            if cap_day is not None:
+                causal_evs = [(ex_d, r) for ex_d, r in _evs if ex_d <= cap_day]
+            else:
+                causal_evs = list(_evs)
+            return _fund._split_ratio_between(causal_evs, d_from, d_to)
 
-            # Group current active facts by quarter/instant period_end without truncating history
-            dur_by_pe: dict[date, dict[str, list[_fund.FactVersion]]] = {}
-            inst_by_pe: dict[date, dict[str, list[_fund.FactVersion]]] = {}
-            for v in active.values():
-                if v.period_start is None:
-                    inst_by_pe.setdefault(v.period_end, {}).setdefault(
-                        v.concept, []
-                    ).append(v)
-                else:
-                    span = (v.period_end - v.period_start).days + 1
+        split_fn = _causal_split_fn if raw_splits else None
+
+        batch_pub_map: dict[int, int] = {}
+        for v in versions:
+            ep = int(v.available_ns)
+            if v.public_ns != NAT:
+                prev_pub = batch_pub_map.get(ep)
+                pv_ns = int(v.public_ns)
+                batch_pub_map[ep] = pv_ns if prev_pub is None else max(prev_pub, pv_ns)
+
+        def _on_snapshot(
+            epoch_ns: int,
+            quarters_by_concept: Mapping[
+                str, Mapping[tuple[date, int], _fund.PeriodValue]
+            ],
+            concept_periods: Mapping[
+                str, Mapping[tuple[date | None, date], _fund.PeriodValue]
+            ],
+            *,
+            _c_idx: int = c_idx,
+            _primary_aid: int = primary_aid,
+            _split_fn: Any = split_fn,
+            _day_box: list[date | None] = cur_snap_day,
+            _pub_map: Mapping[int, int] = batch_pub_map,
+        ) -> None:
+            snap_day = _day_box[0]
+            dur_by_pe: dict[date, dict[str, _fund.PeriodValue]] = {}
+            for ch_name, concept_name in _FUND_DURATION_CONCEPT_MAP:
+                q_map = quarters_by_concept.get(concept_name, {})
+                for pv in q_map.values():
+                    if not pv.usable:
+                        continue
+                    slot = dur_by_pe.setdefault(pv.period_end, {})
+                    prev = slot.get(ch_name)
+                    if prev is None or pv.available_ns >= prev.available_ns:
+                        slot[ch_name] = pv
+                # Fallback for standalone 70..115d duration facts outside a fiscal calendar slot.
+                p_map = concept_periods.get(concept_name, {})
+                for (ps, pe), pv in p_map.items():
+                    if ps is None or not pv.usable:
+                        continue
+                    if pe in dur_by_pe and ch_name in dur_by_pe[pe]:
+                        continue
+                    span = (pe - ps).days + 1
                     if 70 <= span <= 115:
-                        dur_by_pe.setdefault(v.period_end, {}).setdefault(
-                            v.concept, []
-                        ).append(v)
+                        dur_by_pe.setdefault(pe, {})[ch_name] = pv
+
+            inst_by_pe: dict[date, dict[str, _fund.PeriodValue]] = {}
+            for ch_name, concept_name in _FUND_INSTANT_CONCEPT_MAP:
+                p_map = concept_periods.get(concept_name, {})
+                for (ps, pe), pv in p_map.items():
+                    if ps is not None or not pv.usable:
+                        continue
+                    inst_by_pe.setdefault(pe, {})[ch_name] = pv
 
             all_pes = sorted(set(dur_by_pe) | set(inst_by_pe))
             if not all_pes:
-                continue
+                return
+
             mat = np.full((len(all_pes), len(FUND_CHANNELS)), np.nan, dtype=np.float32)
             for row_i, pe in enumerate(all_pes):
-                d_map = dur_by_pe.get(pe, {})
-                i_map = inst_by_pe.get(pe, {})
-                row_versions: list[_fund.FactVersion] = []
-                for c_name in _FUND_DURATION_CONCEPTS:
-                    vs = d_map.get(c_name, [])
-                    if not vs and c_name == "revenue":
-                        vs = d_map.get("revenue_total", []) or d_map.get(
-                            "revenue_contracts", []
-                        )
-                    elif not vs and c_name == "net_income":
-                        vs = d_map.get("net_income_parent", [])
-                        if not vs:
-                            ni_tot = _best_concept_value(
-                                d_map.get("net_income_total", [])
+                d_row = dur_by_pe.get(pe, {})
+                i_row = inst_by_pe.get(pe, {})
+                pe_pub = -1
+                for ch_name, _ in _FUND_DURATION_CONCEPT_MAP:
+                    pv = d_row.get(ch_name)
+                    if pv is None or pv.decimal_value is None:
+                        continue
+                    if (
+                        ch_name == "diluted_eps"
+                        and _split_fn is not None
+                        and snap_day is not None
+                    ):
+                        val = float(
+                            _fund._scale_decimal_to_ref(
+                                pv, "per_share", snap_day, _split_fn
                             )
-                            ni_nci = _best_concept_value(
-                                d_map.get("net_income_nci", [])
-                            )
-                            if math.isfinite(ni_tot) and math.isfinite(ni_nci):
-                                mat[row_i, _FUND_INDEX[c_name]] = np.float32(
-                                    ni_tot - ni_nci
-                                )
-                                row_versions.extend(d_map.get("net_income_total", []))
-                                row_versions.extend(d_map.get("net_income_nci", []))
-                                continue
-                            vs = d_map.get("net_income_common", []) or d_map.get(
-                                "net_income_total", []
-                            )
-                    if vs:
-                        mat[row_i, _FUND_INDEX[c_name]] = np.float32(
-                            _best_concept_value(vs)
                         )
-                        row_versions.extend(vs)
-                # Derived duration fallbacks (gross_profit / fcf / ebitda)
-                if np.isnan(mat[row_i, _FUND_INDEX["gross_profit"]]):
-                    rev_v = mat[row_i, _FUND_INDEX["revenue"]]
-                    cor_v = _best_concept_value(d_map.get("cost_of_revenue", []))
-                    if np.isfinite(rev_v) and math.isfinite(cor_v):
-                        mat[row_i, _FUND_INDEX["gross_profit"]] = np.float32(
-                            rev_v - cor_v
+                    else:
+                        val = pv.float_value
+                    if math.isfinite(val):
+                        mat[row_i, _FUND_INDEX[ch_name]] = np.float32(val)
+                        if pv.available_ns > pe_pub:
+                            pe_pub = int(pv.available_ns)
+                for ch_name, _ in _FUND_INSTANT_CONCEPT_MAP:
+                    pv = i_row.get(ch_name)
+                    if pv is None or pv.decimal_value is None:
+                        continue
+                    if (
+                        ch_name == "shares_outstanding"
+                        and _split_fn is not None
+                        and snap_day is not None
+                    ):
+                        val = float(
+                            _fund._scale_decimal_to_ref(
+                                pv, "shares", snap_day, _split_fn
+                            )
                         )
-                        row_versions.extend(d_map.get("cost_of_revenue", []))
-                if np.isnan(mat[row_i, _FUND_INDEX["fcf"]]):
-                    ocf = mat[row_i, _FUND_INDEX["operating_cash_flow"]]
-                    capex = mat[row_i, _FUND_INDEX["capex"]]
-                    if np.isfinite(ocf) and np.isfinite(capex):
-                        mat[row_i, _FUND_INDEX["fcf"]] = np.float32(ocf - capex)
-                if np.isnan(mat[row_i, _FUND_INDEX["ebitda"]]):
-                    oi = mat[row_i, _FUND_INDEX["operating_income"]]
-                    da = _best_concept_value(d_map.get("d_and_a", []))
-                    if np.isfinite(oi) and math.isfinite(da):
-                        mat[row_i, _FUND_INDEX["ebitda"]] = np.float32(oi + da)
+                    else:
+                        val = pv.float_value
+                    if math.isfinite(val):
+                        mat[row_i, _FUND_INDEX[ch_name]] = np.float32(val)
+                        if pv.available_ns > pe_pub:
+                            pe_pub = int(pv.available_ns)
+                q_pe_ords.append(pe.toordinal())
+                q_pub_ns.append(pe_pub if pe_pub >= 0 else int(epoch_ns))
 
-                for c_name in _FUND_INSTANT_CONCEPTS:
-                    vs = i_map.get(c_name, [])
-                    if not vs and c_name == "cash":
-                        vs = i_map.get("cash_incl_restricted", [])
-                    elif not vs and c_name == "equity":
-                        vs = i_map.get("equity_parent", [])
-                        if not vs:
-                            eq_tot = _best_concept_value(i_map.get("equity_total", []))
-                            mi_v = _best_concept_value(
-                                i_map.get("minority_interest", [])
-                            )
-                            if math.isfinite(eq_tot) and math.isfinite(mi_v):
-                                mat[row_i, _FUND_INDEX[c_name]] = np.float32(
-                                    eq_tot - mi_v
-                                )
-                                row_versions.extend(i_map.get("equity_total", []))
-                                row_versions.extend(i_map.get("minority_interest", []))
-                                continue
-                            vs = i_map.get("equity_total", [])
-                    if vs:
-                        mat[row_i, _FUND_INDEX[c_name]] = np.float32(
-                            _best_concept_value(vs)
-                        )
-                        row_versions.extend(vs)
-                if np.isnan(mat[row_i, _FUND_INDEX["total_liabilities"]]):
-                    le_v = _best_concept_value(i_map.get("liabilities_and_equity", []))
-                    if not math.isfinite(le_v):
-                        ta_v = mat[row_i, _FUND_INDEX["total_assets"]]
-                        le_v = float(ta_v) if np.isfinite(ta_v) else float("nan")
-                    eq_tot_v = _best_concept_value(i_map.get("equity_total", []))
-                    if not math.isfinite(eq_tot_v):
-                        ep_v = _best_concept_value(i_map.get("equity_parent", []))
-                        mi_v = _best_concept_value(i_map.get("minority_interest", []))
-                        if math.isfinite(ep_v) and math.isfinite(mi_v):
-                            eq_tot_v = ep_v + mi_v
-                        elif math.isfinite(ep_v):
-                            eq_tot_v = ep_v
-                    if math.isfinite(le_v) and math.isfinite(eq_tot_v):
-                        mat[row_i, _FUND_INDEX["total_liabilities"]] = np.float32(
-                            le_v - eq_tot_v
-                        )
-                        row_versions.extend(i_map.get("liabilities_and_equity", []))
-                if np.isnan(mat[row_i, _FUND_INDEX["total_debt"]]):
-                    dc = _best_concept_value(i_map.get("debt_current", [])) or 0.0
-                    ltc = _best_concept_value(i_map.get("long_term_debt_current", []))
-                    stb = _best_concept_value(i_map.get("short_term_borrowings", []))
-                    ltnc = _best_concept_value(
-                        i_map.get("long_term_debt_noncurrent", [])
-                    )
-                    ltd = _best_concept_value(i_map.get("long_term_debt", []))
-                    parts_debt = [
-                        x
-                        for x in (dc, ltc, stb, ltnc, ltd)
-                        if math.isfinite(x) and x != 0.0
-                    ]
-                    if parts_debt:
-                        mat[row_i, _FUND_INDEX["total_debt"]] = np.float32(
-                            (dc if math.isfinite(dc) else 0.0)
-                            + (
-                                ltnc
-                                if math.isfinite(ltnc)
-                                else (ltd if math.isfinite(ltd) else 0.0)
-                            )
-                        )
-                pe_ord = pe.toordinal()
-                pe_pub = max((v.available_ns for v in row_versions), default=epoch_ns)
-                q_pe_ords.append(pe_ord)
-                q_pub_ns.append(int(pe_pub))
-
+            snap_pub_ns = _pub_map.get(int(epoch_ns), int(epoch_ns))
             pre_r, p1_r, p3_r, r1_ns, r3_ns = _reaction_window_metrics(
-                primary_aid, snap_pub_ns, price_store, cal
+                _primary_aid,
+                snap_pub_ns,
+                price_store,
+                cal,
+                max_decision_ns=max_ns,
             )
-            snap_cik_idx.append(c_idx)
-            snap_epoch_ns.append(epoch_ns)
+            snap_cik_idx.append(_c_idx)
+            snap_epoch_ns.append(int(epoch_ns))
             q_values_chunks.append(mat)
             snap_offsets.append(snap_offsets[-1] + len(all_pes))
             snap_pre_ret.append(pre_r)
@@ -956,6 +1111,28 @@ def build_fund_store(
             snap_p3_ret.append(p3_r)
             snap_p1_ns.append(r1_ns)
             snap_p3_ns.append(r3_ns)
+
+        machine = _fund.IssuerStateMachine(
+            cik,
+            target_views=(),
+            record_quarters=_FUND_QUARTER_CONCEPTS,
+            split_factor_fn=split_fn,
+            snapshot_callback=_on_snapshot,
+        )
+        idx = 0
+        total_v = len(versions)
+        while idx < total_v:
+            epoch_ns = int(versions[idx].available_ns)
+            end_idx = idx + 1
+            while end_idx < total_v and int(versions[end_idx].available_ns) == epoch_ns:
+                end_idx += 1
+            cur_snap_day[0] = (
+                pd.Timestamp(epoch_ns, unit="ns", tz="UTC")
+                .tz_convert(clocks.NEW_YORK)
+                .date()
+            )
+            machine._apply_batch(versions[idx:end_idx], epoch_ns)
+            idx = end_idx
 
         cik_ends[c_idx] = len(snap_epoch_ns)
 
@@ -1014,6 +1191,7 @@ class EventStore:
         post_1d_ready_ns: np.ndarray,
         post_3d_ready_ns: np.ndarray,
         time_policy: str,
+        event_date_ordinals: np.ndarray | None = None,
     ) -> None:
         self.assets = tuple(assets)
         self.asset_offsets = asset_offsets
@@ -1029,6 +1207,11 @@ class EventStore:
         self.post_1d_ready_ns = post_1d_ready_ns
         self.post_3d_ready_ns = post_3d_ready_ns
         self.time_policy = time_policy
+        self.event_date_ordinals = (
+            event_date_ordinals
+            if event_date_ordinals is not None
+            else np.zeros(len(public_at_ns), dtype=np.int32)
+        )
 
     def slice_asset_events(self, asset_idx: int, decision_at_ns: int) -> dict[str, Any]:
         """Return causal events visible at ``decision_at_ns`` with masked reactions."""
@@ -1042,6 +1225,7 @@ class EventStore:
                 "available_at_ns": np.empty(0, dtype=np.int64),
                 "source_id": np.empty(0, dtype=np.uint8),
                 "kind_code": np.empty(0, dtype=np.int32),
+                "event_date_ordinals": np.empty(0, dtype=np.int32),
                 "numeric_value": np.empty(0, dtype=np.float32),
                 "pre_ret_21d": np.empty(0, dtype=np.float32),
                 "post_1d_ret": np.empty(0, dtype=np.float32),
@@ -1063,6 +1247,7 @@ class EventStore:
             "available_at_ns": self.available_at_ns[idx],
             "source_id": self.source_id[idx],
             "kind_code": self.kind_code[idx],
+            "event_date_ordinals": self.event_date_ordinals[idx],
             "numeric_value": self.numeric_value[idx],
             "pre_ret_21d": self.pre_ret_21d[idx],
             "post_1d_ret": p1,
@@ -1082,6 +1267,7 @@ class EventStore:
             available_at_ns=self.available_at_ns,
             source_id=self.source_id,
             kind_code=self.kind_code,
+            event_date_ordinals=self.event_date_ordinals,
             numeric_value=self.numeric_value,
             pre_ret_21d=self.pre_ret_21d,
             post_1d_ret=self.post_1d_ret,
@@ -1104,6 +1290,11 @@ class EventStore:
     def load(cls, directory: Path) -> EventStore:
         meta = json.loads((directory / "event_store.meta.json").read_text("utf-8"))
         arrays = np.load(directory / "event_store.npz", allow_pickle=False)
+        ev_ords = (
+            arrays["event_date_ordinals"]
+            if "event_date_ordinals" in arrays
+            else np.zeros(len(arrays["public_at_ns"]), dtype=np.int32)
+        )
         return cls(
             assets=meta["assets"],
             asset_offsets=arrays["asset_offsets"],
@@ -1112,6 +1303,7 @@ class EventStore:
             source_id=arrays["source_id"],
             kind_code=arrays["kind_code"],
             kinds=meta["kinds"],
+            event_date_ordinals=ev_ords,
             numeric_value=arrays["numeric_value"],
             pre_ret_21d=arrays["pre_ret_21d"],
             post_1d_ret=arrays["post_1d_ret"],
@@ -1122,6 +1314,66 @@ class EventStore:
         )
 
 
+def _extract_event_kind_names(
+    src: str,
+    raw_ek: Any,
+    form: str,
+    items: Any,
+    vocab: Mapping[str, Any] | None,
+) -> list[str]:
+    if src == "sec":
+        if isinstance(raw_ek, (list, tuple, np.ndarray)):
+            found = [str(x).strip() for x in raw_ek if x is not None and str(x).strip()]
+            if found:
+                return list(dict.fromkeys(found))
+        classified = _sec_events.classify_sec_filing(form, items, vocab)
+        if classified:
+            return list(dict.fromkeys(classified))
+    return [form or src]
+
+
+def _build_cik_asset_intervals(
+    version: Any,
+    asset_list: Sequence[str],
+    asset_pos: Mapping[str, int],
+    families: Mapping[str, Any],
+) -> dict[str, list[tuple[int, date | None, date | None]]]:
+    """Return verified ``cik -> [(asset_idx, effective_from, effective_to)]`` intervals."""
+    intervals: dict[str, list[tuple[int, date | None, date | None]]] = {}
+    covered_assets: set[int] = set()
+    if "issuer_history" in families:
+        ih_ev = version.family("issuer_history")
+        if ih_ev is not None and not ih_ev.empty:
+            for ih_row in ih_ev.to_dict("records"):
+                if str(ih_row.get("status") or "") != "verified":
+                    continue
+                cik_raw = str(ih_row.get("cik") or "").strip()
+                if not cik_raw.isdigit():
+                    continue
+                a_idx = asset_pos.get(str(ih_row.get("asset_id") or ""))
+                if a_idx is None:
+                    continue
+                eff_from = _parse_optional_iso_day(ih_row.get("effective_from"))
+                eff_to = _parse_optional_iso_day(ih_row.get("effective_to"))
+                intervals.setdefault(cik_raw.zfill(10), []).append(
+                    (a_idx, eff_from, eff_to)
+                )
+                covered_assets.add(a_idx)
+    uni_records = _candidates.records(getattr(version, "universe", []))
+    for row in uni_records:
+        a_idx = asset_pos.get(str(row.get("asset_id") or ""))
+        if a_idx is None or a_idx in covered_assets:
+            continue
+        status = row.get("issuer_mapping_status")
+        if status is not None and str(status) not in {"", "verified"}:
+            continue
+        cik_raw = str(row.get("cik") or "").strip()
+        if not cik_raw.isdigit():
+            continue
+        intervals.setdefault(cik_raw.zfill(10), []).append((a_idx, None, None))
+    return intervals
+
+
 def build_event_store(
     version: Any,
     assets: Sequence[str],
@@ -1129,18 +1381,28 @@ def build_event_store(
     time_policy: str,
     cal: clocks.Calendar,
     price_store: PriceStore | None = None,
+    include_news: bool = False,
+    max_date: str | date | None = None,
 ) -> EventStore:
-    """Build causal CSR ``EventStore`` from ``event_observations`` and optional earnings/LLM facts."""
+    """Build causal CSR ``EventStore`` with typed SEC kinds, ``event_date``, and PIT LLM facts."""
     clocks.policy(time_policy)
     asset_list = list(map(str, assets))
     asset_pos = {aid: idx for idx, aid in enumerate(asset_list)}
+    manifest = getattr(version, "manifest", None)
     zones = (
-        version.manifest.get("source_timezones", {})
-        if isinstance(getattr(version, "manifest", None), Mapping)
-        else {}
+        manifest.get("source_timezones", {}) if isinstance(manifest, Mapping) else {}
     )
+    sec_vocab = (
+        manifest.get("sec_event_kinds")
+        if isinstance(manifest, Mapping)
+        and isinstance(manifest.get("sec_event_kinds"), Mapping)
+        else None
+    )
+    max_ns = _cutoff_close_ns(cal, max_date)
     kinds_map: dict[str, int] = {"event": 0}
-    per_asset: list[list[tuple[int, int, int, int, float]]] = [[] for _ in asset_list]
+    per_asset: list[list[tuple[int, int, int, int, float, int]]] = [
+        [] for _ in asset_list
+    ]
 
     def _kind_id(name: str) -> int:
         if name not in kinds_map:
@@ -1153,7 +1415,10 @@ def build_event_store(
             "source",
             "event_uid",
             "form",
+            "items",
+            "event_kinds",
             "filing_date",
+            "event_date",
             "asset_ids",
             "asset_first_seen_at",
             "content_first_seen_at",
@@ -1191,6 +1456,24 @@ def build_event_store(
                 if "form" in obs.columns
                 else [""] * len(obs)
             )
+            items_col = (
+                obs["items"].tolist() if "items" in obs.columns else [""] * len(obs)
+            )
+            ek_col = (
+                obs["event_kinds"].tolist()
+                if "event_kinds" in obs.columns
+                else [None] * len(obs)
+            )
+            ev_date_col = (
+                obs["event_date"].tolist()
+                if "event_date" in obs.columns
+                else [None] * len(obs)
+            )
+            filing_date_col = (
+                obs["filing_date"].tolist()
+                if "filing_date" in obs.columns
+                else [None] * len(obs)
+            )
             links = (
                 obs["asset_ids"].tolist()
                 if "asset_ids" in obs.columns
@@ -1201,48 +1484,60 @@ def build_event_store(
                 pb = int(pub_ns[idx_row])
                 if av == NAT or pb == NAT:
                     continue
+                if max_ns is not None and (av > max_ns or pb > max_ns):
+                    continue
                 src = srcs[idx_row]
                 if src not in SOURCE_CONTRACTS:
                     continue
+                if not include_news and src in _NEWS_SOURCES:
+                    continue
                 src_id = _EV_SRC_ID.get(src, 0)
-                k_name = forms[idx_row] or src
-                k_id = _kind_id(k_name)
+                k_names = _extract_event_kind_names(
+                    src,
+                    ek_col[idx_row],
+                    forms[idx_row],
+                    items_col[idx_row],
+                    sec_vocab,
+                )
+                ev_d = (
+                    _parse_optional_iso_day(ev_date_col[idx_row])
+                    or _parse_optional_iso_day(filing_date_col[idx_row])
+                    or pd.Timestamp(pb, unit="ns", tz="UTC")
+                    .tz_convert(clocks.NEW_YORK)
+                    .date()
+                )
+                ev_ord = ev_d.toordinal() if ev_d is not None else 0
                 row_links = links[idx_row]
                 if row_links is None or isinstance(row_links, (float, int)):
                     continue
                 for aid in row_links:
                     a_idx = asset_pos.get(str(aid))
                     if a_idx is not None:
-                        per_asset[a_idx].append((pb, av, src_id, k_id, 1.0))
+                        for k_name in k_names:
+                            k_id = _kind_id(k_name)
+                            per_asset[a_idx].append((pb, av, src_id, k_id, 1.0, ev_ord))
 
-    if "extraction_facts" in families and hasattr(version, "extraction_facts"):
-        facts_df = version.extraction_facts()
+    if "extraction_facts" in families:
+        facts_df = (
+            version.extraction_facts()
+            if hasattr(version, "extraction_facts")
+            else version.family("extraction_facts")
+        )
         if facts_df is not None and not facts_df.empty:
             valid = facts_df
             if "validation_status" in valid.columns:
                 valid = valid[valid["validation_status"].astype(str) == "valid"]
+            resolved_ver = _default_extractor_version(version)
+            if "extractor_version" in valid.columns and resolved_ver is not None:
+                valid = valid[valid["extractor_version"].astype(str) == resolved_ver]
+            if "run_index" in valid.columns:
+                valid = valid[
+                    pd.to_numeric(valid["run_index"], errors="coerce").fillna(1) == 1
+                ]
             if not valid.empty and "cik" in valid.columns:
-                ciks_s = _fund.cik_at(
-                    version, asset_list, [cal.days[-1]] * len(asset_list)
+                cik_intervals = _build_cik_asset_intervals(
+                    version, asset_list, asset_pos, families
                 )
-                cik_to_assets: dict[str, list[int]] = {}
-                for a_idx, cik_v in enumerate(ciks_s.tolist()):
-                    if cik_v:
-                        cik_to_assets.setdefault(str(cik_v), []).append(a_idx)
-                if "issuer_history" in families:
-                    ih_ev = version.family("issuer_history")
-                    if ih_ev is not None and not ih_ev.empty:
-                        for ih_row in ih_ev.to_dict("records"):
-                            if str(ih_row.get("status") or "") != "verified":
-                                continue
-                            cik_raw = str(ih_row.get("cik") or "").strip()
-                            if not cik_raw.isdigit():
-                                continue
-                            a_idx = asset_pos.get(str(ih_row.get("asset_id") or ""))
-                            if a_idx is not None:
-                                bucket = cik_to_assets.setdefault(cik_raw.zfill(10), [])
-                                if a_idx not in bucket:
-                                    bucket.append(a_idx)
                 acc_col = (
                     "accepted_at" if "accepted_at" in valid.columns else "recorded_at"
                 )
@@ -1276,15 +1571,31 @@ def build_event_store(
                     )
                     if pb == NAT or av == NAT:
                         continue
+                    if max_ns is not None and (av > max_ns or pb > max_ns):
+                        continue
+                    pub_day = (
+                        pd.Timestamp(pb, unit="ns", tz="UTC")
+                        .tz_convert(clocks.NEW_YORK)
+                        .date()
+                    )
+                    pub_ord = pub_day.toordinal()
                     k_id = _kind_id(f"llm:{ft_col[idx_row]}:{act_col[idx_row]}")
                     num_v = (
                         float(low_col[idx_row])
                         if np.isfinite(low_col[idx_row])
                         else 1.0
                     )
-                    for a_idx in cik_to_assets.get(ciks_col[idx_row], ()):
+                    matched_assets: set[int] = set()
+                    for a_idx, eff_from, eff_to in cik_intervals.get(
+                        ciks_col[idx_row], ()
+                    ):
+                        if (eff_from is None or eff_from <= pub_day) and (
+                            eff_to is None or pub_day <= eff_to
+                        ):
+                            matched_assets.add(a_idx)
+                    for a_idx in sorted(matched_assets):
                         per_asset[a_idx].append(
-                            (pb, av, _EV_SRC_ID["extraction"], k_id, num_v)
+                            (pb, av, _EV_SRC_ID["extraction"], k_id, num_v, pub_ord)
                         )
 
     offsets = np.zeros(len(asset_list) + 1, dtype=np.int64)
@@ -1292,6 +1603,7 @@ def build_event_store(
     flat_avail: list[int] = []
     flat_src: list[int] = []
     flat_kind: list[int] = []
+    flat_ord: list[int] = []
     flat_val: list[float] = []
     flat_pre: list[float] = []
     flat_p1: list[float] = []
@@ -1301,14 +1613,15 @@ def build_event_store(
 
     for a_idx, rows in enumerate(per_asset):
         rows.sort(key=lambda r: (r[0], r[1], r[2], r[3]))
-        for pb, av, src_id, k_id, val in rows:
+        for pb, av, src_id, k_id, val, ev_ord in rows:
             pre_r, p1_r, p3_r, r1_ns, r3_ns = _reaction_window_metrics(
-                a_idx, pb, price_store, cal
+                a_idx, pb, price_store, cal, max_decision_ns=max_ns
             )
             flat_pub.append(pb)
             flat_avail.append(av)
             flat_src.append(src_id)
             flat_kind.append(k_id)
+            flat_ord.append(ev_ord)
             flat_val.append(val)
             flat_pre.append(pre_r)
             flat_p1.append(p1_r)
@@ -1326,6 +1639,7 @@ def build_event_store(
         source_id=np.asarray(flat_src, dtype=np.uint8),
         kind_code=np.asarray(flat_kind, dtype=np.int32),
         kinds=inv_kinds,
+        event_date_ordinals=np.asarray(flat_ord, dtype=np.int32),
         numeric_value=np.asarray(flat_val, dtype=np.float32),
         pre_ret_21d=np.asarray(flat_pre, dtype=np.float32),
         post_1d_ret=np.asarray(flat_p1, dtype=np.float32),
@@ -1386,35 +1700,43 @@ def build_macro_store(
     *,
     time_policy: str,
     cal: clocks.Calendar,
+    price_store: PriceStore | None = None,
+    max_date: str | date | None = None,
 ) -> MacroStore:
-    """Build market-wide ``MacroStore [T_sessions, C_macro]`` at causal decision instants."""
+    """Build market-wide ``MacroStore [T_sessions, C_macro]`` with derived + raw FRED + ETF channels."""
     clocks.policy(time_policy)
-    if not sessions:
+    sess_list = [clocks.day(d) for d in sessions]
+    if max_date is not None:
+        max_d = clocks.day(max_date)
+        sess_list = [d for d in sess_list if d <= max_d]
+    if not sess_list:
         return MacroStore(
             np.empty((0, 0), dtype=np.float32),
             columns=(),
             sessions=(),
             time_policy=time_policy,
         )
-    # Build one synthetic representative row per session and evaluate reference + market_etf once!
     uni_records = _candidates.records(getattr(version, "universe", []))
     rep_asset = (
         str(uni_records[0]["asset_id"])
         if uni_records
         else "00000000-0000-4000-8000-000000000000"
     )
-    dec_ns = cal.decisions[1 : len(sessions) + 1]
+    n_sess = len(sess_list)
+    dec_ns = cal.decisions[1 : n_sess + 1]
+    if len(dec_ns) < n_sess:
+        pad = np.full(n_sess - len(dec_ns), NAT, dtype=np.int64)
+        dec_ns = np.concatenate([dec_ns, pad])
     valid_dec = dec_ns != NAT
-    # Where final decision is NAT (frozen last session without next_session), fall back to end-of-day wall
     eff_dec_ns = np.where(
         valid_dec,
         dec_ns,
-        clocks.wall_instants(sessions, clocks.DECISION_TIME),
+        clocks.wall_instants(sess_list, clocks.DECISION_TIME),
     )
     rep_samples = pd.DataFrame(
         {
-            "asset_id": [rep_asset] * len(sessions),
-            "signal_session": list(sessions),
+            "asset_id": [rep_asset] * n_sess,
+            "signal_session": sess_list,
             "decision_at": clocks.utc(eff_dec_ns),
         }
     )
@@ -1424,33 +1746,137 @@ def build_macro_store(
         frames.append(
             _reference_features(version, rep_samples, time_policy=time_policy)
         )
+        raw_ref_df = (
+            version.family(
+                "reference_series",
+                columns=[
+                    "series_id",
+                    "date",
+                    "value",
+                    "observation_sequence",
+                    "observed_at",
+                    "available_at",
+                ],
+            )
+            if hasattr(version, "family")
+            else None
+        )
+        if raw_ref_df is not None and not raw_ref_df.empty:
+            prepared = _prepare_reference_series(
+                raw_ref_df, _RAW_MACRO_SERIES, time_policy
+            )
+            ny_dates = (
+                pd.DatetimeIndex(eff_dec_ns, tz="UTC").tz_convert(clocks.NEW_YORK).date
+            )
+            raw_cols: dict[str, np.ndarray] = {}
+            for sid in _RAW_MACRO_SERIES:
+                prep = prepared.get(sid)
+                arr = np.full(n_sess, np.nan, dtype=np.float32)
+                if prep is not None:
+                    for t_i in range(n_sess):
+                        val, _, _ = _series_snapshot_at(
+                            prep,
+                            int(eff_dec_ns[t_i]),
+                            ny_dates[t_i],
+                            max_age_days=10,
+                        )
+                        if math.isfinite(val):
+                            arr[t_i] = np.float32(val)
+                raw_cols[f"raw_{sid.lower()}"] = arr
+            frames.append(pd.DataFrame(raw_cols))
+
     present_syms = {str(r.get("symbol", "")).upper() for r in uni_records}
     if any(sym in present_syms for sym in REFERENCE_ETFS):
         frames.append(
             _market_etf_features(version, rep_samples, time_policy=time_policy)
         )
+
+    if price_store is not None and price_store.data.shape[1] >= n_sess:
+        sym_to_idx: dict[str, int] = {}
+        asset_pos = {aid: idx for idx, aid in enumerate(price_store.assets)}
+        for rec in uni_records:
+            sym = str(rec.get("symbol") or "").strip().upper()
+            aid = str(rec.get("asset_id") or "")
+            if sym and aid in asset_pos and sym not in sym_to_idx:
+                sym_to_idx[sym] = asset_pos[aid]
+        ret_mat = price_store.channel("ret_1d")
+        inv_mat = price_store.channel("bar_invalid")
+        tr_mat = price_store.channel("tr_index")
+        adj_mat = price_store.channel("close_adj")
+        etf_cols: dict[str, np.ndarray] = {}
+        for sym in _MACRO_ETF_SYMBOLS:
+            a_i = sym_to_idx.get(sym)
+            arr = np.full(n_sess, np.nan, dtype=np.float32)
+            if a_i is not None:
+                r = ret_mat[a_i, :n_sess].astype(np.float64)
+                bad = np.isfinite(inv_mat[a_i, :n_sess]) & (inv_mat[a_i, :n_sess] > 0.5)
+                r[bad] = np.nan
+                arr = r.astype(np.float32)
+            etf_cols[f"etf_ret_1d_{sym.lower()}"] = arr
+
+        # SPY 21d realized volatility & QQQ-SPY 21d/63d spreads (strictly causal)
+        spy_r = etf_cols["etf_ret_1d_spy"].astype(np.float64)
+        spy_rvol = (
+            pd.Series(spy_r)
+            .rolling(21, min_periods=15)
+            .std(ddof=1)
+            .to_numpy(dtype=np.float32)
+        )
+        etf_cols["etf_rvol_21d_spy"] = spy_rvol
+
+        def _cum_ret(sym_name: str, win: int) -> np.ndarray:
+            out = np.full(n_sess, np.nan, dtype=np.float64)
+            a_i = sym_to_idx.get(sym_name)
+            if a_i is None or n_sess <= win:
+                return out
+            tr_s = tr_mat[a_i, :n_sess].astype(np.float64)
+            adj_s = adj_mat[a_i, :n_sess].astype(np.float64)
+            lvl = tr_s if np.any(np.isfinite(tr_s) & (tr_s > 0)) else adj_s
+            bad = np.isfinite(inv_mat[a_i, :n_sess]) & (inv_mat[a_i, :n_sess] > 0.5)
+            lvl = np.where(bad | ~(np.isfinite(lvl) & (lvl > 0)), np.nan, lvl)
+            p1, p0 = lvl[win:], lvl[:-win]
+            ok = np.isfinite(p1) & np.isfinite(p0) & (p0 > 0)
+            out[win:][ok] = p1[ok] / p0[ok] - 1.0
+            return out
+
+        for w in (21, 63):
+            etf_cols[f"etf_qqq_spy_{w}d"] = (
+                _cum_ret("QQQ", w) - _cum_ret("SPY", w)
+            ).astype(np.float32)
+        frames.append(pd.DataFrame(etf_cols))
+
     if not frames:
         return MacroStore(
-            np.empty((len(sessions), 0), dtype=np.float32),
+            np.empty((n_sess, 0), dtype=np.float32),
             columns=(),
-            sessions=sessions,
+            sessions=sess_list,
             time_policy=time_policy,
         )
     merged = pd.concat(frames, axis=1)
-    num_cols = [
-        c
-        for c in merged.columns
-        if pd.api.types.is_numeric_dtype(merged[c])
-        and not pd.api.types.is_bool_dtype(merged[c])
-    ]
+    seen: set[str] = set()
+    num_cols: list[str] = []
+    for c in merged.columns:
+        if c in seen:
+            continue
+        seen.add(c)
+        col_s = merged[c]
+        if isinstance(col_s, pd.DataFrame):
+            col_s = col_s.iloc[:, 0]
+        if pd.api.types.is_numeric_dtype(col_s) and not pd.api.types.is_bool_dtype(
+            col_s
+        ):
+            num_cols.append(c)
+    merged_dedup = merged.loc[:, ~merged.columns.duplicated()]
     mat = (
-        merged[num_cols]
+        merged_dedup[num_cols]
         .apply(pd.to_numeric, errors="coerce")
         .to_numpy(dtype=np.float32)
         if num_cols
-        else np.empty((len(sessions), 0), dtype=np.float32)
+        else np.empty((n_sess, 0), dtype=np.float32)
     )
-    return MacroStore(mat, columns=num_cols, sessions=sessions, time_policy=time_policy)
+    return MacroStore(
+        mat, columns=num_cols, sessions=sess_list, time_policy=time_policy
+    )
 
 
 @dataclass
@@ -1462,6 +1888,65 @@ class Stores:
     fundamentals: FundStore
     events: EventStore
     macro: MacroStore
+
+    def assert_cutoff(self, max_date: str | date) -> None:
+        """Hard physical holdout guard verifying all 4 stores and anchors are <= ``max_date``."""
+        max_d = clocks.day(max_date)
+        if self.anchors.sessions and max(self.anchors.sessions) > max_d:
+            raise ValueError(
+                f"CUTOFF_VIOLATION: anchors.sessions max {max(self.anchors.sessions)} > {max_d}"
+            )
+        if not self.anchors.frame.empty:
+            sig_max = max(clocks.day(d) for d in self.anchors.frame["signal_session"])
+            if sig_max > max_d:
+                raise ValueError(
+                    f"CUTOFF_VIOLATION: anchors signal_session max {sig_max} > {max_d}"
+                )
+        if self.prices.sessions and max(self.prices.sessions) > max_d:
+            raise ValueError(
+                f"CUTOFF_VIOLATION: prices.sessions max {max(self.prices.sessions)} > {max_d}"
+            )
+        if self.macro.sessions and max(self.macro.sessions) > max_d:
+            raise ValueError(
+                f"CUTOFF_VIOLATION: macro.sessions max {max(self.macro.sessions)} > {max_d}"
+            )
+        max_close_ns = int(
+            clocks.Calendar([max_d], infer_early_closes=True).closes[0]
+            if max_d.weekday() < 5
+            else clocks.wall_instants([max_d], clocks.LABEL_CLOSE_TIME)[0]
+        )
+        if len(self.fundamentals.snap_epoch_ns):
+            if int(self.fundamentals.snap_epoch_ns.max()) > max_close_ns:
+                raise ValueError(
+                    "CUTOFF_VIOLATION: fundamentals.snap_epoch_ns exceeds cutoff"
+                )
+            for arr_name, arr in (
+                ("snap_post_1d_ready_ns", self.fundamentals.snap_post_1d_ready_ns),
+                ("snap_post_3d_ready_ns", self.fundamentals.snap_post_3d_ready_ns),
+            ):
+                fin = arr[(arr != NEVER) & (arr != NAT)]
+                if len(fin) and int(fin.max()) > max_close_ns:
+                    raise ValueError(
+                        f"CUTOFF_VIOLATION: fundamentals.{arr_name} exceeds cutoff"
+                    )
+        if len(self.events.available_at_ns):
+            av_fin = self.events.available_at_ns[self.events.available_at_ns != NAT]
+            if len(av_fin) and int(av_fin.max()) > max_close_ns:
+                raise ValueError(
+                    "CUTOFF_VIOLATION: events.available_at_ns exceeds cutoff"
+                )
+            pb_fin = self.events.public_at_ns[self.events.public_at_ns != NAT]
+            if len(pb_fin) and int(pb_fin.max()) > max_close_ns:
+                raise ValueError("CUTOFF_VIOLATION: events.public_at_ns exceeds cutoff")
+            for arr_name, arr in (
+                ("post_1d_ready_ns", self.events.post_1d_ready_ns),
+                ("post_3d_ready_ns", self.events.post_3d_ready_ns),
+            ):
+                fin = arr[(arr != NEVER) & (arr != NAT)]
+                if len(fin) and int(fin.max()) > max_close_ns:
+                    raise ValueError(
+                        f"CUTOFF_VIOLATION: events.{arr_name} exceeds cutoff"
+                    )
 
     def save(self, directory: Path) -> None:
         self.anchors.save(directory)

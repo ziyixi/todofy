@@ -413,6 +413,7 @@ class StoresAndMaterializeAdversarialTest(unittest.TestCase):
             time_policy="public_reconstructed",
             cal=cal,
             price_store=pstore,
+            include_news=True,
         )
         estore_cons = build_event_store(
             ver,
@@ -420,16 +421,28 @@ class StoresAndMaterializeAdversarialTest(unittest.TestCase):
             time_policy="observed_content",
             cal=cal,
             price_store=pstore,
+            include_news=True,
         )
+        # Default EventStore excludes news sources (alpaca_news / finnhub_news)
+        estore_default = build_event_store(
+            ver,
+            pstore.assets,
+            time_policy="public_reconstructed",
+            cal=cal,
+            price_store=pstore,
+        )
+        self.assertFalse(bool(np.isin(estore_default.source_id, [1, 2]).any()))
 
-        # At t+1 06:00 ET decision: pre-market 08:30 ET and post-market 16:15 ET are BOTH visible,
-        # yet NEITHER 1d nor 3d post-event reaction is complete yet!
+        # At t+1 06:00 ET decision: pre-market 08:30 ET (r0=t) has completed its 1st session
+        # close (t 16:00 ET <= t+1 06:00 ET), while post-market 16:15 ET (r0=t+1) has NOT.
+        # Neither has 3d ready yet.
         dec_t1 = int(cal.decisions[11])
         sl_t1 = estore_re.slice_asset_events(0, dec_t1)
         self.assertGreaterEqual(len(sl_t1["public_at_ns"]), 2)
-        self.assertFalse(bool(sl_t1["reaction_1d_ready"].any()))
+        self.assertEqual(sl_t1["reaction_1d_ready"][:2].tolist(), [True, False])
+        self.assertTrue(np.isfinite(sl_t1["post_1d_ret"][0]))
+        self.assertTrue(np.isnan(sl_t1["post_1d_ret"][1]))
         self.assertFalse(bool(sl_t1["reaction_3d_ready"].any()))
-        self.assertTrue(np.isnan(sl_t1["post_1d_ret"]).all())
         self.assertTrue(np.isnan(sl_t1["post_3d_ret"]).all())
 
         # Conservative clock hides the date-only event captured at t+1 12:00 ET at t+1 06:00 ET!
@@ -437,24 +450,28 @@ class StoresAndMaterializeAdversarialTest(unittest.TestCase):
         self.assertEqual(
             len(sl_cons_t1["public_at_ns"]), 2
         )  # excludes late-captured date_only event
-        self.assertFalse(bool(sl_cons_t1["reaction_1d_ready"].any()))
+        self.assertEqual(sl_cons_t1["reaction_1d_ready"][:2].tolist(), [True, False])
         self.assertFalse(bool(sl_cons_t1["reaction_3d_ready"].any()))
 
-        # At t+2 06:00 ET: pre-market 08:30 ET 1d reaction is now ready; post-market 16:15 ET 1d
-        # requires t+2 16:00 ET close -> still False! Neither has 3d ready yet.
+        # At t+2 06:00 ET: both pre-market (r0=t) and post-market (r0=t+1) 1d reactions are ready.
+        # Neither has 3d ready yet (pre-market 3d closes at t+2 16:00 ET > t+2 06:00 ET).
         dec_t2 = int(cal.decisions[12])
         sl_t2 = estore_re.slice_asset_events(0, dec_t2)
-        self.assertEqual(sl_t2["reaction_1d_ready"][:2].tolist(), [True, False])
-        self.assertTrue(np.isfinite(sl_t2["post_1d_ret"][0]))
-        self.assertTrue(np.isnan(sl_t2["post_1d_ret"][1]))
+        self.assertEqual(sl_t2["reaction_1d_ready"][:2].tolist(), [True, True])
+        self.assertTrue(np.isfinite(sl_t2["post_1d_ret"][:2]).all())
         self.assertFalse(bool(sl_t2["reaction_3d_ready"].any()))
 
-        # At t+5 06:00 ET: both pre-market and post-market 3d reactions are ready.
-        dec_t5 = int(cal.decisions[15])
-        sl_t5 = estore_re.slice_asset_events(0, dec_t5)
-        self.assertTrue(bool(sl_t5["reaction_1d_ready"][:2].all()))
-        self.assertTrue(bool(sl_t5["reaction_3d_ready"][:2].all()))
-        self.assertTrue(np.isfinite(sl_t5["post_3d_ret"][:2]).all())
+        # At t+3 06:00 ET: pre-market 3d reaction (t+2 close) is ready; post-market 3d (t+3 close) is not.
+        dec_t3 = int(cal.decisions[13])
+        sl_t3 = estore_re.slice_asset_events(0, dec_t3)
+        self.assertEqual(sl_t3["reaction_3d_ready"][:2].tolist(), [True, False])
+
+        # At t+4 06:00 ET: both pre-market and post-market 3d reactions are ready.
+        dec_t4 = int(cal.decisions[14])
+        sl_t4 = estore_re.slice_asset_events(0, dec_t4)
+        self.assertTrue(bool(sl_t4["reaction_1d_ready"][:2].all()))
+        self.assertTrue(bool(sl_t4["reaction_3d_ready"][:2].all()))
+        self.assertTrue(np.isfinite(sl_t4["post_3d_ret"][:2]).all())
 
         # Also verify materialize() masks ev_last_post_1d_ret / ev_last_post_3d_ret at signal_session == day_t
         with tempfile.TemporaryDirectory() as tmp:
@@ -475,7 +492,10 @@ class StoresAndMaterializeAdversarialTest(unittest.TestCase):
             ]
             self.assertEqual(len(row_t), 1)
             ridx = int(row_t.index[0])
-            self.assertTrue(np.isnan(res.X.loc[ridx, "ev_last_post_1d_ret"]))
+            # At signal_session == day_t (decision = day_{t+1} 06:00 ET):
+            # sec-premarket (day_t 08:30 ET) has its 1d reaction (day_t 16:00 ET) ALREADY complete,
+            # while its 3d reaction (day_{t+2} 16:00 ET) is still strictly masked as NaN!
+            self.assertTrue(np.isfinite(res.X.loc[ridx, "ev_last_post_1d_ret"]))
             self.assertTrue(np.isnan(res.X.loc[ridx, "ev_last_post_3d_ret"]))
 
             # Regression guard: weekly sampling with late-starting source coverage
@@ -804,18 +824,19 @@ class StoresAndMaterializeAdversarialTest(unittest.TestCase):
             ]
             self.assertEqual(cold.report["recomputed_groups"], enabled)
 
-            # 2) Change one group param (news_intensity) -> only news_intensity recomputes
+            # 2) Change one group param (price_vol_beta) -> only price_vol_beta recomputes
             parsed = yaml.safe_load(DEFAULT_TRAINING_RECIPE_YAML)
-            parsed["feature_groups"]["news_intensity"]["half_lives_days"] = [1.0, 10.0]
+            self.assertFalse(parsed["feature_groups"]["news_intensity"]["enabled"])
+            parsed["feature_groups"]["price_vol_beta"]["windows"] = [5, 21, 63, 126]
             warm_one = ds.materialize(
                 recipe_yaml=yaml.safe_dump(parsed, sort_keys=False), cache_dir=cache_dir
             )
-            self.assertEqual(warm_one.report["recomputed_groups"], ["news_intensity"])
+            self.assertEqual(warm_one.report["recomputed_groups"], ["price_vol_beta"])
             self.assertEqual(
                 warm_one.report["cached_groups"],
-                [g for g in enabled if g != "news_intensity"],
+                [g for g in enabled if g != "price_vol_beta"],
             )
-            self.assertIn("news_decay_hl_10d", warm_one.X.columns)
+            self.assertIn("pvol_rvol_126d", warm_one.X.columns)
             self.assertLess(warm_one.report["elapsed_seconds"], 3.0)
 
             # 3) Change exclude_columns only -> 0 recomputed groups & 100% cache hit
@@ -1319,8 +1340,8 @@ class StoresAndMaterializeAdversarialTest(unittest.TestCase):
         price_rows = []
         dr_rows = []
         for idx, d in enumerate(sessions):
-            # Jump at session 26 (day after public_at at session 24 post-close) vs different move at session 31+ (after observed_at at session 30)
-            lvl = 100.0 if idx <= 25 else (120.0 if idx <= 30 else 132.0)
+            # Jump at session 25 (1st reaction close after public_at at session 24 post-close) vs different move at session 31+ (after observed_at at session 30)
+            lvl = 100.0 if idx <= 24 else (120.0 if idx <= 30 else 132.0)
             price_rows.append(
                 {
                     "asset_id": ASSET_1,
@@ -1397,8 +1418,8 @@ class StoresAndMaterializeAdversarialTest(unittest.TestCase):
             primary_asset_of_cik={CIK_1: 0},
         )
         self.assertEqual(len(fstore.snap_epoch_ns), 1)
-        # public_at is 16:30 after session 24 close -> r0_idx=25, +1d=26 (lvl 120 / pre lvl 100 - 1 = +0.20)
-        self.assertEqual(int(fstore.snap_post_1d_ready_ns[0]), int(cal.closes[26]))
+        # public_at is 16:30 after session 24 close -> r0_idx=25, 1d reaction at session 25 close (lvl 120 / pre lvl 100 - 1 = +0.20)
+        self.assertEqual(int(fstore.snap_post_1d_ready_ns[0]), int(cal.closes[25]))
         self.assertAlmostEqual(float(fstore.snap_post_1d_ret[0]), 0.20, places=4)
 
     def test_build_earnings_pead_sue_masks_stale_and_old_sue(self) -> None:

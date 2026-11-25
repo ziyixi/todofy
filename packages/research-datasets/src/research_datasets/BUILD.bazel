@@ -21,6 +21,7 @@ py_library(
         "groups/__init__.py",
         "groups/domain.py",
         "groups/price.py",
+        "groups/signals.py",
         "industry.py",
         "labels.py",
         "materialize.py",

@@ -116,7 +116,13 @@ from .industry import (
     sic_to_ff12,
     sic_to_major_group,
 )
-from .labels import split_membership
+from .labels import (
+    attach_risk_adjusted_labels,
+    gauss_rank_cross_section,
+    residual_vol_63d,
+    split_membership,
+    welch_beta_252d,
+)
 from .materialize import (
     DEFAULT_TRAINING_RECIPE_YAML,
     EXCLUDED_FEATURE_TOKENS,
@@ -254,6 +260,7 @@ __all__ = [
     "__version__",
     "asof_join",
     "asset_at",
+    "attach_risk_adjusted_labels",
     "audit_features",
     "borrow_features",
     "build_candidates",
@@ -276,6 +283,7 @@ __all__ = [
     "fundamental_features",
     "fundamental_ratios",
     "fundamental_states",
+    "gauss_rank_cross_section",
     "group_columns",
     "industry",
     "insider_features",
@@ -298,6 +306,7 @@ __all__ = [
     "reference_features",
     "register_feature_group",
     "release_features",
+    "residual_vol_63d",
     "risk_free_daily",
     "sec_event_specs",
     "sec_public_clock",
@@ -313,4 +322,5 @@ __all__ = [
     "us_federal_holidays",
     "validate_recipe",
     "valuation",
+    "welch_beta_252d",
 ]

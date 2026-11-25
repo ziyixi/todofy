@@ -123,7 +123,11 @@ class GroupBuildContext:
         self.benchmark_id = benchmark_id
         self.horizons = tuple(horizons)
         self.families = _candidates.families(version)
-        self.calendar = _candidates.calendar(version, version.calendar)
+        self.calendar = (
+            _candidates.calendar(version, stores.prices.sessions)
+            if stores.prices.sessions
+            else _candidates.calendar(version, version.calendar)
+        )
         self._samples_cache: pd.DataFrame | None = None
         self._cik_cache: pd.Series | None = None
         self._shares_cache: pd.Series | None = None
