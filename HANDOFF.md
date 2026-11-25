@@ -1,19 +1,13 @@
 # Handoff
 
-Updated 2026-11-24 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
+Updated 2026-11-25 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
 Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
-Branch `fix/mail-hero-status-alarm` self-heals a missing Durable Object alarm during `MailCoordinator` `GET /status` reads when pending jobs exist (`pending > 0 && next_alarm === null`), leaving idle coordinators (`pending === 0`) without an alarm. Land after branch `CI gate` passes, verify `Mail Hero deploy` and same-SHA reconciliation, then confirm coordinator status checks remain clean.
-
-Branch `fix/website-release-inactive-state` treats GitHub Deployment `inactive` following `success` as satisfied in the website release gate (`GitHubClient.latestState`) and preserves the verified release's `success` timestamp in `website/relay` (`latestReleaseState`), while updating Home website-sync blocked guidance to inspect Actions directly instead of blindly retrying against a blocked ledger. Main deployment and reconciliation verification are in progress.
-
 Private application follow-ups and release verification are tracked in `private/HANDOFF.md`.
 
 `packages/research-datasets` `2.5.0` (untruncated multi-clock `Stores`, pluggable 15-group feature registry, declarative YAML `materialize`, and `load_local`) is pinned to public `main` (`f7840d90c7cbd104be71901c9406a4b03b54ae43`) and cleanly verified in an isolated Python 3.14 environment (`2.5.0`, 20 registered groups).
-
-Branch `chore/update-console-controls` advances the private application pin for console form, batch-scope, and request-budget UI controls without schema or public service changes; land only after branch `CI gate` passes, then verify private publication and same-SHA reconciliation.
 
 `packages/research-datasets` memory, indexing, coverage-slice, period-anchor, panel-benchmark, earnings-projection,
 and vectorized fundamental-factor updates landed on `main` (`75e518c4`) after branch CI passed.
@@ -83,7 +77,7 @@ codes generically. It changes no source, so it publishes no service and no priva
 
 ## Latest verified release
 
-Main `180588ac` shipped dual Workers Free / Workers Paid quota tracking, billing-cycle `workers_cpu_ms`, non-shedding projection alerts, and `HomeService.ReadUsage`; matching reconciliation passed (`45380333121`) with zero infrastructure drift and live Paid verification on Home confirmed all metrics and non-shedding behavior. See the [November 24 archive](docs/history/handoff-2026-11-24.md) and [November 15 archive](docs/history/handoff-2026-11-15.md).
+Main `9a7da234` completed the November 24–25 release wave: Home Workers Paid billing-cycle quota tracking (`workers_cpu_ms`, `Q6` `'success'` status classification, 3-day monthly projection warm-up with 20% early-burn override), Mail Hero coordinator alarm self-heal & verified daily backup recovery, Website release-gate `inactive`-after-`success` handling, `packages/research-datasets` data-quality fixes, Model Router partial index, Newsletter aged ambiguous Notion write retry, CI verify-once/sharded verification and `75m` `restore-check` timeout, and pinned private application updates. Matching `Personal cloud reconcile` passed with zero infrastructure drift, and live Home verification confirmed `暂无未处理提醒` (`0` active faults, `0` active attention items, `0` undismissed digest items, `0` Worker errors across all 17 Workers, `0` configuration drift). See the [November 25 archive](docs/history/handoff-2026-11-25.md), [November 24 archive](docs/history/handoff-2026-11-24.md), and [November 15 archive](docs/history/handoff-2026-11-15.md).
 
 Shared Worker receipt recovery (`7ef001fe`) adds fixed failure stages, exact committed-result readback and a
 guarded receipt-only path without application redeployment. The old statusless Tasks receipt remains historical
