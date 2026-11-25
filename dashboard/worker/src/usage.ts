@@ -528,7 +528,7 @@ export function parseUsage(body: unknown, now: number, options: ParseUsageOption
     paidMeasured.set('r2_class_a', r2Paid.classA);
     paidMeasured.set('r2_class_b', r2Paid.classB);
   }
-  const billingWindow: ProjectionWindow = { startMs: period.startMs, endExclusiveMs: period.endExclusiveMs, minElapsedMs: DAILY_PROJECTION_AFTER_MS };
+  const billingWindow: ProjectionWindow = { startMs: period.startMs, endExclusiveMs: period.endExclusiveMs };
   const paid_rows = PAID_QUOTA_RESOURCES.map((id) =>
     quotaRow(id, paidMeasured.get(id) ?? missingMeasured(), now, PAID_ALLOWANCES[id], billingWindow),
   );

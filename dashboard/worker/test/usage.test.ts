@@ -563,6 +563,30 @@ describe('fetchUsage', () => {
     expect(row(data.paid_rows, 'ai_neurons')).toMatchObject({ period: 'daily', limit: 10_000, guard_trigger: false });
     // Linear projection over the 30-day billing period (11-24 00:00Z -> 12-01 12:00Z = 7.5 days = 1/4 of 30 days).
     expect(row(data.paid_rows, 'workers_cpu_ms')).toMatchObject({ projected: 6_000_000, projected_percent: 20 });
+
+    // Early in the billing cycle (Day 2, < 3 days elapsed), a low-share burst (< 20% used) does not project.
+    const day2 = parseUsage(
+      graphqlBody({
+        ...REALISTIC_USAGE,
+        monthFactor: 10,
+        workersCpuUs: 1_500_000_000, // 5% of 30,000,000 ms
+      }),
+      Date.parse('2026-11-25T05:30:00Z'),
+      { ownedDoNamespaces },
+    );
+    expect(row(day2?.paid_rows ?? [], 'workers_cpu_ms')).toMatchObject({ used: 1_500_000, percent: 5, projected: null, projected_percent: null });
+
+    // Early runaway (>= 20% used within the first 3 days) still projects immediately.
+    const day2High = parseUsage(
+      graphqlBody({
+        ...REALISTIC_USAGE,
+        monthFactor: 10,
+        workersCpuUs: 6_000_000_000, // 20% of 30,000,000 ms
+      }),
+      Date.parse('2026-11-25T12:00:00Z'),
+      { ownedDoNamespaces },
+    );
+    expect(row(day2High?.paid_rows ?? [], 'workers_cpu_ms').projected_percent).toBeGreaterThanOrEqual(100);
   });
 
   it('treats absent monthly datasets as null used values without failing Free rows', () => {
