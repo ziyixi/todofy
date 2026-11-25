@@ -164,6 +164,6 @@ export async function setupStatus(env: Env): Promise<Row> {
       { id: 'scheduler', label: '持久后台调度', status: !scheduler.available ? 'error' : scheduler.failed > 0 ? 'warning' : 'ok', detail: !scheduler.available ? '本次无法读取 Durable Object 状态。' : `${scheduler.pending} 条待办、${scheduler.failed} 条失败记录；这不是邮件来源的端到端验收。` },
       { id: 'edge', label: 'Email Routing 与 R2', status: 'pending', detail: '请用合成测试邮件验证路由、原件保存和后台解析；仅有配置无法证明真实可达。' },
       { id: 'received', label: '已有收件记录', status: recent.last_received_at ? 'ok' : 'pending', detail: recent.last_received_at ? '已有 Cloudflare 入口邮件记录；来源身份和完整业务链路仍需验收。' : '尚未收到邮件。' },
-      { id: 'runtime', label: 'Cloudflare Free 运行限制', status: 'warning', detail: 'Free Worker 请求 CPU 为 10 ms，后台解析通过 Durable Object alarm 执行；大邮件仍需实测。' },
+      { id: 'runtime', label: 'Cloudflare 运行模式', status: 'ok', detail: '账户已启用 Workers Paid，后台解析与备份通过 Durable Object alarm 分片执行。' },
     ] }
 }

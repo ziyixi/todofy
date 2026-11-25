@@ -196,7 +196,7 @@ export class MailCoordinator {
       const stats=this.state.storage.sql.exec<{pending:number;failed:number;oldest:number|null}>(`SELECT sum(CASE WHEN failed=0 THEN 1 ELSE 0 END) pending,sum(failed) failed,min(created) oldest FROM jobs`).one();
       const {policy:_policy,...backup}=this.backup.status();
       let nextAlarm=await this.state.storage.getAlarm();
-      if((stats.pending ?? 0)>0 && nextAlarm===null) {
+      if(((stats.pending ?? 0)>0 || this.nativeBackup.nextWake()!==null) && nextAlarm===null) {
         await this.schedule();
         nextAlarm=await this.state.storage.getAlarm();
       }

@@ -80,7 +80,8 @@ acknowledgement still gate writes. Unknown usage cannot start a new shed, and an
 being renewed without evidence. See [guard behavior](design.md#53-per-service-guard).
 
 Daily projection is `used × 86400 / elapsed_seconds`, suppressed during the first three UTC hours. Monthly
-projection is `used × days_in_month / elapsed_days`, suppressed during the first day. Storage is not projected.
+projection is `used × period_days / elapsed_days`, suppressed during the first three days of the billing
+cycle unless measured usage has already reached 20% of the monthly limit. Storage is not projected.
 The UI labels this a straight-line estimate.
 
 ## 3. Executable resource bounds

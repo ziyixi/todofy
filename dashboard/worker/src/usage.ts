@@ -310,6 +310,9 @@ function sumBy(rows: readonly unknown[], dataset: Dataset, value: (row: unknown)
 
 /** Daily rows are not projected in the first hours of the UTC day, where one early job dominates. */
 export const DAILY_PROJECTION_AFTER_MS = 3 * HOUR_MS;
+/** Monthly rows are not projected in the first 3 days of the cycle unless usage already reached 20%. */
+export const MONTHLY_PROJECTION_AFTER_MS = 3 * DAY_MS;
+export const EARLY_PROJECTION_USED_RATIO = 0.2;
 
 export interface ProjectionWindow {
   readonly startMs: number;
@@ -319,13 +322,14 @@ export interface ProjectionWindow {
 
 /**
  * Linear end-of-period projection (design.md §5.2): used / elapsed × period, a straight-line estimate,
- * not a forecast; null when too little of the period has passed.
+ * not a forecast; null when too little of the period has passed (unless monthly usage is already high).
  */
 export function projection(
   period: QuotaRow['period'],
   used: number | null,
   now: number,
   window?: ProjectionWindow,
+  limit?: number,
 ): number | null {
   if (used === null) return null;
   if (period === 'daily') {
@@ -333,13 +337,13 @@ export function projection(
     return elapsed < DAILY_PROJECTION_AFTER_MS ? null : round1((used * DAY_MS) / elapsed);
   }
   if (period === 'monthly') {
-    if (window !== undefined) {
-      const elapsed = now - window.startMs;
-      const minElapsed = window.minElapsedMs ?? DAY_MS;
-      return elapsed < minElapsed ? null : round1((used * (window.endExclusiveMs - window.startMs)) / elapsed);
-    }
-    const elapsedDays = (now - startOfUtcMonth(now)) / DAY_MS;
-    return elapsedDays < 1 ? null : round1((used * daysInUtcMonth(now)) / elapsedDays);
+    const startMs = window !== undefined ? window.startMs : startOfUtcMonth(now);
+    const periodMs = window !== undefined ? window.endExclusiveMs - window.startMs : daysInUtcMonth(now) * DAY_MS;
+    const elapsed = now - startMs;
+    if (elapsed <= 0) return null;
+    const minElapsed = window?.minElapsedMs ?? MONTHLY_PROJECTION_AFTER_MS;
+    const earlyBurn = limit !== undefined && limit > 0 && used / limit >= EARLY_PROJECTION_USED_RATIO;
+    return elapsed < minElapsed && !earlyBurn ? null : round1((used * periodMs) / elapsed);
   }
   return null;
 }
@@ -352,7 +356,7 @@ function quotaRow(
   window?: ProjectionWindow,
 ): QuotaRow {
   const used = measured.used === null ? null : round1(measured.used);
-  const projected = projection(allowance.period, used, now, window);
+  const projected = projection(allowance.period, used, now, window, allowance.limit);
   const percentOf = (value: number | null): number | null => (value === null ? null : round1((value / allowance.limit) * 100));
   return {
     id,

@@ -174,6 +174,10 @@ describe('parseUsage', () => {
     expect(projection('daily', 100, Date.parse('2026-09-29T02:59:00Z'))).toBeNull();
     expect(projection('daily', 100, Date.parse('2026-09-29T03:00:00Z'))).toBe(800);
     expect(projection('monthly', 100, Date.parse('2026-09-01T23:00:00Z'))).toBeNull();
+    expect(projection('monthly', 100, Date.parse('2026-09-03T23:00:00Z'), undefined, 1000)).toBeNull();
+    // Genuine early runaway (>= 20% of monthly cap within the first 3 days) still projects immediately.
+    expect(projection('monthly', 200, Date.parse('2026-09-02T00:00:00Z'), undefined, 1000)).toBe(6000);
+    expect(projection('monthly', 100, Date.parse('2026-09-04T00:00:00Z'), undefined, 1000)).toBe(1000);
     expect(projection('monthly', 100, Date.parse('2026-09-16T00:00:00Z'))).toBe(200);
     expect(projection('storage', 100, NOW)).toBeNull();
     expect(projection('daily', null, NOW)).toBeNull();

@@ -258,3 +258,12 @@ test('status read schedules a missing alarm only when pending jobs exist',async(
   } finally {f.close();}
 });
 
+test('status read also schedules a missing alarm when native backup is enabled and idle',async()=>{
+  const f=fixture({env:{NATIVE_BACKUP_ENABLED:'true'}});
+  try {
+    const healed=await (await request(f,'/status')).json();
+    assert.equal(healed.pending,0);
+    assert.equal(typeof healed.next_alarm,'number');
+  } finally {f.close();}
+});
+
