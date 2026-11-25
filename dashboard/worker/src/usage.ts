@@ -569,12 +569,13 @@ interface ScriptAcc {
 
 const maxOrNull = (a: number | null, b: number | null): number | null => (a === null ? b : b === null ? a : Math.max(a, b));
 
-function statusBucket(status: string): 'ok' | 'exceeded_resources' | 'client_disconnected' | 'script_exception' | null {
+function statusBucket(status: string, errors: number): 'ok' | 'exceeded_resources' | 'client_disconnected' | 'script_exception' | null {
   if (status === UNKNOWN_DIMENSION) return null;
-  if (status === 'ok') return 'ok';
+  if (status === 'success' || status === 'ok') return 'ok';
   if (status === 'exceededResources' || status === 'exceededCpu' || status === 'exceededMemory') return 'exceeded_resources';
   if (status === 'clientDisconnected') return 'client_disconnected';
-  return 'script_exception';
+  if (status === 'scriptThrewException' || status === 'scriptException') return 'script_exception';
+  return errors > 0 ? 'script_exception' : null;
 }
 
 /**
@@ -622,7 +623,7 @@ function parseScripts(workers: readonly unknown[], doInv: readonly unknown[]): S
       entry.p50_weight += weight;
     }
     entry.cpu_p99_us = maxOrNull(entry.cpu_p99_us, optional(row, 'quantiles', 'cpuTimeP99'));
-    const bucket = statusBucket(dimension(row, 'status'));
+    const bucket = statusBucket(dimension(row, 'status'), err);
     if (bucket !== null && bucket !== 'ok') entry[bucket] += req > 0 ? req : err;
   }
   for (const row of doInv) {
@@ -631,7 +632,7 @@ function parseScripts(workers: readonly unknown[], doInv: readonly unknown[]): S
     const err = field(row, 'sum', 'errors');
     entry.do_requests = (entry.do_requests ?? 0) + req;
     entry.do_errors = (entry.do_errors ?? 0) + err;
-    const bucket = statusBucket(dimension(row, 'status'));
+    const bucket = statusBucket(dimension(row, 'status'), err);
     if (bucket === 'exceeded_resources') entry.do_exceeded_resources += req > 0 ? req : err;
     else if (bucket === 'client_disconnected') entry.do_client_disconnected += req > 0 ? req : err;
     else if (bucket === 'script_exception') entry.do_script_exception += req > 0 ? req : err;

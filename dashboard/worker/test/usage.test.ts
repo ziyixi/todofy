@@ -336,7 +336,7 @@ describe('parseUsage per script and per resource (design-v2.md §4)', () => {
     account.workers = [
       {
         sum: { requests: 1000, errors: 0, subrequests: 20 },
-        dimensions: { scriptName: 'router', status: 'ok' },
+        dimensions: { scriptName: 'router', status: 'success' },
         quantiles: { cpuTimeP50: 800, cpuTimeP99: 3000 },
       },
       {
@@ -356,7 +356,7 @@ describe('parseUsage per script and per resource (design-v2.md §4)', () => {
       },
     ];
     account.doInv = [
-      { sum: { requests: 90, errors: 0 }, dimensions: { scriptName: 'router', namespaceId: 'ns-1', status: 'ok' } },
+      { sum: { requests: 90, errors: 0 }, dimensions: { scriptName: 'router', namespaceId: 'ns-1', status: 'success' } },
       { sum: { requests: 1, errors: 1 }, dimensions: { scriptName: 'router', namespaceId: 'ns-1', status: 'exceededResources' } },
       { sum: { requests: 4, errors: 0 }, dimensions: { scriptName: 'router', namespaceId: 'ns-1', status: 'clientDisconnected' } },
       { sum: { requests: 2, errors: 2 }, dimensions: { scriptName: 'router', namespaceId: 'ns-1', status: 'scriptThrewException' } },
