@@ -341,6 +341,19 @@ class LocalClient:
             return payload, {}
         raise DatasetError("NOT_FOUND", f"本地归档不支持请求：{path}")
 
+    def _artifact_cached(self, item: Mapping[str, Any]) -> bool:
+        try:
+            local = self._resolve_local_key(str(item["key"]))
+            return local.is_file() and local.stat().st_size == item.get("size_bytes")
+        except DatasetError:
+            return False
+
+    def _artifact(self, item: Mapping[str, Any], *, on_chunk: Any = None) -> Path:
+        path = self._part(item)
+        if on_chunk is not None:
+            on_chunk(int(item.get("size_bytes", 0)))
+        return path
+
     def _part(self, item: Mapping[str, Any]) -> Path:
         sha, size = item.get("sha256"), item.get("size_bytes")
         if (
@@ -360,7 +373,14 @@ class LocalClient:
         self._stats["cached_parts"] += 1
         return local
 
-    def version(self, dataset_id: str | None = None) -> Dataset:
+    def version(
+        self,
+        dataset_id: str | None = None,
+        *,
+        prefetch: bool | str = False,
+        progress: bool | None = None,
+    ) -> Dataset:
+        del prefetch, progress
         if dataset_id is None or dataset_id == "latest":
             ds_root = self.archive_dir / "datasets"
             candidates = (
@@ -390,6 +410,8 @@ class LocalClient:
             )
         return self._versions[dataset_id]
 
+    dataset = version
+
 
 def load_local(
     archive_dir: str | Path,
@@ -412,6 +434,8 @@ def load(
     max_requests: int = 500,
     quiet: bool = True,
     preload: bool = False,
+    prefetch: bool | str = "training",
+    progress: bool | None = None,
 ) -> Dataset:
     """One-line entry point returning a frozen research `Dataset` (`Version`)."""
     client = connect(
@@ -421,7 +445,7 @@ def load(
         max_requests=max_requests,
         quiet=quiet,
     )
-    ds = client.version(dataset_id)
+    ds = client.version(dataset_id, prefetch=prefetch, progress=progress)
     if preload:
         ds.preload()
     return ds
@@ -461,12 +485,14 @@ class Client:
         body: Any = None,
         target: str | Path | None = None,
         attempts: int = 4,
+        on_chunk: Any = None,
     ) -> tuple[bytes | None, Any]:
         url = f"{self.base_url}/{path}"
         data = json.dumps(body).encode() if body is not None else None
         headers = dict(
             self._headers, **({"Content-Type": "application/json"} if data else {})
         )
+        chunk_size = (256 * 1024) if on_chunk is not None else (1 << 20)
         for attempt in range(attempts):
             if self._stats["requests"] >= self.max_requests:
                 raise DatasetError(
@@ -496,9 +522,11 @@ class Client:
                         self._stats["bytes"] += len(payload)
                         return payload, response.headers
                     with open(target, "wb") as output:
-                        while chunk := response.read(1 << 20):
+                        while chunk := response.read(chunk_size):
                             output.write(chunk)
                             self._stats["bytes"] += len(chunk)
+                            if on_chunk is not None:
+                                on_chunk(len(chunk))
                     expected = response.headers.get("content-length", "")
                     size = os.path.getsize(target)
                     if expected.isdigit() and int(expected) != size:
@@ -536,8 +564,7 @@ class Client:
         assert payload is not None
         return json.loads(payload)
 
-    def _part(self, item: Mapping[str, Any]) -> Path:
-        """An immutable artifact named by its manifest SHA-256: verified once per session, then read from the cache."""
+    def _artifact_path(self, item: Mapping[str, Any]) -> tuple[Path, str, int]:
         sha, size = item.get("sha256"), item.get("size_bytes")
         if (
             not isinstance(sha, str)
@@ -546,7 +573,35 @@ class Client:
             or size < 0
         ):
             raise DatasetError("INTEGRITY", "分片的 SHA-256 或大小元数据无效。")
-        path = self.cache_dir / f"{sha}.parquet"
+        key = str(item.get("key") or "")
+        if key.endswith(".bin.zst"):
+            suffix = ".bin.zst"
+        elif key.endswith(".parquet") or not key:
+            suffix = ".parquet"
+        elif key.endswith(".json"):
+            suffix = ".json"
+        elif key.endswith(".npz"):
+            suffix = ".npz"
+        elif key.endswith(".zst"):
+            suffix = ".zst"
+        else:
+            suffix = ".bin"
+        return self.cache_dir / f"{sha}{suffix}", sha, size
+
+    def _artifact_cached(self, item: Mapping[str, Any]) -> bool:
+        path, sha, size = self._artifact_path(item)
+        if not path.exists() or path.stat().st_size != size:
+            return False
+        if sha in self._verified or _sha256(path) == sha:
+            self._verified.add(sha)
+            return True
+        path.unlink(missing_ok=True)
+        self._verified.discard(sha)
+        return False
+
+    def _artifact(self, item: Mapping[str, Any], *, on_chunk: Any = None) -> Path:
+        """An immutable artifact named by its manifest SHA-256: verified once per session, then read from the cache."""
+        path, sha, size = self._artifact_path(item)
         if path.exists():
             if path.stat().st_size == size and (
                 sha in self._verified or _sha256(path) == sha
@@ -556,9 +611,11 @@ class Client:
                 return path
             path.unlink(missing_ok=True)
             self._verified.discard(sha)
-        partial = path.with_suffix(".partial")
+        partial = path.with_name(path.name + ".partial")
         self._request(
-            "artifact?" + urllib.parse.urlencode({"key": item["key"]}), target=partial
+            "artifact?" + urllib.parse.urlencode({"key": item["key"]}),
+            target=partial,
+            on_chunk=on_chunk,
         )
         if partial.stat().st_size != size or _sha256(partial) != sha:
             partial.unlink(missing_ok=True)
@@ -569,6 +626,10 @@ class Client:
         partial.replace(path)
         self._verified.add(sha)
         return path
+
+    def _part(self, item: Mapping[str, Any]) -> Path:
+        """An immutable Parquet part named by its manifest SHA-256."""
+        return self._artifact(item)
 
     def _mark(self) -> tuple[int, int, int]:
         return (
@@ -618,7 +679,13 @@ class Client:
                 raise DatasetError("NOT_FOUND", "没有归档就绪的固定版本。")
             query = {"page_size": 20, "page_token": page["next_page_token"]}
 
-    def version(self, ref: str = "latest") -> Dataset:
+    def version(
+        self,
+        ref: str = "latest",
+        *,
+        prefetch: bool | str = "training",
+        progress: bool | None = None,
+    ) -> Dataset:
         """A ready fixed version. 'latest' is resolved once per session; pass the UUID to pin a notebook."""
         if ref == "latest":
             self._latest = self._latest or self._newest_ready()
@@ -641,7 +708,11 @@ class Client:
                 self, manifest, hashlib.sha256(raw_manifest).hexdigest()
             )
             self._say(before, f"版本 {ref[:8]} manifest")
-        return self._versions[ref]
+        ds = self._versions[ref]
+        if prefetch in (True, "training"):
+            show_progress = (not self.quiet) if progress is None else bool(progress)
+            ds.prefetch_training(progress=show_progress)
+        return ds
 
     dataset = version
 
@@ -903,6 +974,7 @@ class Dataset:
         self.quality = manifest.get("quality", {})
         self.limitations = manifest.get("limitations", [])
         self._df_cache: dict[tuple[Any, ...], pd.DataFrame] = {}
+        self._training_bundle_cache: dict[str, Any] = {}
 
     def __repr__(self) -> str:
         rows = self.manifest.get("bar_counts", {})
@@ -916,8 +988,59 @@ class Dataset:
         return self._client.usage()
 
     def clear_cache(self) -> None:
-        """Clear in-memory DataFrame cache for this dataset."""
+        """Clear in-memory DataFrame and training bundle caches for this dataset."""
         self._df_cache.clear()
+        self._training_bundle_cache.clear()
+
+    def prefetch_training(
+        self, *, progress: bool | None = None
+    ) -> dict[str, Any] | None:
+        """Stream uncached pre-materialized training shards to local SSD cache with SHA-256 verification."""
+        from .training import prefetch_training_bundle
+
+        show_progress = (
+            (not getattr(self._client, "quiet", False))
+            if progress is None
+            else bool(progress)
+        )
+        return prefetch_training_bundle(self, progress=show_progress)
+
+    def training(
+        self,
+        *,
+        as_of: str | date | None = None,
+        fit_end: str | date | None = None,
+        pad_to: int = 1280,
+        recipe_yaml: str | Mapping[str, Any] | None = None,
+        include_stores: bool = True,
+        progress: bool | None = None,
+    ) -> Any:
+        """Zero-leakage <50 ms RAM training view with Tier-2 <= fit_end scaling and JAX TPU tensors."""
+        from .training import load_training_bundle, slice_training_view
+
+        cache_key = (
+            "__default__"
+            if recipe_yaml is None
+            else hashlib.sha256(str(recipe_yaml).encode("utf-8")).hexdigest()
+        )
+        loaded = self._training_bundle_cache.get(cache_key)
+        if loaded is None:
+            show_progress = (
+                (not getattr(self._client, "quiet", False))
+                if progress is None
+                else bool(progress)
+            )
+            loaded = load_training_bundle(
+                self, progress=show_progress, recipe_yaml=recipe_yaml
+            )
+            self._training_bundle_cache[cache_key] = loaded
+        return slice_training_view(
+            loaded,
+            as_of=as_of,
+            fit_end=fit_end,
+            pad_to=pad_to,
+            include_stores=include_stores,
+        )
 
     def preload(self, families: Sequence[str] | None = None) -> Dataset:
         """Download and verify Parquet parts for frozen families up front."""

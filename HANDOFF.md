@@ -1,11 +1,13 @@
 # Handoff
 
-Updated 2026-11-25 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
+Updated 2026-11-27 UTC. Read [AGENTS](AGENTS.md), then the target application's README/rules.
 Documentation entrypoints are in [docs/README](docs/README.md).
 
 ## Current work
 
 Private application follow-ups and release verification are tracked in `private/HANDOFF.md`.
+
+Branch `feat/research-datasets-v2.7` upgrades `packages/research-datasets` to `2.7.0` (24/7 BTC/ETH reference features, zero-LLM `fundamental_restatement` group, `tqdm.auto` streaming prefetch on `client.dataset("latest")`, server pre-materialized `training/` shard builder, `< 50 ms` warm RAM Tier-2 zero-leakage slicing via `ds.training(as_of=..., fit_end=..., pad_to=1280)` with native TPU-MXU-aligned JAX static tensors, vectorized Acklam `GaussRank`, and streaming lower-RSS store builders) and pins the corresponding private application update. Local `ruff`, all 244 SDK tests (including `test_sdk_v27.py`), and a 574k-row archive dry-run benchmark passed (`10.43 ms` median warm slice, `4.92 GiB` peak RSS). Merge after `CI gate` passes, then wait for same-SHA main `CI and deploy` and `Personal cloud reconcile` and complete post-deploy live verification.
 
 `packages/research-datasets` `2.5.0` (untruncated multi-clock `Stores`, pluggable 15-group feature registry, declarative YAML `materialize`, and `load_local`) is pinned to public `main` (`f7840d90c7cbd104be71901c9406a4b03b54ae43`) and cleanly verified in an isolated Python 3.14 environment (`2.5.0`, 20 registered groups).
 

@@ -713,6 +713,7 @@ _MACRO_SENS_COLS: tuple[str, ...] = (
     "mac_beta_qqq_spy_252d",
     "mac_beta_iwm_spy_252d",
     "mac_beta_iwf_iwd_252d",
+    "mac_beta_btc_63d",
     "mac_panic_inversion",
     "mac_panic_oversold_x",
     "mac_panic_qqq_x",
@@ -811,6 +812,12 @@ def build_macro_sensitivity_crisis(
             b_mat = np.full((n_assets, n_sess), np.nan, dtype=np.float64)
         betas_mat[col_name] = b_mat
         data[col_name] = _select_at_anchors(b_mat, ctx.stores.anchors)
+
+    # 63d causal rolling stock beta to 7x24 BTC daily log return (min_periods=30)
+    btc_1d = _mcol("crypto_ret_1d_btc")
+    if np.isfinite(btc_1d).sum() >= 30:
+        b_btc = _rolling_ols_beta_1d(resid, btc_1d, 63, 30)
+        data["mac_beta_btc_63d"] = _select_at_anchors(b_btc, ctx.stores.anchors)
 
     # Zero-parameter explicit crisis interactions (dormant=0 in calm markets)
     with np.errstate(invalid="ignore", divide="ignore"):

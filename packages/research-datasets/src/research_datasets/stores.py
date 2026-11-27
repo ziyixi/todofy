@@ -8,7 +8,7 @@ import math
 from bisect import bisect_right
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -155,6 +155,12 @@ _RAW_MACRO_SERIES: tuple[str, ...] = (
     "VXVCLS",
     "DTWEXBGS",
     "DCOILWTICO",
+    "CBBTCUSD",
+    "CBETHUSD",
+    "ALPACA_BTC_CLOSE16",
+    "ALPACA_BTC_PRE06",
+    "ALPACA_ETH_CLOSE16",
+    "ALPACA_ETH_PRE06",
 )
 _MACRO_ETF_SYMBOLS: tuple[str, ...] = (
     "SPY",
@@ -414,6 +420,8 @@ def _stream_parquet_prices(
         columns=avail_cols,
         filter=pads.field("asset_id").isin(list(asset_list)),
         batch_size=65_536,
+        batch_readahead=2,
+        fragment_readahead=1,
     )
     for batch in scanner.to_batches():
         if batch.num_rows == 0:
@@ -421,6 +429,95 @@ def _stream_parquet_prices(
         _fill_price_channels(
             tensor, batch.to_pandas(), asset_pos, day_pos, fields=fields
         )
+    import pyarrow as pa
+
+    pa.default_memory_pool().release_unused()
+    return True
+
+
+def _fill_daily_returns_batch(
+    tensor: np.ndarray,
+    disputed_mat: np.ndarray,
+    dr_df: pd.DataFrame,
+    asset_pos: Mapping[str, int],
+    day_pos: Mapping[str, int],
+) -> None:
+    if dr_df is None or dr_df.empty:
+        return
+    if "row_kind" in dr_df.columns:
+        dr_df = dr_df[dr_df["row_kind"].astype(str).isin({"first", "session"})]
+        if dr_df.empty:
+            return
+    dr_fields = {"tr_index": 8}
+    if "split_index" in dr_df.columns:
+        dr_fields["split_index"] = 13
+    _fill_price_channels(tensor, dr_df, asset_pos, day_pos, fields=dr_fields)
+    aids = dr_df["asset_id"].astype(str).map(asset_pos)
+    raw_dates = dr_df["date"]
+    if pd.api.types.is_datetime64_any_dtype(raw_dates.dtype):
+        date_strs = raw_dates.dt.strftime("%Y-%m-%d")
+    else:
+        date_strs = raw_dates.map(lambda v: clocks.day(v).isoformat())
+    sids = date_strs.map(day_pos)
+    keep = (aids.notna() & sids.notna()).to_numpy()
+    if not keep.any():
+        return
+    ai = aids[keep].to_numpy(dtype=np.int64)
+    si = sids[keep].to_numpy(dtype=np.int64)
+    if "flags" in dr_df.columns:
+        susp = (
+            dr_df["flags"]
+            .iloc[np.flatnonzero(keep)]
+            .map(_has_adjustment_suspect)
+            .to_numpy(dtype=np.float32)
+        )
+        tensor[ai, si, 12] = susp
+    else:
+        tensor[ai, si, 12] = np.float32(0.0)
+    if "tr_status" in dr_df.columns:
+        disp = (
+            dr_df["tr_status"].iloc[np.flatnonzero(keep)].fillna("").astype(str)
+            == "disputed"
+        ).to_numpy(dtype=bool)
+        disputed_mat[ai, si] = disp
+
+
+def _stream_parquet_daily_returns(
+    tensor: np.ndarray,
+    disputed_mat: np.ndarray,
+    version: Any,
+    asset_list: Sequence[str],
+    asset_pos: Mapping[str, int],
+    day_pos: Mapping[str, int],
+    wanted_cols: Sequence[str],
+) -> bool:
+    """Stream `daily_returns` parquet parts in bounded 65k-row batches to cap RSS."""
+    if not (hasattr(version, "_parts") and hasattr(version, "_client")):
+        return False
+    import pyarrow.dataset as pads
+
+    parts = version._parts("daily_returns", asset_list)
+    if not parts:
+        return True
+    paths = [str(version._client._part(item)) for item in parts]
+    ds = pads.dataset(paths, format="parquet")
+    avail_cols = [c for c in wanted_cols if c in ds.schema.names]
+    scanner = ds.scanner(
+        columns=avail_cols,
+        filter=pads.field("asset_id").isin(list(asset_list)),
+        batch_size=65_536,
+        batch_readahead=2,
+        fragment_readahead=1,
+    )
+    for batch in scanner.to_batches():
+        if batch.num_rows == 0:
+            continue
+        _fill_daily_returns_batch(
+            tensor, disputed_mat, batch.to_pandas(), asset_pos, day_pos
+        )
+    import pyarrow as pa
+
+    pa.default_memory_pool().release_unused()
     return True
 
 
@@ -484,51 +581,31 @@ def build_price_store(
             "flags",
             "tr_status",
         ]
-        if hasattr(version, "_read_family"):
-            dr_df = version._read_family(
-                "daily_returns",
-                symbols=asset_list,
-                columns=wanted_dr,
-                optional_columns=True,
-            )
-        else:
-            from .client import DatasetError
-
-            try:
-                dr_df = version.family("daily_returns", asset_list, columns=wanted_dr)
-            except (DatasetError, KeyError, ValueError):
-                dr_df = version.family(
+        if not _stream_parquet_daily_returns(
+            tensor, disputed_mat, version, asset_list, asset_pos, day_pos, wanted_dr
+        ):
+            if hasattr(version, "_read_family"):
+                dr_df = version._read_family(
                     "daily_returns",
-                    asset_list,
-                    columns=["asset_id", "date", "row_kind", "tr_index"],
-                )
-        if dr_df is not None and not dr_df.empty:
-            if "row_kind" in dr_df.columns:
-                dr_df = dr_df[dr_df["row_kind"].astype(str).isin({"first", "session"})]
-            dr_fields = {"tr_index": 8}
-            if "split_index" in dr_df.columns:
-                dr_fields["split_index"] = 13
-            _fill_price_channels(tensor, dr_df, asset_pos, day_pos, fields=dr_fields)
-            work_dr = dr_df[["asset_id", "date"]].copy()
-            if "flags" in dr_df.columns:
-                work_dr["_tr_suspect"] = (
-                    dr_df["flags"].map(_has_adjustment_suspect).astype(np.float32)
+                    symbols=asset_list,
+                    columns=wanted_dr,
+                    optional_columns=True,
                 )
             else:
-                work_dr["_tr_suspect"] = np.float32(0.0)
-            _fill_price_channels(
-                tensor, work_dr, asset_pos, day_pos, fields={"_tr_suspect": 12}
-            )
-            if "tr_status" in dr_df.columns:
-                work_dr["_tr_disputed"] = (
-                    dr_df["tr_status"].fillna("").astype(str) == "disputed"
-                ).astype(np.float32)
-                tmp_disp = np.zeros((n_assets, n_sessions, 1), dtype=np.float32)
-                _fill_price_channels(
-                    tmp_disp, work_dr, asset_pos, day_pos, fields={"_tr_disputed": 0}
-                )
-                disputed_mat = tmp_disp[:, :, 0] > 0.5
-        del dr_df
+                from .client import DatasetError
+
+                try:
+                    dr_df = version.family(
+                        "daily_returns", asset_list, columns=wanted_dr
+                    )
+                except (DatasetError, KeyError, ValueError):
+                    dr_df = version.family(
+                        "daily_returns",
+                        asset_list,
+                        columns=["asset_id", "date", "row_kind", "tr_index"],
+                    )
+            _fill_daily_returns_batch(tensor, disputed_mat, dr_df, asset_pos, day_pos)
+            del dr_df
 
     # Derive causal daily total return + intraday/overnight decomposition.
     # Never mix dollar `close_adj` with `tr_index` inside one asset.
@@ -917,35 +994,31 @@ def build_fund_store(
         )
 
     max_ns = _cutoff_close_ns(cal, max_date)
-    manifest, frames = _fund._iter_fact_frames(version, unique_ciks)
-    zones = (
-        manifest.get("source_timezones", {}) if isinstance(manifest, Mapping) else {}
+    manifest_obj = getattr(version, "manifest", None)
+    part_idx = (
+        manifest_obj.get("part_index") if isinstance(manifest_obj, Mapping) else None
     )
-    by_cik: dict[str, list[_fund.FactVersion]] = {}
+    has_cik_part_index = isinstance(part_idx, Sequence) and any(
+        isinstance(item, Mapping)
+        and item.get("family") == "fundamentals"
+        and "first_cik" in item
+        for item in part_idx
+    )
+    batch_size = (
+        128 if (has_cik_part_index and len(unique_ciks) > 128) else len(unique_ciks)
+    )
+    cik_batches = [
+        unique_ciks[i : i + batch_size]
+        for i in range(0, len(unique_ciks), max(1, batch_size))
+    ]
+    cik_splits = _fund._cik_split_events(version, unique_ciks)
+
     totals = {
         "dropped_unknown_clock_versions": 0,
         "dropped_invalid_clock_versions": 0,
         "dropped_unmapped_tags": 0,
         "dropped_unit_mismatch": 0,
     }
-    for chunk in frames:
-        if chunk is None or chunk.empty:
-            continue
-        versions, stats = _fund.normalize_facts(
-            chunk,
-            time_policy=time_policy,
-            source_timezones=zones,
-            concepts=_FUND_NORMALIZE_CONCEPTS,
-        )
-        for k, cnt in stats.items():
-            totals[k] = totals.get(k, 0) + cnt
-        for v in versions:
-            if max_ns is not None and int(v.available_ns) > max_ns:
-                continue
-            by_cik.setdefault(v.cik, []).append(v)
-
-    cik_splits = _fund._cik_split_events(version, unique_ciks)
-
     snap_cik_idx: list[int] = []
     snap_epoch_ns: list[int] = []
     snap_offsets: list[int] = [0]
@@ -960,181 +1033,217 @@ def build_fund_store(
     cik_starts = np.zeros(len(unique_ciks), dtype=np.int64)
     cik_ends = np.zeros(len(unique_ciks), dtype=np.int64)
 
-    for c_idx, cik in enumerate(unique_ciks):
-        cik_starts[c_idx] = len(snap_epoch_ns)
-        versions = by_cik.pop(cik, [])
-        if not versions:
-            cik_ends[c_idx] = len(snap_epoch_ns)
-            continue
-        versions.sort(key=lambda v: (v.available_ns, v.observation_sequence))
-        primary_aid = (primary_asset_of_cik or {}).get(cik, -1)
-        raw_splits = cik_splits.get(cik, ())
-        cur_snap_day: list[date | None] = [None]
-
-        def _causal_split_fn(
-            d_from: date | None,
-            d_to: date | None,
-            *,
-            _evs: Sequence[tuple[date, float]] = raw_splits,
-            _day_box: list[date | None] = cur_snap_day,
-        ) -> float:
-            if not _evs or d_from is None or d_to is None:
-                return 1.0
-            cap_day = _day_box[0]
-            if cap_day is not None:
-                causal_evs = [(ex_d, r) for ex_d, r in _evs if ex_d <= cap_day]
-            else:
-                causal_evs = list(_evs)
-            return _fund._split_ratio_between(causal_evs, d_from, d_to)
-
-        split_fn = _causal_split_fn if raw_splits else None
-
-        batch_pub_map: dict[int, int] = {}
-        for v in versions:
-            ep = int(v.available_ns)
-            if v.public_ns != NAT:
-                prev_pub = batch_pub_map.get(ep)
-                pv_ns = int(v.public_ns)
-                batch_pub_map[ep] = pv_ns if prev_pub is None else max(prev_pub, pv_ns)
-
-        def _on_snapshot(
-            epoch_ns: int,
-            quarters_by_concept: Mapping[
-                str, Mapping[tuple[date, int], _fund.PeriodValue]
-            ],
-            concept_periods: Mapping[
-                str, Mapping[tuple[date | None, date], _fund.PeriodValue]
-            ],
-            *,
-            _c_idx: int = c_idx,
-            _primary_aid: int = primary_aid,
-            _split_fn: Any = split_fn,
-            _day_box: list[date | None] = cur_snap_day,
-            _pub_map: Mapping[int, int] = batch_pub_map,
-        ) -> None:
-            snap_day = _day_box[0]
-            dur_by_pe: dict[date, dict[str, _fund.PeriodValue]] = {}
-            for ch_name, concept_name in _FUND_DURATION_CONCEPT_MAP:
-                q_map = quarters_by_concept.get(concept_name, {})
-                for pv in q_map.values():
-                    if not pv.usable:
-                        continue
-                    slot = dur_by_pe.setdefault(pv.period_end, {})
-                    prev = slot.get(ch_name)
-                    if prev is None or pv.available_ns >= prev.available_ns:
-                        slot[ch_name] = pv
-                # Fallback for standalone 70..115d duration facts outside a fiscal calendar slot.
-                p_map = concept_periods.get(concept_name, {})
-                for (ps, pe), pv in p_map.items():
-                    if ps is None or not pv.usable:
-                        continue
-                    if pe in dur_by_pe and ch_name in dur_by_pe[pe]:
-                        continue
-                    span = (pe - ps).days + 1
-                    if 70 <= span <= 115:
-                        dur_by_pe.setdefault(pe, {})[ch_name] = pv
-
-            inst_by_pe: dict[date, dict[str, _fund.PeriodValue]] = {}
-            for ch_name, concept_name in _FUND_INSTANT_CONCEPT_MAP:
-                p_map = concept_periods.get(concept_name, {})
-                for (ps, pe), pv in p_map.items():
-                    if ps is not None or not pv.usable:
-                        continue
-                    inst_by_pe.setdefault(pe, {})[ch_name] = pv
-
-            all_pes = sorted(set(dur_by_pe) | set(inst_by_pe))
-            if not all_pes:
-                return
-
-            mat = np.full((len(all_pes), len(FUND_CHANNELS)), np.nan, dtype=np.float32)
-            for row_i, pe in enumerate(all_pes):
-                d_row = dur_by_pe.get(pe, {})
-                i_row = inst_by_pe.get(pe, {})
-                pe_pub = -1
-                for ch_name, _ in _FUND_DURATION_CONCEPT_MAP:
-                    pv = d_row.get(ch_name)
-                    if pv is None or pv.decimal_value is None:
-                        continue
-                    if (
-                        ch_name == "diluted_eps"
-                        and _split_fn is not None
-                        and snap_day is not None
-                    ):
-                        val = float(
-                            _fund._scale_decimal_to_ref(
-                                pv, "per_share", snap_day, _split_fn
-                            )
-                        )
-                    else:
-                        val = pv.float_value
-                    if math.isfinite(val):
-                        mat[row_i, _FUND_INDEX[ch_name]] = np.float32(val)
-                        if pv.available_ns > pe_pub:
-                            pe_pub = int(pv.available_ns)
-                for ch_name, _ in _FUND_INSTANT_CONCEPT_MAP:
-                    pv = i_row.get(ch_name)
-                    if pv is None or pv.decimal_value is None:
-                        continue
-                    if (
-                        ch_name == "shares_outstanding"
-                        and _split_fn is not None
-                        and snap_day is not None
-                    ):
-                        val = float(
-                            _fund._scale_decimal_to_ref(
-                                pv, "shares", snap_day, _split_fn
-                            )
-                        )
-                    else:
-                        val = pv.float_value
-                    if math.isfinite(val):
-                        mat[row_i, _FUND_INDEX[ch_name]] = np.float32(val)
-                        if pv.available_ns > pe_pub:
-                            pe_pub = int(pv.available_ns)
-                q_pe_ords.append(pe.toordinal())
-                q_pub_ns.append(pe_pub if pe_pub >= 0 else int(epoch_ns))
-
-            snap_pub_ns = _pub_map.get(int(epoch_ns), int(epoch_ns))
-            pre_r, p1_r, p3_r, r1_ns, r3_ns = _reaction_window_metrics(
-                _primary_aid,
-                snap_pub_ns,
-                price_store,
-                cal,
-                max_decision_ns=max_ns,
-            )
-            snap_cik_idx.append(_c_idx)
-            snap_epoch_ns.append(int(epoch_ns))
-            q_values_chunks.append(mat)
-            snap_offsets.append(snap_offsets[-1] + len(all_pes))
-            snap_pre_ret.append(pre_r)
-            snap_p1_ret.append(p1_r)
-            snap_p3_ret.append(p3_r)
-            snap_p1_ns.append(r1_ns)
-            snap_p3_ns.append(r3_ns)
-
-        machine = _fund.IssuerStateMachine(
-            cik,
-            target_views=(),
-            record_quarters=_FUND_QUARTER_CONCEPTS,
-            split_factor_fn=split_fn,
-            snapshot_callback=_on_snapshot,
+    c_idx_base = 0
+    for cik_batch in cik_batches:
+        manifest, frames = _fund._iter_fact_frames(version, cik_batch)
+        zones = (
+            manifest.get("source_timezones", {})
+            if isinstance(manifest, Mapping)
+            else {}
         )
-        idx = 0
-        total_v = len(versions)
-        while idx < total_v:
-            epoch_ns = int(versions[idx].available_ns)
-            end_idx = idx + 1
-            while end_idx < total_v and int(versions[end_idx].available_ns) == epoch_ns:
-                end_idx += 1
-            cur_snap_day[0] = (
-                pd.Timestamp(epoch_ns, unit="ns", tz="UTC")
-                .tz_convert(clocks.NEW_YORK)
-                .date()
+        by_cik: dict[str, list[_fund.FactVersion]] = {}
+        for chunk in frames:
+            if chunk is None or chunk.empty:
+                continue
+            versions_chunk, stats = _fund.normalize_facts(
+                chunk,
+                time_policy=time_policy,
+                source_timezones=zones,
+                concepts=_FUND_NORMALIZE_CONCEPTS,
             )
-            machine._apply_batch(versions[idx:end_idx], epoch_ns)
-            idx = end_idx
+            for k, cnt in stats.items():
+                totals[k] = totals.get(k, 0) + cnt
+            for v in versions_chunk:
+                if max_ns is not None and int(v.available_ns) > max_ns:
+                    continue
+                by_cik.setdefault(v.cik, []).append(v)
 
-        cik_ends[c_idx] = len(snap_epoch_ns)
+        for offset_i, cik in enumerate(cik_batch):
+            c_idx = c_idx_base + offset_i
+            cik_starts[c_idx] = len(snap_epoch_ns)
+            versions = by_cik.pop(cik, [])
+            if not versions:
+                cik_ends[c_idx] = len(snap_epoch_ns)
+                continue
+            versions.sort(key=lambda v: (v.available_ns, v.observation_sequence))
+            primary_aid = (primary_asset_of_cik or {}).get(cik, -1)
+            raw_splits = cik_splits.get(cik, ())
+            cur_snap_day: list[date | None] = [None]
+
+            def _causal_split_fn(
+                d_from: date | None,
+                d_to: date | None,
+                *,
+                _evs: Sequence[tuple[date, float]] = raw_splits,
+                _day_box: list[date | None] = cur_snap_day,
+            ) -> float:
+                if not _evs or d_from is None or d_to is None:
+                    return 1.0
+                cap_day = _day_box[0]
+                if cap_day is not None:
+                    causal_evs = [(ex_d, r) for ex_d, r in _evs if ex_d <= cap_day]
+                else:
+                    causal_evs = list(_evs)
+                return _fund._split_ratio_between(causal_evs, d_from, d_to)
+
+            split_fn = _causal_split_fn if raw_splits else None
+
+            batch_pub_map: dict[int, int] = {}
+            for v in versions:
+                ep = int(v.available_ns)
+                if v.public_ns != NAT:
+                    prev_pub = batch_pub_map.get(ep)
+                    pv_ns = int(v.public_ns)
+                    batch_pub_map[ep] = (
+                        pv_ns if prev_pub is None else max(prev_pub, pv_ns)
+                    )
+
+            def _on_snapshot(
+                epoch_ns: int,
+                quarters_by_concept: Mapping[
+                    str, Mapping[tuple[date, int], _fund.PeriodValue]
+                ],
+                concept_periods: Mapping[
+                    str, Mapping[tuple[date | None, date], _fund.PeriodValue]
+                ],
+                *,
+                _c_idx: int = c_idx,
+                _primary_aid: int = primary_aid,
+                _split_fn: Any = split_fn,
+                _day_box: list[date | None] = cur_snap_day,
+                _pub_map: Mapping[int, int] = batch_pub_map,
+            ) -> None:
+                snap_day = _day_box[0]
+                dur_by_pe: dict[date, dict[str, _fund.PeriodValue]] = {}
+                for ch_name, concept_name in _FUND_DURATION_CONCEPT_MAP:
+                    q_map = quarters_by_concept.get(concept_name, {})
+                    for pv in q_map.values():
+                        if not pv.usable:
+                            continue
+                        slot = dur_by_pe.setdefault(pv.period_end, {})
+                        prev = slot.get(ch_name)
+                        if prev is None or pv.available_ns >= prev.available_ns:
+                            slot[ch_name] = pv
+                    # Fallback for standalone 70..115d duration facts outside a fiscal calendar slot.
+                    p_map = concept_periods.get(concept_name, {})
+                    for (ps, pe), pv in p_map.items():
+                        if ps is None or not pv.usable:
+                            continue
+                        if pe in dur_by_pe and ch_name in dur_by_pe[pe]:
+                            continue
+                        span = (pe - ps).days + 1
+                        if 70 <= span <= 115:
+                            dur_by_pe.setdefault(pe, {})[ch_name] = pv
+
+                inst_by_pe: dict[date, dict[str, _fund.PeriodValue]] = {}
+                for ch_name, concept_name in _FUND_INSTANT_CONCEPT_MAP:
+                    p_map = concept_periods.get(concept_name, {})
+                    for (ps, pe), pv in p_map.items():
+                        if ps is not None or not pv.usable:
+                            continue
+                        inst_by_pe.setdefault(pe, {})[ch_name] = pv
+
+                all_pes = sorted(set(dur_by_pe) | set(inst_by_pe))
+                if not all_pes:
+                    return
+
+                mat = np.full(
+                    (len(all_pes), len(FUND_CHANNELS)), np.nan, dtype=np.float32
+                )
+                for row_i, pe in enumerate(all_pes):
+                    d_row = dur_by_pe.get(pe, {})
+                    i_row = inst_by_pe.get(pe, {})
+                    pe_pub = -1
+                    for ch_name, _ in _FUND_DURATION_CONCEPT_MAP:
+                        pv = d_row.get(ch_name)
+                        if pv is None or pv.decimal_value is None:
+                            continue
+                        if (
+                            ch_name == "diluted_eps"
+                            and _split_fn is not None
+                            and snap_day is not None
+                        ):
+                            val = float(
+                                _fund._scale_decimal_to_ref(
+                                    pv, "per_share", snap_day, _split_fn
+                                )
+                            )
+                        else:
+                            val = pv.float_value
+                        if math.isfinite(val):
+                            mat[row_i, _FUND_INDEX[ch_name]] = np.float32(val)
+                            if pv.available_ns > pe_pub:
+                                pe_pub = int(pv.available_ns)
+                    for ch_name, _ in _FUND_INSTANT_CONCEPT_MAP:
+                        pv = i_row.get(ch_name)
+                        if pv is None or pv.decimal_value is None:
+                            continue
+                        if (
+                            ch_name == "shares_outstanding"
+                            and _split_fn is not None
+                            and snap_day is not None
+                        ):
+                            val = float(
+                                _fund._scale_decimal_to_ref(
+                                    pv, "shares", snap_day, _split_fn
+                                )
+                            )
+                        else:
+                            val = pv.float_value
+                        if math.isfinite(val):
+                            mat[row_i, _FUND_INDEX[ch_name]] = np.float32(val)
+                            if pv.available_ns > pe_pub:
+                                pe_pub = int(pv.available_ns)
+                    q_pe_ords.append(pe.toordinal())
+                    q_pub_ns.append(pe_pub if pe_pub >= 0 else int(epoch_ns))
+
+                snap_pub_ns = _pub_map.get(int(epoch_ns), int(epoch_ns))
+                pre_r, p1_r, p3_r, r1_ns, r3_ns = _reaction_window_metrics(
+                    _primary_aid,
+                    snap_pub_ns,
+                    price_store,
+                    cal,
+                    max_decision_ns=max_ns,
+                )
+                snap_cik_idx.append(_c_idx)
+                snap_epoch_ns.append(int(epoch_ns))
+                q_values_chunks.append(mat)
+                snap_offsets.append(snap_offsets[-1] + len(all_pes))
+                snap_pre_ret.append(pre_r)
+                snap_p1_ret.append(p1_r)
+                snap_p3_ret.append(p3_r)
+                snap_p1_ns.append(r1_ns)
+                snap_p3_ns.append(r3_ns)
+
+            machine = _fund.IssuerStateMachine(
+                cik,
+                target_views=(),
+                record_quarters=_FUND_QUARTER_CONCEPTS,
+                split_factor_fn=split_fn,
+                snapshot_callback=_on_snapshot,
+                update_ledger=False,
+            )
+            idx = 0
+            total_v = len(versions)
+            while idx < total_v:
+                epoch_ns = int(versions[idx].available_ns)
+                end_idx = idx + 1
+                while (
+                    end_idx < total_v
+                    and int(versions[end_idx].available_ns) == epoch_ns
+                ):
+                    end_idx += 1
+                cur_snap_day[0] = (
+                    pd.Timestamp(epoch_ns, unit="ns", tz="UTC")
+                    .tz_convert(clocks.NEW_YORK)
+                    .date()
+                )
+                machine._apply_batch(versions[idx:end_idx], epoch_ns)
+                idx = end_idx
+
+            cik_ends[c_idx] = len(snap_epoch_ns)
+        by_cik.clear()
+        c_idx_base += len(cik_batch)
 
     q_values = (
         np.concatenate(q_values_chunks, axis=0)
@@ -1516,6 +1625,26 @@ def build_event_store(
                         for k_name in k_names:
                             k_id = _kind_id(k_name)
                             per_asset[a_idx].append((pb, av, src_id, k_id, 1.0, ev_ord))
+            del (
+                pub_ns,
+                invalid,
+                cap_ns,
+                avail_base,
+                srcs,
+                forms,
+                items_col,
+                ek_col,
+                ev_date_col,
+                filing_date_col,
+                links,
+            )
+        del obs
+        import gc
+
+        import pyarrow as pa
+
+        gc.collect()
+        pa.default_memory_pool().release_unused()
 
     if "extraction_facts" in families:
         facts_df = (
@@ -1694,6 +1823,148 @@ class MacroStore:
         )
 
 
+def _crypto_latest_value(
+    prep: Any,
+    decision_ns: int,
+    *,
+    max_obs_date: date | None = None,
+    min_obs_date: date | None = None,
+    exact_obs_date: date | None = None,
+    max_age_ref: date | None = None,
+    max_age_days: int | None = None,
+) -> float:
+    """Strictly causal latest finite observation with ``avail_ns <= decision_ns`` and date bounds."""
+    if prep is None or decision_ns == NAT or len(prep.avail_ns) == 0:
+        return float("nan")
+    mask = prep.avail_ns <= decision_ns
+    if not mask.any():
+        return float("nan")
+    idxs = np.flatnonzero(mask)
+    best_date: date | None = None
+    best_val = float("nan")
+    # Rows in _PreparedSeries are ordered by (_day, _seq, _eff_ns); iterating keeps latest seq per day.
+    for idx in idxs.tolist():
+        d_cur = prep.dates[idx]
+        if exact_obs_date is not None and d_cur != exact_obs_date:
+            continue
+        if max_obs_date is not None and d_cur > max_obs_date:
+            continue
+        if min_obs_date is not None and d_cur < min_obs_date:
+            continue
+        v_cur = float(prep.values[idx])
+        if not math.isfinite(v_cur) or v_cur <= 0.0:
+            continue
+        if best_date is None or d_cur >= best_date:
+            best_date = d_cur
+            best_val = v_cur
+    if best_date is None:
+        return float("nan")
+    if (
+        max_age_ref is not None
+        and max_age_days is not None
+        and (max_age_ref - best_date).days > max_age_days
+    ):
+        return float("nan")
+    return best_val
+
+
+def _build_crypto_macro_columns(
+    prepared: Mapping[str, Any],
+    sess_list: Sequence[date],
+    eff_dec_ns: np.ndarray,
+    ny_dates: Sequence[date],
+) -> dict[str, np.ndarray]:
+    """Compute causal BTC/ETH daily returns, 21d vol, and weekend/holiday gaps (< decision_at)."""
+    n_sess = len(sess_list)
+    cols: dict[str, np.ndarray] = {}
+    for sym, fred_id, c16_id, p06_id in (
+        ("btc", "CBBTCUSD", "ALPACA_BTC_CLOSE16", "ALPACA_BTC_PRE06"),
+        ("eth", "CBETHUSD", "ALPACA_ETH_CLOSE16", "ALPACA_ETH_PRE06"),
+    ):
+        prep_fred = prepared.get(fred_id)
+        prep_c16 = prepared.get(c16_id)
+        prep_p06 = prepared.get(p06_id)
+
+        p_c16 = np.full(n_sess, np.nan, dtype=np.float64)
+        p_fred = np.full(n_sess, np.nan, dtype=np.float64)
+        wgap = np.full(n_sess, np.nan, dtype=np.float64)
+
+        for t_i in range(n_sess):
+            d_sig = sess_list[t_i]
+            d_entry = ny_dates[t_i]
+            dec_t = int(eff_dec_ns[t_i])
+
+            v_c16 = _crypto_latest_value(
+                prep_c16,
+                dec_t,
+                max_obs_date=d_sig,
+                max_age_ref=d_sig,
+                max_age_days=3,
+            )
+            v_fred = _crypto_latest_value(
+                prep_fred,
+                dec_t,
+                max_obs_date=d_sig,
+                max_age_ref=d_sig,
+                max_age_days=5,
+            )
+            p_c16[t_i] = v_c16
+            p_fred[t_i] = v_fred
+
+            gap_days = (d_entry - d_sig).days
+            if gap_days >= 2:
+                v_p06 = _crypto_latest_value(prep_p06, dec_t, exact_obs_date=d_entry)
+                v_sig_c16 = _crypto_latest_value(prep_c16, dec_t, exact_obs_date=d_sig)
+                if math.isfinite(v_p06) and math.isfinite(v_sig_c16):
+                    wgap[t_i] = math.log(v_p06 / v_sig_c16)
+                else:
+                    # 2016-2020 fallback: FRED weekend/holiday close strictly after d_sig & <= decision_at
+                    v_f_end = _crypto_latest_value(
+                        prep_fred,
+                        dec_t,
+                        min_obs_date=d_sig + timedelta(days=1),
+                        max_age_ref=d_entry,
+                        max_age_days=3,
+                    )
+                    v_f_sig = _crypto_latest_value(
+                        prep_fred, dec_t, exact_obs_date=d_sig
+                    )
+                    if math.isfinite(v_f_end) and math.isfinite(v_f_sig):
+                        wgap[t_i] = math.log(v_f_end / v_f_sig)
+            elif gap_days == 1 and (math.isfinite(v_c16) or math.isfinite(v_fred)):
+                wgap[t_i] = 0.0
+
+        # Same-source log returns (zero source-stitch discontinuity at 2021 boundary)
+        ret_1d = np.full(n_sess, np.nan, dtype=np.float64)
+        if n_sess > 1:
+            ok_c16 = np.isfinite(p_c16[1:]) & np.isfinite(p_c16[:-1])
+            ok_fr = (~ok_c16) & np.isfinite(p_fred[1:]) & np.isfinite(p_fred[:-1])
+            ret_1d[1:][ok_c16] = np.log(p_c16[1:][ok_c16] / p_c16[:-1][ok_c16])
+            ret_1d[1:][ok_fr] = np.log(p_fred[1:][ok_fr] / p_fred[:-1][ok_fr])
+        cols[f"crypto_ret_1d_{sym}"] = ret_1d.astype(np.float32)
+        cols[f"crypto_weekend_gap_{sym}"] = wgap.astype(np.float32)
+
+        if sym == "btc":
+            ret_21d = np.full(n_sess, np.nan, dtype=np.float64)
+            if n_sess > 21:
+                ok_c21 = np.isfinite(p_c16[21:]) & np.isfinite(p_c16[:-21])
+                ok_f21 = (
+                    (~ok_c21) & np.isfinite(p_fred[21:]) & np.isfinite(p_fred[:-21])
+                )
+                ret_21d[21:][ok_c21] = np.log(p_c16[21:][ok_c21] / p_c16[:-21][ok_c21])
+                ret_21d[21:][ok_f21] = np.log(
+                    p_fred[21:][ok_f21] / p_fred[:-21][ok_f21]
+                )
+            cols["crypto_ret_21d_btc"] = ret_21d.astype(np.float32)
+            cols["crypto_rvol_21d_btc"] = (
+                pd.Series(ret_1d)
+                .rolling(21, min_periods=15)
+                .std(ddof=1)
+                .to_numpy(dtype=np.float32)
+            )
+    return cols
+
+
 def build_macro_store(
     version: Any,
     sessions: Sequence[date],
@@ -1783,6 +2054,9 @@ def build_macro_store(
                         if math.isfinite(val):
                             arr[t_i] = np.float32(val)
                 raw_cols[f"raw_{sid.lower()}"] = arr
+            raw_cols.update(
+                _build_crypto_macro_columns(prepared, sess_list, eff_dec_ns, ny_dates)
+            )
             frames.append(pd.DataFrame(raw_cols))
 
     present_syms = {str(r.get("symbol", "")).upper() for r in uni_records}

@@ -15,7 +15,6 @@ import math
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
-from statistics import NormalDist
 from typing import Any
 
 import numpy as np
@@ -860,6 +859,63 @@ def residual_vol_63d(
     return out
 
 
+def norm_ppf_vec(p: np.ndarray) -> np.ndarray:
+    """Vectorized Acklam rational approximation of Phi^-1(p) (max abs error < 1.15e-9)."""
+    a = (
+        -3.969683028665376e01,
+        2.209460984245205e02,
+        -2.759285104469687e02,
+        1.383577518672690e02,
+        -3.066479806614716e01,
+        2.506628277459239e00,
+    )
+    b = (
+        -5.447609879822406e01,
+        1.615858368580409e02,
+        -1.556989798598866e02,
+        6.680131188771972e01,
+        -1.328068155288572e01,
+    )
+    c = (
+        -7.784894002430293e-03,
+        -3.223964580411365e-01,
+        -2.400758277161838e00,
+        -2.549732539343734e00,
+        4.374664141464968e00,
+        2.938163982698783e00,
+    )
+    d = (
+        7.784695709041462e-03,
+        3.224671290700398e-01,
+        2.445134137142996e00,
+        3.754408661907416e00,
+    )
+    plow = 0.02425
+    phigh = 1.0 - plow
+    p_arr = np.asarray(p, dtype=np.float64)
+    out = np.empty_like(p_arr)
+    low = p_arr < plow
+    high = p_arr > phigh
+    mid = (~low) & (~high)
+    if low.any():
+        q = np.sqrt(-2.0 * np.log(p_arr[low]))
+        out[low] = (
+            ((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]
+        ) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1.0)
+    if mid.any():
+        q = p_arr[mid] - 0.5
+        r = q * q
+        out[mid] = (
+            (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q
+        ) / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1.0)
+    if high.any():
+        q = np.sqrt(-2.0 * np.log(1.0 - p_arr[high]))
+        out[high] = -(
+            ((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]
+        ) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1.0)
+    return out
+
+
 def gauss_rank_cross_section(
     values: np.ndarray,
     sessions: np.ndarray,
@@ -872,21 +928,43 @@ def gauss_rank_cross_section(
     out = np.full(len(vals), np.nan, dtype=np.float64)
     if not mask.any():
         return out
-    nd = NormalDist()
-    inv_cdf = nd.inv_cdf
     valid_idx = np.flatnonzero(mask)
-    sub_s = pd.Series(vals[valid_idx])
-    sub_g = pd.Series(sess[valid_idx])
-    for grp_pos in sub_g.groupby(sub_g, sort=False).groups.values():
-        pos = np.asarray(grp_pos, dtype=np.int64)
-        m = len(pos)
-        if m == 0:
-            continue
-        ranks = sub_s.iloc[pos].rank(method="average").to_numpy(dtype=np.float64)
-        u = np.clip((ranks - 0.5) / float(m), 1e-6, 1.0 - 1e-6)
-        out[valid_idx[pos]] = np.fromiter(
-            (inv_cdf(float(p)) for p in u), dtype=np.float64, count=m
-        )
+    sub_v = vals[valid_idx]
+    sub_s = sess[valid_idx]
+    if np.issubdtype(sub_s.dtype, np.integer):
+        g_codes = sub_s.astype(np.int64, copy=False)
+    else:
+        g_codes = pd.factorize(sub_s, sort=False)[0].astype(np.int64, copy=False)
+
+    k = len(valid_idx)
+    order = np.lexsort((sub_v, g_codes))
+    g_s = g_codes[order]
+    v_s = sub_v[order]
+
+    g_change = np.empty(k + 1, dtype=bool)
+    g_change[0] = True
+    g_change[k] = True
+    if k > 1:
+        g_change[1:k] = g_s[1:] != g_s[:-1]
+    g_starts = np.flatnonzero(g_change[:-1])
+    g_ends = np.flatnonzero(g_change[1:]) + 1
+    g_lens = g_ends - g_starts
+    elem_g_start = np.repeat(g_starts, g_lens)
+    elem_g_len = np.repeat(g_lens, g_lens).astype(np.float64)
+    ord_rank = (np.arange(k, dtype=np.float64) - elem_g_start) + 1.0
+
+    t_change = np.empty(k + 1, dtype=bool)
+    t_change[0] = True
+    t_change[k] = True
+    if k > 1:
+        t_change[1:k] = (g_s[1:] != g_s[:-1]) | (v_s[1:] != v_s[:-1])
+    t_starts = np.flatnonzero(t_change[:-1])
+    t_ends = np.flatnonzero(t_change[1:]) + 1
+    t_lens = t_ends - t_starts
+    avg_rank = np.repeat(0.5 * (ord_rank[t_starts] + ord_rank[t_ends - 1]), t_lens)
+
+    u = np.clip((avg_rank - 0.5) / elem_g_len, 1e-6, 1.0 - 1e-6)
+    out[valid_idx[order]] = norm_ppf_vec(u)
     return out
 
 

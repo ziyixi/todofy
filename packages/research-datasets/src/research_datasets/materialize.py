@@ -812,6 +812,7 @@ def materialize(
         # Re-open PriceStore memory-mapped to drop eager write buffer RSS
         del pstore, fstore, estore, mstore, anchors, stores
         gc.collect()
+        pa.default_memory_pool().release_unused()
         stores = Stores.load(stores_dir, mmap=True)
         anchors = stores.anchors
 
@@ -921,6 +922,7 @@ def materialize(
         X = pd.DataFrame(index=anchors.frame.index)
     del mat, ctx
     gc.collect()
+    pa.default_memory_pool().release_unused()
 
     # Enforce hard physical barrier: pointer columns & forbidden tokens never enter X
     hits = audit_features(list(X.columns))
@@ -946,15 +948,24 @@ def materialize(
                 time_policy=eff_policy,
                 max_date=max_d,
             )
-            y_serializable = y_df.copy()
-            for c in y_serializable.columns:
-                if isinstance(y_serializable[c].dtype, pd.CategoricalDtype):
+            cat_cols = [
+                c
+                for c in y_df.columns
+                if isinstance(y_df[c].dtype, pd.CategoricalDtype)
+            ]
+            if cat_cols:
+                y_serializable = y_df.copy()
+                for c in cat_cols:
                     y_serializable[c] = y_serializable[c].astype(str)
+            else:
+                y_serializable = y_df
             tmp_y = labels_path.with_suffix(".parquet.tmp")
             y_serializable.to_parquet(tmp_y, index=False, engine="pyarrow")
             tmp_y.replace(labels_path)
-            del y_serializable
+            if cat_cols:
+                del y_serializable
             gc.collect()
+            pa.default_memory_pool().release_unused()
 
     report = {
         "cache_root": str(mat_root),

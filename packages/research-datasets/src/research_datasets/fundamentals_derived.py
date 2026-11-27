@@ -645,7 +645,8 @@ def _sanitize_unit_scales(
         "shares_weighted_diluted",
         "shares_weighted_basic",
     )
-    large_share_refs: list[tuple[date, Decimal, date]] = []
+    refs_by_ord: dict[int, list[tuple[int, float, date]]] = {}
+    ref_seq = 0
     for c_name in share_concepts:
         for pv in concept_periods.get(c_name, {}).values():
             if (
@@ -653,9 +654,12 @@ def _sanitize_unit_scales(
                 and pv.decimal_value is not None
                 and pv.decimal_value >= Decimal(100000)
             ):
-                large_share_refs.append(
-                    (pv.period_end, pv.decimal_value, pv.reference_date)
+                refs_by_ord.setdefault(pv.period_end.toordinal(), []).append(
+                    (ref_seq, float(pv.decimal_value), pv.reference_date)
                 )
+                ref_seq += 1
+    sorted_ref_ords = sorted(refs_by_ord)
+    n_ref_ords = len(sorted_ref_ords)
 
     for c_name in share_concepts:
         p_map = concept_periods.get(c_name)
@@ -667,21 +671,44 @@ def _sanitize_unit_scales(
             ):
                 continue
             ref_val: float | None = None
-            best_dist = 9999
-            for r_pe, r_dec, r_ref in large_share_refs:
-                dist = abs((r_pe - pv.period_end).days)
-                if dist <= 400 and dist < best_dist:
-                    f = (
-                        split_factor_fn(r_ref, pv.reference_date)
-                        if split_factor_fn is not None
-                        else 1.0
-                    )
-                    if f <= 0 or not math.isfinite(f):
-                        f = 1.0
-                    cand = float(r_dec) * f
-                    if cand >= 100_000.0:
-                        best_dist = dist
-                        ref_val = cand
+            if n_ref_ords:
+                pe_ord = pv.period_end.toordinal()
+                best_dist = 401
+                best_seq = ref_seq + 1
+                pos = bisect_left(sorted_ref_ords, pe_ord)
+                left = pos - 1
+                right = pos
+                while left >= 0 or right < n_ref_ords:
+                    dl = pe_ord - sorted_ref_ords[left] if left >= 0 else 9999
+                    dr = sorted_ref_ords[right] - pe_ord if right < n_ref_ords else 9999
+                    d_min = min(dl, dr)
+                    if d_min > 400 or d_min > best_dist:
+                        break
+                    check_ords: list[int] = []
+                    if dl == d_min:
+                        check_ords.append(sorted_ref_ords[left])
+                        left -= 1
+                    if dr == d_min:
+                        check_ords.append(sorted_ref_ords[right])
+                        right += 1
+                    for r_ord in check_ords:
+                        for r_seq, r_flt, r_ref in refs_by_ord[r_ord]:
+                            if d_min == best_dist and r_seq >= best_seq:
+                                continue
+                            f = (
+                                split_factor_fn(r_ref, pv.reference_date)
+                                if split_factor_fn is not None
+                                else 1.0
+                            )
+                            if f <= 0 or not math.isfinite(f):
+                                f = 1.0
+                            cand = r_flt * f
+                            if cand >= 100_000.0:
+                                best_dist = d_min
+                                best_seq = r_seq
+                                ref_val = cand
+                                if split_factor_fn is None:
+                                    break
             val_f = float(pv.decimal_value)
             if ref_val is None and 0.0 < val_f < 50_000.0:
                 ni_pv = concept_periods.get("net_income", {}).get(key)
@@ -1056,10 +1083,12 @@ class IssuerStateMachine:
             None,
         ]
         | None = None,
+        update_ledger: bool = True,
     ) -> None:
         self.cik = cik
         self._split_factor_fn = split_factor_fn
         self._snapshot_callback = snapshot_callback
+        self._update_ledger = bool(update_ledger)
         if target_views is None:
             views_list: list[str] = []
             for name, spec in ALL_CONCEPTS.items():
@@ -2289,9 +2318,10 @@ class IssuerStateMachine:
         if self._snapshot_callback is not None:
             self._snapshot_callback(batch_clock, quarters_by_concept, concept_periods)
 
-        self._update_quarter_ledger(
-            batch_clock, slots_list, concept_periods, quarters_by_concept
-        )
+        if self._update_ledger:
+            self._update_quarter_ledger(
+                batch_clock, slots_list, concept_periods, quarters_by_concept
+            )
 
         ttm_by_concept: dict[str, dict[date, PeriodValue]] = {}
         for c_name in needed_ttm:
