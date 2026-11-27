@@ -163,7 +163,6 @@ class PrivateCheckout(unittest.TestCase):
                 "private-check.yml",
                 "private-check.yml",
                 "private-check.yml",
-                "private-check.yml",
                 "private-release.yml",
             ],
         )
