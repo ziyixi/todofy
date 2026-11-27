@@ -79,17 +79,11 @@ parent revision, then builds `@private//:private` and tests `@private//:check` f
 private commit before updating the parent gitlink. Fork builds without private access skip this job; public checks
 use the same public graph without an initialized submodule.
 
-The private job restores the public Bazel cache but never saves a cache or uploads build/test artifacts. Public
-cache producers run without the private checkout. Its Bazel output stays in a file on the runner because it names
-private targets and prints failing test logs; the public log shows only fixed `PRIVATE_*` error codes for the
-baseline, build, test and selection steps. A failed test step also prints one `PRIVATE_TEST_<STATUS> <hash>` line per
-failed target, where the hash is the first 10 hex digits of the SHA-256 of the target label without its leading `@`.
-Map a hash back locally and rerun that target (a Linux-only target needs a Linux machine):
-
-```sh
-bazel query 'tests(@private//:check)' 2>/dev/null | sed 's/^@*//' | while read -r label; do
-  printf '%s %s\n' "$(printf '%s' "$label" | shasum -a 256 | cut -c1-10)" "$label"; done
-```
+The private check job restores the shared repository and Bazel action caches and saves its compacted action cache on
+`main` pushes (just like public checks) so unchanged builds and tests hit the disk cache. Planning runs once in the
+`plan` job and hands the affected target list to test shards via a short-lived Actions artifact so shards skip repeated
+Target Determinator work. Bazel build and test output streams directly to the Actions log with `--test_output=errors`
+for direct debugging; production secrets, credentials and private deployment outputs remain protected.
 
 For each selected VPS publication, the observer access job first checks and applies the canonical read-only
 discovery grants through native Actions. The VPS rollout waits for both that job and the Fleet consumer, so a new
