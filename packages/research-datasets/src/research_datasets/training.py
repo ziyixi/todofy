@@ -604,7 +604,7 @@ def build_server_training_bundle(
     anc_sha, anc_size = _sha256_file(anc_path)
     del anc_df
 
-    # 2. Compact labels parquet — write & immediately free mat.y before Tier-1 X build
+    # 2. Compact labels parquet — write & immediately free mat.y
     y_compact = _compact_labels_frame(mat.y, horizons)
     label_columns = list(y_compact.columns)
     y_path = out_dir / "labels.parquet"
@@ -620,7 +620,43 @@ def build_server_training_bundle(
     gc.collect()
     pa.default_memory_pool().release_unused()
 
-    # 3. Tier-1 X shards — build, write, and immediately free mat.X & x_tier1
+    # 3. Write MacroStore & PriceStore shards BEFORE Tier-1 X and release all Stores
+    # (PriceStore + FundStore + EventStore + MacroStore) to cut peak RSS by >1 GiB.
+    price_shape = [int(d) for d in pstore.data.shape]
+    price_channels = list(pstore.channels)
+    price_assets = list(pstore.assets)
+    price_sessions = [d.isoformat() for d in pstore.sessions]
+    benchmark_idx = int(pstore.benchmark_idx)
+    macro_columns = list(mstore.columns)
+    macro_sessions = [d.isoformat() for d in mstore.sessions]
+
+    macro_df = pd.DataFrame(
+        mstore.data.astype(np.float32, copy=False),
+        columns=macro_columns,
+    )
+    macro_df.insert(0, "session", macro_sessions)
+    m_path = out_dir / "macro_store.parquet"
+    pq.write_table(
+        pa.Table.from_pandas(macro_df, preserve_index=False),
+        m_path,
+        compression="zstd",
+        compression_level=6,
+    )
+    m_sha, m_size = _sha256_file(m_path)
+    del macro_df
+
+    price_shards = _write_zstd_tensor_shards(
+        pstore.data,
+        out_dir,
+        prefix="price_store",
+        target_shard_bytes=price_shard_raw_bytes,
+    )
+    mat.stores = None
+    del pstore, mstore
+    gc.collect()
+    pa.default_memory_pool().release_unused()
+
+    # 4. Tier-1 X shards — build, write, and immediately free mat.X & x_tier1
     x_tier1, col_types = build_tier1_features(mat.X, anc_frame)
     mat.X = pd.DataFrame()
     gc.collect()
@@ -655,31 +691,6 @@ def build_server_training_bundle(
     gc.collect()
     pa.default_memory_pool().release_unused()
 
-    # 4. MacroStore parquet
-    macro_df = pd.DataFrame(
-        mstore.data.astype(np.float32, copy=False),
-        columns=list(mstore.columns),
-    )
-    macro_df.insert(0, "session", [d.isoformat() for d in mstore.sessions])
-    m_path = out_dir / "macro_store.parquet"
-    pq.write_table(
-        pa.Table.from_pandas(macro_df, preserve_index=False),
-        m_path,
-        compression="zstd",
-        compression_level=6,
-    )
-    m_sha, m_size = _sha256_file(m_path)
-    del macro_df
-
-    # 5. PriceStore Zstd float32 shards
-    price_shards = _write_zstd_tensor_shards(
-        pstore.data,
-        out_dir,
-        prefix="price_store",
-        target_shard_bytes=price_shard_raw_bytes,
-    )
-    pa.default_memory_pool().release_unused()
-
     bundle_id = f"tb-v1-{r_sha[:12]}"
     bundle_meta: dict[str, Any] = {
         "schema_version": TRAINING_BUNDLE_SCHEMA_VERSION,
@@ -695,13 +706,13 @@ def build_server_training_bundle(
         "tier1_columns": tier1_columns,
         "column_types": col_types,
         "label_columns": label_columns,
-        "price_shape": [int(d) for d in pstore.data.shape],
-        "price_channels": list(pstore.channels),
-        "price_assets": list(pstore.assets),
-        "price_sessions": [d.isoformat() for d in pstore.sessions],
-        "benchmark_idx": int(pstore.benchmark_idx),
-        "macro_columns": list(mstore.columns),
-        "macro_sessions": [d.isoformat() for d in mstore.sessions],
+        "price_shape": price_shape,
+        "price_channels": price_channels,
+        "price_assets": price_assets,
+        "price_sessions": price_sessions,
+        "benchmark_idx": benchmark_idx,
+        "macro_columns": macro_columns,
+        "macro_sessions": macro_sessions,
         "artifacts": {
             "anchors": {
                 "filename": "anchors.parquet",
