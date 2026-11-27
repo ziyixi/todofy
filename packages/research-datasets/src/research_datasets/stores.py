@@ -419,17 +419,21 @@ def _stream_parquet_prices(
     scanner = ds.scanner(
         columns=avail_cols,
         filter=pads.field("asset_id").isin(list(asset_list)),
-        batch_size=65_536,
-        batch_readahead=2,
+        batch_size=32_768,
+        batch_readahead=1,
         fragment_readahead=1,
     )
-    for batch in scanner.to_batches():
+    import pyarrow as pa
+
+    for batch_idx, batch in enumerate(scanner.to_batches()):
         if batch.num_rows == 0:
             continue
         _fill_price_channels(
             tensor, batch.to_pandas(), asset_pos, day_pos, fields=fields
         )
-    import pyarrow as pa
+        del batch
+        if (batch_idx + 1) % 16 == 0:
+            pa.default_memory_pool().release_unused()
 
     pa.default_memory_pool().release_unused()
     return True
@@ -505,17 +509,21 @@ def _stream_parquet_daily_returns(
     scanner = ds.scanner(
         columns=avail_cols,
         filter=pads.field("asset_id").isin(list(asset_list)),
-        batch_size=65_536,
-        batch_readahead=2,
+        batch_size=32_768,
+        batch_readahead=1,
         fragment_readahead=1,
     )
-    for batch in scanner.to_batches():
+    import pyarrow as pa
+
+    for batch_idx, batch in enumerate(scanner.to_batches()):
         if batch.num_rows == 0:
             continue
         _fill_daily_returns_batch(
             tensor, disputed_mat, batch.to_pandas(), asset_pos, day_pos
         )
-    import pyarrow as pa
+        del batch
+        if (batch_idx + 1) % 16 == 0:
+            pa.default_memory_pool().release_unused()
 
     pa.default_memory_pool().release_unused()
     return True
@@ -607,79 +615,87 @@ def build_price_store(
             _fill_daily_returns_batch(tensor, disputed_mat, dr_df, asset_pos, day_pos)
             del dr_df
 
-    # Derive causal daily total return + intraday/overnight decomposition.
+    # Derive causal daily total return + intraday/overnight decomposition in 256-asset
+    # chunks so float64 intermediates stay < 20 MB instead of ~1 GiB across the universe.
     # Never mix dollar `close_adj` with `tr_index` inside one asset.
-    tr_lvl = tensor[:, :, 8].astype(np.float64)
-    adj_close = tensor[:, :, 7].astype(np.float64)
-    has_tr = np.any(np.isfinite(tr_lvl) & (tr_lvl > 0), axis=1, keepdims=True)
-    base_lvl = np.where(has_tr, tr_lvl, adj_close)
-    tr_suspect = tensor[:, :, 12].astype(np.float64)
-    suspect_mask = np.isfinite(tr_suspect) & (tr_suspect > 0.5)
-    ret_1d = np.full((n_assets, n_sessions), np.nan, dtype=np.float64)
-    valid_prev = (base_lvl[:, :-1] > 0) & np.isfinite(base_lvl[:, :-1])
-    valid_curr = (base_lvl[:, 1:] > 0) & np.isfinite(base_lvl[:, 1:])
-    ok_ret = valid_prev & valid_curr & ~suspect_mask[:, 1:]
-    ret_1d[:, 1:][ok_ret] = base_lvl[:, 1:][ok_ret] / base_lvl[:, :-1][ok_ret] - 1.0
-    tensor[:, :, 9] = ret_1d.astype(np.float32)
+    chunk_assets = 256
+    for a0 in range(0, n_assets, chunk_assets):
+        a1 = min(n_assets, a0 + chunk_assets)
+        sl = slice(a0, a1)
+        m = a1 - a0
+        tr_lvl = tensor[sl, :, 8].astype(np.float64)
+        adj_close = tensor[sl, :, 7].astype(np.float64)
+        has_tr = np.any(np.isfinite(tr_lvl) & (tr_lvl > 0), axis=1, keepdims=True)
+        base_lvl = np.where(has_tr, tr_lvl, adj_close)
+        tr_suspect = tensor[sl, :, 12].astype(np.float64)
+        suspect_mask = np.isfinite(tr_suspect) & (tr_suspect > 0.5)
+        ret_1d = np.full((m, n_sessions), np.nan, dtype=np.float64)
+        valid_prev = (base_lvl[:, :-1] > 0) & np.isfinite(base_lvl[:, :-1])
+        valid_curr = (base_lvl[:, 1:] > 0) & np.isfinite(base_lvl[:, 1:])
+        ok_ret = valid_prev & valid_curr & ~suspect_mask[:, 1:]
+        ret_1d[:, 1:][ok_ret] = base_lvl[:, 1:][ok_ret] / base_lvl[:, :-1][ok_ret] - 1.0
+        tensor[sl, :, 9] = ret_1d.astype(np.float32)
 
-    open_raw = tensor[:, :, 0].astype(np.float64)
-    high_raw = tensor[:, :, 1].astype(np.float64)
-    low_raw = tensor[:, :, 2].astype(np.float64)
-    close_raw = tensor[:, :, 3].astype(np.float64)
-    vol_raw = tensor[:, :, 4].astype(np.float64)
-    ok_intra = (
-        np.isfinite(open_raw)
-        & (open_raw > 0)
-        & np.isfinite(close_raw)
-        & (close_raw > 0)
-    )
-    intraday = np.full((n_assets, n_sessions), np.nan, dtype=np.float64)
-    intraday[ok_intra] = close_raw[ok_intra] / open_raw[ok_intra] - 1.0
-    tensor[:, :, 11] = intraday.astype(np.float32)
+        open_raw = tensor[sl, :, 0].astype(np.float64)
+        high_raw = tensor[sl, :, 1].astype(np.float64)
+        low_raw = tensor[sl, :, 2].astype(np.float64)
+        close_raw = tensor[sl, :, 3].astype(np.float64)
+        vol_raw = tensor[sl, :, 4].astype(np.float64)
+        ok_intra = (
+            np.isfinite(open_raw)
+            & (open_raw > 0)
+            & np.isfinite(close_raw)
+            & (close_raw > 0)
+        )
+        intraday = np.full((m, n_sessions), np.nan, dtype=np.float64)
+        intraday[ok_intra] = close_raw[ok_intra] / open_raw[ok_intra] - 1.0
+        tensor[sl, :, 11] = intraday.astype(np.float32)
 
-    ok_over = np.isfinite(ret_1d) & ok_intra & ((1.0 + intraday) > 0)
-    overnight = np.full((n_assets, n_sessions), np.nan, dtype=np.float64)
-    overnight[ok_over] = (1.0 + ret_1d[ok_over]) / (1.0 + intraday[ok_over]) - 1.0
-    tensor[:, :, 10] = overnight.astype(np.float32)
+        ok_over = np.isfinite(ret_1d) & ok_intra & ((1.0 + intraday) > 0)
+        overnight = np.full((m, n_sessions), np.nan, dtype=np.float64)
+        overnight[ok_over] = (1.0 + ret_1d[ok_over]) / (1.0 + intraday[ok_over]) - 1.0
+        tensor[sl, :, 10] = overnight.astype(np.float32)
 
-    # Dual quality masks:
-    # - bar_invalid: adjustment_suspect, missing/non-positive price level, or zero-volume zombie bar
-    # - bar_extreme: disputed-but-kept or genuine >50% single-day move (retained for risk modeling)
-    zero_vol = np.isfinite(vol_raw) & (vol_raw <= 0.0)
-    missing_lvl = ~(np.isfinite(base_lvl) & (base_lvl > 0.0))
-    bar_invalid = suspect_mask | zero_vol | missing_lvl
-    bar_extreme = (~bar_invalid) & (
-        disputed_mat | (np.isfinite(ret_1d) & (np.abs(ret_1d) > 0.50))
-    )
-    tensor[:, :, 14] = bar_invalid.astype(np.float32)
-    tensor[:, :, 15] = bar_extreme.astype(np.float32)
+        # Dual quality masks:
+        # - bar_invalid: adjustment_suspect, missing/non-positive price level, or zero-volume zombie bar
+        # - bar_extreme: disputed-but-kept or genuine >50% single-day move (retained for risk modeling)
+        zero_vol = np.isfinite(vol_raw) & (vol_raw <= 0.0)
+        missing_lvl = ~(np.isfinite(base_lvl) & (base_lvl > 0.0))
+        bar_invalid = suspect_mask | zero_vol | missing_lvl
+        bar_extreme = (~bar_invalid) & (
+            disputed_mat[sl] | (np.isfinite(ret_1d) & (np.abs(ret_1d) > 0.50))
+        )
+        tensor[sl, :, 14] = bar_invalid.astype(np.float32)
+        tensor[sl, :, 15] = bar_extreme.astype(np.float32)
 
-    # Split-invariant channels: log_dollar_volume, hl_range_ratio, open_close_ratio
-    dvol = np.full((n_assets, n_sessions), np.nan, dtype=np.float64)
-    ok_dv = (
-        np.isfinite(close_raw)
-        & (close_raw > 0.0)
-        & np.isfinite(vol_raw)
-        & (vol_raw >= 0.0)
-    )
-    dvol[ok_dv] = np.log1p(close_raw[ok_dv] * vol_raw[ok_dv])
-    tensor[:, :, 16] = dvol.astype(np.float32)
+        # Split-invariant channels: log_dollar_volume, hl_range_ratio, open_close_ratio
+        dvol = np.full((m, n_sessions), np.nan, dtype=np.float64)
+        ok_dv = (
+            np.isfinite(close_raw)
+            & (close_raw > 0.0)
+            & np.isfinite(vol_raw)
+            & (vol_raw >= 0.0)
+        )
+        dvol[ok_dv] = np.log1p(close_raw[ok_dv] * vol_raw[ok_dv])
+        tensor[sl, :, 16] = dvol.astype(np.float32)
 
-    hl_ratio = np.full((n_assets, n_sessions), np.nan, dtype=np.float64)
-    ok_hl = (
-        np.isfinite(high_raw)
-        & np.isfinite(low_raw)
-        & np.isfinite(close_raw)
-        & (close_raw > 0.0)
-        & (low_raw > 0.0)
-        & (high_raw >= low_raw)
-    )
-    hl_ratio[ok_hl] = (high_raw[ok_hl] - low_raw[ok_hl]) / close_raw[ok_hl]
-    tensor[:, :, 17] = hl_ratio.astype(np.float32)
+        hl_ratio = np.full((m, n_sessions), np.nan, dtype=np.float64)
+        ok_hl = (
+            np.isfinite(high_raw)
+            & np.isfinite(low_raw)
+            & np.isfinite(close_raw)
+            & (close_raw > 0.0)
+            & (low_raw > 0.0)
+            & (high_raw >= low_raw)
+        )
+        hl_ratio[ok_hl] = (high_raw[ok_hl] - low_raw[ok_hl]) / close_raw[ok_hl]
+        tensor[sl, :, 17] = hl_ratio.astype(np.float32)
 
-    oc_ratio = np.full((n_assets, n_sessions), np.nan, dtype=np.float64)
-    oc_ratio[ok_intra] = np.log(close_raw[ok_intra] / open_raw[ok_intra])
-    tensor[:, :, 18] = oc_ratio.astype(np.float32)
+        oc_ratio = np.full((m, n_sessions), np.nan, dtype=np.float64)
+        oc_ratio[ok_intra] = np.log(close_raw[ok_intra] / open_raw[ok_intra])
+        tensor[sl, :, 18] = oc_ratio.astype(np.float32)
+
+    del disputed_mat
 
     bench_idx = asset_pos.get(str(benchmark_id), -1) if benchmark_id else -1
     return PriceStore(
@@ -1483,6 +1499,61 @@ def _build_cik_asset_intervals(
     return intervals
 
 
+def _read_filtered_event_observations(
+    version: Any,
+    columns: Sequence[str],
+    *,
+    include_sources: Sequence[str] | None = None,
+    exclude_sources: Sequence[str] | None = None,
+) -> pd.DataFrame | None:
+    """Push source filtering into PyArrow dataset scanning so news rows never inflate RSS."""
+    if hasattr(version, "_parts") and hasattr(version, "_client"):
+        import pyarrow as pa
+        import pyarrow.dataset as pads
+
+        parts = version._parts("event_observations", None)
+        if not parts:
+            return pd.DataFrame()
+        paths = [str(version._client._part(item)) for item in parts]
+        ds = pads.dataset(paths, format="parquet")
+        avail = [c for c in columns if c in ds.schema.names]
+        filt = None
+        if "source" in ds.schema.names:
+            if include_sources is not None:
+                filt = pads.field("source").isin(list(include_sources))
+            elif exclude_sources is not None:
+                filt = ~pads.field("source").isin(list(exclude_sources))
+        scanner = ds.scanner(
+            columns=avail,
+            filter=filt,
+            batch_size=32_768,
+            batch_readahead=1,
+            fragment_readahead=1,
+        )
+        batches: list[pa.RecordBatch] = []
+        for batch in scanner.to_batches():
+            if batch.num_rows > 0:
+                batches.append(batch)
+        if not batches:
+            pa.default_memory_pool().release_unused()
+            return pd.DataFrame(columns=avail)
+        tbl = pa.Table.from_batches(batches)
+        del batches
+        df = tbl.to_pandas()
+        del tbl
+        pa.default_memory_pool().release_unused()
+        return df
+
+    obs = version.event_observations(columns=list(columns))
+    if obs is None or obs.empty or "source" not in obs.columns:
+        return obs
+    if include_sources is not None:
+        return obs[obs["source"].astype(str).isin(set(include_sources))]
+    if exclude_sources is not None:
+        return obs[~obs["source"].astype(str).isin(set(exclude_sources))]
+    return obs
+
+
 def build_event_store(
     version: Any,
     assets: Sequence[str],
@@ -1537,7 +1608,11 @@ def build_event_store(
             "public_at",
             "public_date",
         ]
-        obs = version.event_observations(columns=obs_cols)
+        obs = _read_filtered_event_observations(
+            version,
+            obs_cols,
+            exclude_sources=None if include_news else sorted(_NEWS_SOURCES),
+        )
         if obs is not None and not obs.empty:
             if "observation_sequence" in obs.columns:
                 obs = obs.sort_values("observation_sequence", kind="mergesort")

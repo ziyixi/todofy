@@ -758,31 +758,36 @@ def welch_beta_252d(
         else np.zeros(n_sess, dtype=np.float64)
     )
     rm = mkt - rf
-    ri = r_arr - rf[None, :]
-    if bar_invalid is not None:
-        bad = np.isfinite(bar_invalid) & (bar_invalid > 0.5)
-        ri = np.where(bad, np.nan, ri)
-
     lo = np.minimum(-2.0 * rm, 4.0 * rm)
     hi = np.maximum(-2.0 * rm, 4.0 * rm)
-    valid = np.isfinite(ri) & np.isfinite(rm)[None, :]
-    ri_w = np.where(valid, np.clip(ri, lo[None, :], hi[None, :]), 0.0)
-    x = np.where(valid, rm[None, :], 0.0)
-    v_num = valid.astype(np.float64)
-
+    rm_fin = np.isfinite(rm)[None, :]
+    rm_row = np.where(rm_fin, rm[None, :], 0.0)
     w = int(window)
     mp = max(2, int(min_periods))
-    cnt = _prefix_window_sums(v_num, w)
-    sx = _prefix_window_sums(x, w)
-    sy = _prefix_window_sums(ri_w, w)
-    sxx = _prefix_window_sums(x * x, w)
-    sxy = _prefix_window_sums(x * ri_w, w)
-
-    with np.errstate(invalid="ignore", divide="ignore"):
-        denom = sxx - (sx * sx) / cnt
-        numer = sxy - (sx * sy) / cnt
-        ok = (cnt >= mp) & (denom > 1e-12)
-        out[ok] = numer[ok] / denom[ok]
+    chunk = 256
+    for a0 in range(0, n_assets, chunk):
+        a1 = min(n_assets, a0 + chunk)
+        ri = r_arr[a0:a1] - rf[None, :]
+        if bar_invalid is not None:
+            bsub = bar_invalid[a0:a1]
+            bad = np.isfinite(bsub) & (bsub > 0.5)
+            ri = np.where(bad, np.nan, ri)
+        valid = np.isfinite(ri) & rm_fin
+        ri_w = np.where(valid, np.clip(ri, lo[None, :], hi[None, :]), 0.0)
+        x = np.where(valid, rm_row, 0.0)
+        v_num = valid.astype(np.float64)
+        cnt = _prefix_window_sums(v_num, w)
+        sx = _prefix_window_sums(x, w)
+        sy = _prefix_window_sums(ri_w, w)
+        sxx = _prefix_window_sums(x * x, w)
+        sxy = _prefix_window_sums(x * ri_w, w)
+        sub_out = np.full((a1 - a0, n_sess), np.nan, dtype=np.float64)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            denom = sxx - (sx * sx) / cnt
+            numer = sxy - (sx * sy) / cnt
+            ok = (cnt >= mp) & (denom > 1e-12)
+            sub_out[ok] = numer[ok] / denom[ok]
+        out[a0:a1] = sub_out
 
     # Cross-sectional median fallback per day for newly listed / <min_periods stocks
     for t in range(n_sess):
@@ -821,33 +826,39 @@ def residual_vol_63d(
         else np.zeros(n_sess, dtype=np.float64)
     )
     rm = mkt - rf
-    ri = r_arr - rf[None, :]
-    if bar_invalid is not None:
-        bad = np.isfinite(bar_invalid) & (bar_invalid > 0.5)
-        ri = np.where(bad, np.nan, ri)
-
-    valid = np.isfinite(ri) & np.isfinite(rm)[None, :]
-    x = np.where(valid, rm[None, :], 0.0)
-    y = np.where(valid, ri, 0.0)
-    v_num = valid.astype(np.float64)
-
+    rm_fin = np.isfinite(rm)[None, :]
+    rm_row = np.where(rm_fin, rm[None, :], 0.0)
     w = int(window)
     mp = max(2, int(min_periods))
-    cnt = _prefix_window_sums(v_num, w)
-    sx = _prefix_window_sums(x, w)
-    sy = _prefix_window_sums(y, w)
-    sxx = _prefix_window_sums(x * x, w)
-    syy = _prefix_window_sums(y * y, w)
-    sxy = _prefix_window_sums(x * y, w)
-
-    with np.errstate(invalid="ignore", divide="ignore"):
-        dof = cnt - 1.0
-        v_xx = (sxx - (sx * sx) / cnt) / dof
-        v_yy = (syy - (sy * sy) / cnt) / dof
-        c_xy = (sxy - (sx * sy) / cnt) / dof
-        ok = (cnt >= mp) & np.isfinite(b_arr)
-        resid_var = np.maximum(0.0, v_yy - 2.0 * b_arr * c_xy + (b_arr**2) * v_xx)
-        out[ok] = np.sqrt(resid_var[ok])
+    chunk = 256
+    for a0 in range(0, n_assets, chunk):
+        a1 = min(n_assets, a0 + chunk)
+        ri = r_arr[a0:a1] - rf[None, :]
+        if bar_invalid is not None:
+            bsub = bar_invalid[a0:a1]
+            bad = np.isfinite(bsub) & (bsub > 0.5)
+            ri = np.where(bad, np.nan, ri)
+        valid = np.isfinite(ri) & rm_fin
+        x = np.where(valid, rm_row, 0.0)
+        y = np.where(valid, ri, 0.0)
+        v_num = valid.astype(np.float64)
+        cnt = _prefix_window_sums(v_num, w)
+        sx = _prefix_window_sums(x, w)
+        sy = _prefix_window_sums(y, w)
+        sxx = _prefix_window_sums(x * x, w)
+        syy = _prefix_window_sums(y * y, w)
+        sxy = _prefix_window_sums(x * y, w)
+        b_sub = b_arr[a0:a1]
+        sub_out = np.full((a1 - a0, n_sess), np.nan, dtype=np.float64)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            dof = cnt - 1.0
+            v_xx = (sxx - (sx * sx) / cnt) / dof
+            v_yy = (syy - (sy * sy) / cnt) / dof
+            c_xy = (sxy - (sx * sy) / cnt) / dof
+            ok = (cnt >= mp) & np.isfinite(b_sub)
+            resid_var = np.maximum(0.0, v_yy - 2.0 * b_sub * c_xy + (b_sub**2) * v_xx)
+            sub_out[ok] = np.sqrt(resid_var[ok])
+        out[a0:a1] = sub_out
 
     if 0.0 < floor_quantile < 1.0:
         for t in range(n_sess):
@@ -988,14 +999,7 @@ def attach_risk_adjusted_labels(
     n_assets, n_sess = price_store.data.shape[0], price_store.data.shape[1]
     ret = price_store.channel("ret_1d").astype(np.float64)
     bar_inv = price_store.channel("bar_invalid").astype(np.float64)
-    close_raw = price_store.channel("close_raw").astype(np.float64)
-    vol_raw = price_store.channel("volume_raw").astype(np.float64)
-    tr_lvl = price_store.channel("tr_index").astype(np.float64)
-    adj_lvl = price_store.channel("close_adj").astype(np.float64)
-    has_tr = np.any(np.isfinite(tr_lvl) & (tr_lvl > 0.0), axis=1, keepdims=True)
-    lvl = np.where(has_tr, tr_lvl, adj_lvl)
     bad_mask = np.isfinite(bar_inv) & (bar_inv > 0.5)
-    lvl = np.where(bad_mask | ~(np.isfinite(lvl) & (lvl > 0.0)), np.nan, lvl)
 
     b_idx = price_store.benchmark_idx if benchmark_idx is None else int(benchmark_idx)
     if 0 <= b_idx < n_assets:
@@ -1033,6 +1037,7 @@ def attach_risk_adjusted_labels(
     rvol_row = np.full(n_rows, np.nan, dtype=np.float64)
     beta_row[in_bounds] = beta_mat[ai[in_bounds], si[in_bounds]]
     rvol_row[in_bounds] = rvol_mat[ai[in_bounds], si[in_bounds]]
+    del beta_mat, rvol_mat
     result["welch_beta_252d"] = beta_row
     result["resid_vol_63d"] = rvol_row
 
@@ -1052,38 +1057,64 @@ def attach_risk_adjusted_labels(
     log_rf_csum = np.zeros(n_sess + 1, dtype=np.float64)
     np.cumsum(np.log1p(np.clip(rf_arr, -0.5, 1.0)), out=log_rf_csum[1:])
 
-    # Trailing 21d mean dollar volume & prefix sums for forward relative dollar volume
-    ok_dv = (
-        ~bad_mask
-        & np.isfinite(close_raw)
-        & (close_raw > 0.0)
-        & np.isfinite(vol_raw)
-        & (vol_raw >= 0.0)
-    )
-    dvol = np.where(ok_dv, close_raw * vol_raw, 0.0)
-    dv_cnt_csum = np.zeros((n_assets, n_sess + 1), dtype=np.int32)
-    dv_sum_csum = np.zeros((n_assets, n_sess + 1), dtype=np.float64)
-    np.cumsum(ok_dv.astype(np.int32), axis=1, out=dv_cnt_csum[:, 1:])
-    np.cumsum(dvol, axis=1, out=dv_sum_csum[:, 1:])
-
-    # Prefix sums of daily excess returns & market excess returns for forward residual vol
+    # Prefix sums of daily excess returns & market excess returns (chunked to limit peak RAM)
     rm = mkt_ret - rf_arr
-    ri = np.where(bad_mask, np.nan, ret - rf_arr[None, :])
-    rv_ok = np.isfinite(ri) & np.isfinite(rm)[None, :]
-    rx = np.where(rv_ok, rm[None, :], 0.0)
-    ry = np.where(rv_ok, ri, 0.0)
+    rm_fin = np.isfinite(rm)[None, :]
+    rm_row = np.where(rm_fin, rm[None, :], 0.0)
     rc_csum = np.zeros((n_assets, n_sess + 1), dtype=np.int32)
     rx_csum = np.zeros((n_assets, n_sess + 1), dtype=np.float64)
     ry_csum = np.zeros((n_assets, n_sess + 1), dtype=np.float64)
     rxx_csum = np.zeros((n_assets, n_sess + 1), dtype=np.float64)
     ryy_csum = np.zeros((n_assets, n_sess + 1), dtype=np.float64)
     rxy_csum = np.zeros((n_assets, n_sess + 1), dtype=np.float64)
-    np.cumsum(rv_ok.astype(np.int32), axis=1, out=rc_csum[:, 1:])
-    np.cumsum(rx, axis=1, out=rx_csum[:, 1:])
-    np.cumsum(ry, axis=1, out=ry_csum[:, 1:])
-    np.cumsum(rx * rx, axis=1, out=rxx_csum[:, 1:])
-    np.cumsum(ry * ry, axis=1, out=ryy_csum[:, 1:])
-    np.cumsum(rx * ry, axis=1, out=rxy_csum[:, 1:])
+    chunk = 256
+    for a0 in range(0, n_assets, chunk):
+        a1 = min(n_assets, a0 + chunk)
+        ri = np.where(bad_mask[a0:a1], np.nan, ret[a0:a1] - rf_arr[None, :])
+        rv_ok = np.isfinite(ri) & rm_fin
+        rx = np.where(rv_ok, rm_row, 0.0)
+        ry = np.where(rv_ok, ri, 0.0)
+        np.cumsum(rv_ok.astype(np.int32), axis=1, out=rc_csum[a0:a1, 1:])
+        np.cumsum(rx, axis=1, out=rx_csum[a0:a1, 1:])
+        np.cumsum(ry, axis=1, out=ry_csum[a0:a1, 1:])
+        np.cumsum(rx * rx, axis=1, out=rxx_csum[a0:a1, 1:])
+        np.cumsum(ry * ry, axis=1, out=ryy_csum[a0:a1, 1:])
+        np.cumsum(rx * ry, axis=1, out=rxy_csum[a0:a1, 1:])
+    del ret, bar_inv
+
+    # Trailing 21d mean dollar volume & prefix sums (chunked)
+    dv_cnt_csum = np.zeros((n_assets, n_sess + 1), dtype=np.int32)
+    dv_sum_csum = np.zeros((n_assets, n_sess + 1), dtype=np.float64)
+    close_ch = price_store.channel("close_raw")
+    vol_ch = price_store.channel("volume_raw")
+    for a0 in range(0, n_assets, chunk):
+        a1 = min(n_assets, a0 + chunk)
+        c_sub = close_ch[a0:a1].astype(np.float64)
+        v_sub = vol_ch[a0:a1].astype(np.float64)
+        ok_dv = (
+            ~bad_mask[a0:a1]
+            & np.isfinite(c_sub)
+            & (c_sub > 0.0)
+            & np.isfinite(v_sub)
+            & (v_sub >= 0.0)
+        )
+        dvol = np.where(ok_dv, c_sub * v_sub, 0.0)
+        np.cumsum(ok_dv.astype(np.int32), axis=1, out=dv_cnt_csum[a0:a1, 1:])
+        np.cumsum(dvol, axis=1, out=dv_sum_csum[a0:a1, 1:])
+
+    # Clean level matrix (float32 suffices for drawdown ratios, 50% smaller)
+    tr_ch = price_store.channel("tr_index")
+    adj_ch = price_store.channel("close_adj")
+    lvl = np.full((n_assets, n_sess), np.nan, dtype=np.float32)
+    for a0 in range(0, n_assets, chunk):
+        a1 = min(n_assets, a0 + chunk)
+        tr_sub = tr_ch[a0:a1]
+        adj_sub = adj_ch[a0:a1]
+        has_tr = np.any(np.isfinite(tr_sub) & (tr_sub > 0.0), axis=1, keepdims=True)
+        sub_l = np.where(has_tr, tr_sub, adj_sub)
+        bad_l = bad_mask[a0:a1] | ~(np.isfinite(sub_l) & (sub_l > 0.0))
+        lvl[a0:a1] = np.where(bad_l, np.nan, sub_l).astype(np.float32)
+    del bad_mask
 
     is_bench = (
         anchors_frame["is_benchmark"].fillna(False).to_numpy(dtype=bool)

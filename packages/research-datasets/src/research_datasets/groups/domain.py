@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import importlib
 import math
 from collections.abc import Mapping, Sequence
@@ -9,6 +10,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 
 from .. import candidates as _candidates
 from .. import clocks
@@ -593,6 +595,10 @@ def build_valuation_dynamic(
                     vals[fin_sub] = np.nan
                 data[f"val_{name}"][pos] = vals
             del val_df
+            if hasattr(ctx.version, "clear_cache"):
+                ctx.version.clear_cache()
+            gc.collect()
+            pa.default_memory_pool().release_unused()
     if "val_market_cap_issuer" in data:
         ctx.set_mcap_cache(data["val_market_cap_issuer"])
     return pd.DataFrame(data, index=af.index)
@@ -765,6 +771,10 @@ def build_earnings_pead_sue(
                         arr[stale_mask] = np.nan
                     data[col][pos] = arr
             del q_ledger, raw_df, sue_df
+        if hasattr(ctx.version, "clear_cache"):
+            ctx.version.clear_cache()
+        gc.collect()
+        pa.default_memory_pool().release_unused()
 
     # Causal latest SEC filing post-1d/3d reaction strictly masked by reaction_ready_mask
     ev_store = ctx.stores.events
@@ -835,8 +845,11 @@ def build_sec_typed_events(
         and not _candidates.flagged(r)
         and str(r["asset_id"]) != str(ctx.benchmark_id)
     ]
-    obs = ctx.version.event_observations(
-        columns=list(
+    from ..stores import _read_filtered_event_observations
+
+    obs = _read_filtered_event_observations(
+        ctx.version,
+        list(
             dict.fromkeys(
                 [
                     "source",
@@ -858,7 +871,8 @@ def build_sec_typed_events(
                     "story_key",
                 ]
             )
-        )
+        ),
+        include_sources=("sec",),
     )
     checks = ctx.version.source_checks(assets)
     cal = ctx.calendar
@@ -882,6 +896,7 @@ def build_sec_typed_events(
         signal_days=cal.days[first : last + 1],
     )
     data = _reindex_event_grid(ev_df, assets, signals, af, _SEC_TYPED_CORE_COLS)
+    del obs, checks, ev_df
     return pd.DataFrame(data, index=af.index)
 
 
@@ -1261,6 +1276,10 @@ def _run_extra_numeric(
                     dtype=np.float32
                 )
         del part
+        if hasattr(ctx.version, "clear_cache"):
+            ctx.version.clear_cache()
+        gc.collect()
+        pa.default_memory_pool().release_unused()
     return pd.DataFrame(data, index=af.index)
 
 
@@ -1348,6 +1367,10 @@ def build_llm_release_guidance(
                     arr[stale] = np.nan
                 data[col][pos] = arr
         del rel
+        if hasattr(ctx.version, "clear_cache"):
+            ctx.version.clear_cache()
+        gc.collect()
+        pa.default_memory_pool().release_unused()
     return pd.DataFrame(data, index=af.index)
 
 

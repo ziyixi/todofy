@@ -15,9 +15,10 @@ import gc
 import hashlib
 import json
 import math
+import shutil
 import sys
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -538,15 +539,336 @@ def _read_zstd_tensor_shards(
     return out
 
 
+def _transform_tier1_column(
+    raw_name: str,
+    raw_series: pd.Series | np.ndarray,
+    *,
+    sessions: np.ndarray,
+    ind_codes: np.ndarray,
+    cs_mask: np.ndarray,
+) -> tuple[str, str, np.ndarray | None]:
+    """Run Tier-1 single-date transform on one raw feature column.
+
+    Returns ``(out_name, col_type, float32_array_or_None)``. ``None`` means dropped.
+    """
+    if raw_name in _TYPE_B_DROP_COLS:
+        return str(raw_name), "dropped", None
+
+    arr = pd.to_numeric(raw_series, errors="coerce").to_numpy(dtype=np.float64)
+    out_name = _INVERT_MULTIPLES.get(str(raw_name), str(raw_name))
+    if raw_name in _INVERT_MULTIPLES:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            arr = np.where(np.isfinite(arr) & (np.abs(arr) > 1e-6), 1.0 / arr, np.nan)
+
+    arr = _clip_physical_domain(out_name, arr)
+
+    # Drop strictly empty (0% finite) placeholder columns.
+    if out_name != "ind_ff12_code" and not np.any(np.isfinite(arr)):
+        return out_name, "dropped", None
+
+    ctype = _classify_feature(out_name)
+    if ctype == "categorical":
+        return "ind_ff12_code", "categorical", ind_codes.astype(np.float32)
+    if ctype == "tier1_a1":
+        gr = gauss_rank_cross_section(arr, sessions, cs_mask)
+        return (
+            out_name,
+            "tier1_a1",
+            np.where(np.isfinite(gr), gr, 0.0).astype(np.float32),
+        )
+    if ctype == "tier1_a2":
+        gr = _sector_gauss_rank(arr, sessions, ind_codes, cs_mask)
+        return (
+            out_name,
+            "tier1_a2",
+            np.where(np.isfinite(gr), gr, 0.0).astype(np.float32),
+        )
+    return out_name, ctype, arr.astype(np.float32)
+
+
+def _stream_tier1_x_shards(
+    ordered_groups: Sequence[tuple[str, str, Sequence[str]]],
+    anchors_df: pd.DataFrame,
+    out_dir: Path,
+    *,
+    x_rows_per_part: int,
+    on_progress: Callable[[str, str, int, int], None] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+) -> tuple[list[dict[str, Any]], int, int, list[str], dict[str, list[str]]]:
+    """Stream per-group part Parquets into Zstd Tier-1 ``x_tier1_part-*.parquet`` shards.
+
+    Holds only one feature group (~30 MB) during Tier-1 transforms and one row-slice
+    (~220 MB for 200k rows) during shard assembly, producing output identical to
+    ``build_tier1_features(mat.X, anchors_df)``.
+    """
+    n = len(anchors_df)
+    col_types: dict[str, list[str]] = {
+        "tier1_a1": [],
+        "tier1_a2": [],
+        "tier2_c_sparse": [],
+        "tier2_c_binary": [],
+        "tier2_d_macro": [],
+        "categorical": [],
+        "dropped": [],
+    }
+    step = max(1, int(x_rows_per_part))
+    if n == 0:
+        empty_tbl = pa.table({})
+        fname = "x_tier1_part-00000.parquet"
+        fpath = out_dir / fname
+        pq.write_table(empty_tbl, fpath, compression="zstd", compression_level=6)
+        sha, size = _sha256_file(fpath)
+        return (
+            [
+                {
+                    "filename": fname,
+                    "start_row": 0,
+                    "end_row": 0,
+                    "rows": 0,
+                    "sha256": sha,
+                    "size_bytes": size,
+                }
+            ],
+            0,
+            0,
+            [],
+            col_types,
+        )
+
+    sessions = np.array(
+        [clocks.day(d).toordinal() for d in anchors_df["signal_session"]],
+        dtype=np.int32,
+    )
+    in_uni = (
+        anchors_df["in_universe"].fillna(True).to_numpy(dtype=bool)
+        if "in_universe" in anchors_df.columns
+        else np.ones(n, dtype=bool)
+    )
+    is_bench = (
+        anchors_df["is_benchmark"].fillna(False).to_numpy(dtype=bool)
+        if "is_benchmark" in anchors_df.columns
+        else np.zeros(n, dtype=bool)
+    )
+    cs_mask = in_uni & ~is_bench
+
+    # Resolve FF12 industry codes once before transforming any group.
+    ind_codes = np.full(n, 12, dtype=np.int32)
+    for _gname, p_path, kept_cols in ordered_groups:
+        if "ind_ff12_code" in kept_cols:
+            ind_tbl = pq.read_table(p_path, columns=["ind_ff12_code"])
+            raw_ind = pd.to_numeric(
+                ind_tbl.column(0).to_pandas(), errors="coerce"
+            ).to_numpy(dtype=np.float64)
+            ok_ind = np.isfinite(raw_ind) & (raw_ind >= 0) & (raw_ind < 12)
+            ind_codes = np.where(ok_ind, np.nan_to_num(raw_ind, nan=12.0), 12.0).astype(
+                np.int32
+            )
+            del ind_tbl, raw_ind
+            break
+
+    # Identify redundant *_age_days columns across groups to collapse into one `fund_age_days`.
+    fund_age_sources: list[tuple[str, list[str]]] = []
+    fund_age_set: set[str] = set()
+    for _gname, p_path, kept_cols in ordered_groups:
+        age_in_group = [
+            c
+            for c in kept_cols
+            if c.endswith("_age_days")
+            and c not in {"earn_sue_age_days", "txt_age_days", "fund_age_days"}
+        ]
+        if age_in_group:
+            fund_age_sources.append((p_path, age_in_group))
+            fund_age_set.update(age_in_group)
+
+    tmp_dir = out_dir / ".tier1_stream_tmp"
+    if tmp_dir.exists():
+        shutil.rmtree(tmp_dir)
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    temp_files: list[Path] = []
+    tier1_columns: list[str] = []
+    emitted_cols: set[str] = set()
+    n_groups = len(ordered_groups)
+    n_shards = (n + step - 1) // step
+
+    try:
+        # 1. Collapsed `fund_age_days` column (emitted first, matching build_tier1_features).
+        if fund_age_sources:
+            f_age = np.full(n, np.nan, dtype=np.float64)
+            for p_path, age_cols in fund_age_sources:
+                age_tbl = pq.read_table(p_path, columns=age_cols)
+                for col_i in range(age_tbl.num_columns):
+                    vals = pd.to_numeric(
+                        age_tbl.column(col_i).to_pandas(), errors="coerce"
+                    ).to_numpy(dtype=np.float64)
+                    fin = np.isfinite(vals)
+                    if fin.any():
+                        take = fin & (~np.isfinite(f_age) | (vals < f_age))
+                        f_age[take] = vals[take]
+                del age_tbl
+            f_age_out = np.where(
+                np.isfinite(f_age), np.maximum(f_age, 0.0), np.nan
+            ).astype(np.float32)
+            age_tmp = tmp_dir / "g_000_fund_age.parquet"
+            pq.write_table(
+                pa.table({"fund_age_days": pa.array(f_age_out, type=pa.float32())}),
+                age_tmp,
+                row_group_size=step,
+                compression="snappy",
+            )
+            temp_files.append(age_tmp)
+            tier1_columns.append("fund_age_days")
+            emitted_cols.add("fund_age_days")
+            col_types["tier2_c_sparse"].append("fund_age_days")
+            del f_age, f_age_out
+
+        # 2. Stream each feature group part through Tier-1 and flush as aligned row-groups.
+        for g_idx, (gname, p_path, kept_cols) in enumerate(ordered_groups):
+            if cancel_check is not None and cancel_check():
+                raise RuntimeError("MATERIALIZE_CANCELLED")
+            if on_progress is not None:
+                on_progress(
+                    "writing_training_bundle",
+                    f"tier1:{gname}",
+                    g_idx + 1,
+                    n_groups + n_shards,
+                )
+            if not kept_cols:
+                continue
+            read_cols = [
+                c
+                for c in kept_cols
+                if c not in _TYPE_B_DROP_COLS and c not in fund_age_set
+            ]
+            # Record dropped columns in exact column order.
+            if not read_cols:
+                for raw_name in kept_cols:
+                    col_types["dropped"].append(str(raw_name))
+                continue
+            part_tbl = pq.read_table(p_path, columns=read_cols)
+            col_lookup = {name: i for i, name in enumerate(part_tbl.schema.names)}
+            arrays_out: dict[str, pa.Array] = {}
+            for raw_name in kept_cols:
+                if raw_name in _TYPE_B_DROP_COLS or raw_name in fund_age_set:
+                    col_types["dropped"].append(str(raw_name))
+                    continue
+                raw_s = part_tbl.column(col_lookup[raw_name]).to_pandas()
+                out_name, ctype, out_arr = _transform_tier1_column(
+                    str(raw_name),
+                    raw_s,
+                    sessions=sessions,
+                    ind_codes=ind_codes,
+                    cs_mask=cs_mask,
+                )
+                del raw_s
+                if out_arr is None:
+                    col_types["dropped"].append(out_name)
+                    continue
+                if out_name not in emitted_cols:
+                    tier1_columns.append(out_name)
+                    emitted_cols.add(out_name)
+                    col_types[ctype].append(out_name)
+                arrays_out[out_name] = pa.array(out_arr, type=pa.float32())
+                del out_arr
+            del part_tbl
+            if arrays_out:
+                g_tmp = tmp_dir / f"g_{g_idx + 1:03d}_{gname}.parquet"
+                pq.write_table(
+                    pa.table(arrays_out),
+                    g_tmp,
+                    row_group_size=step,
+                    compression="snappy",
+                )
+                temp_files.append(g_tmp)
+            del arrays_out
+            gc.collect()
+            pa.default_memory_pool().release_unused()
+
+        if "ind_ff12_code" not in emitted_cols:
+            ind_tmp = tmp_dir / "g_999_ind.parquet"
+            pq.write_table(
+                pa.table(
+                    {
+                        "ind_ff12_code": pa.array(
+                            ind_codes.astype(np.float32), type=pa.float32()
+                        )
+                    }
+                ),
+                ind_tmp,
+                row_group_size=step,
+                compression="snappy",
+            )
+            temp_files.append(ind_tmp)
+            tier1_columns.append("ind_ff12_code")
+            emitted_cols.add("ind_ff12_code")
+            col_types["categorical"].append("ind_ff12_code")
+
+        # 3. Assemble final Zstd-compressed x_tier1_part-*.parquet one 200k-row slice at a time.
+        x_parts: list[dict[str, Any]] = []
+        readers = [pq.ParquetFile(p) for p in temp_files]
+        for part_i, lo in enumerate(range(0, n, step)):
+            if cancel_check is not None and cancel_check():
+                raise RuntimeError("MATERIALIZE_CANCELLED")
+            hi = min(n, lo + step)
+            fname = f"x_tier1_part-{part_i:05d}.parquet"
+            if on_progress is not None:
+                on_progress(
+                    "writing_training_bundle",
+                    fname,
+                    n_groups + part_i + 1,
+                    n_groups + n_shards,
+                )
+            col_arrays: dict[str, pa.ChunkedArray] = {}
+            for rdr in readers:
+                rg_tbl = rdr.read_row_group(part_i)
+                for col_name, col_arr in zip(
+                    rg_tbl.schema.names, rg_tbl.columns, strict=True
+                ):
+                    col_arrays[col_name] = col_arr
+                del rg_tbl
+            ordered_names = [c for c in tier1_columns if c in col_arrays]
+            chunk_tbl = pa.table(
+                [col_arrays[c] for c in ordered_names], names=ordered_names
+            )
+            fpath = out_dir / fname
+            pq.write_table(
+                chunk_tbl,
+                fpath,
+                compression="zstd",
+                compression_level=6,
+            )
+            sha, size = _sha256_file(fpath)
+            x_parts.append(
+                {
+                    "filename": fname,
+                    "start_row": int(lo),
+                    "end_row": int(hi),
+                    "rows": int(hi - lo),
+                    "sha256": sha,
+                    "size_bytes": size,
+                }
+            )
+            del col_arrays, chunk_tbl
+            gc.collect()
+            pa.default_memory_pool().release_unused()
+        del readers
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    return x_parts, n, len(tier1_columns), tier1_columns, col_types
+
+
 def build_server_training_bundle(
     dataset: Any,
     output_dir: str | Path,
     *,
     recipe_yaml: str | Mapping[str, Any] | None = None,
+    cache_dir: str | Path | None = None,
     benchmark: str = "SPY",
     universe: str = "pit",
     x_rows_per_part: int = 200_000,
     price_shard_raw_bytes: int = 96 * 1024 * 1024,
+    on_progress: Callable[[str, str, int, int], None] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Materialize a frozen dataset and emit compact Zstd-compressed server ``training/`` shards."""
     out_dir = Path(output_dir)
@@ -568,10 +890,14 @@ def build_server_training_bundle(
     mat = materialize(
         dataset,
         recipe_yaml=norm_yaml,
+        cache_dir=cache_dir,
         benchmark=eff_benchmark,
         universe=universe,
         include_stores=True,
         include_labels=True,
+        return_matrix=False,
+        on_progress=on_progress,
+        cancel_check=cancel_check,
     )
     assert mat.stores is not None and mat.y is not None
     horizons = tuple(
@@ -581,10 +907,13 @@ def build_server_training_bundle(
     anc_order_sha = str(mat.anchors.order_sha256)
     anc_sampling = str(mat.anchors.sampling)
     anc_time_policy = str(mat.anchors.time_policy)
+    ordered_groups = list(mat.report.get("ordered_groups") or ())
     pstore = mat.stores.prices
     mstore = mat.stores.macro
 
     # 1. Anchors parquet
+    if on_progress is not None:
+        on_progress("writing_training_bundle", "anchors.parquet", 1, 4)
     anc_df = anc_frame.copy()
     anc_df["asset_id"] = anc_df["asset_id"].astype(str)
     anc_df["signal_session"] = [
@@ -605,6 +934,8 @@ def build_server_training_bundle(
     del anc_df
 
     # 2. Compact labels parquet — write & immediately free mat.y
+    if on_progress is not None:
+        on_progress("writing_training_bundle", "labels.parquet", 2, 4)
     y_compact = _compact_labels_frame(mat.y, horizons)
     label_columns = list(y_compact.columns)
     y_path = out_dir / "labels.parquet"
@@ -621,7 +952,9 @@ def build_server_training_bundle(
     pa.default_memory_pool().release_unused()
 
     # 3. Write MacroStore & PriceStore shards BEFORE Tier-1 X and release all Stores
-    # (PriceStore + FundStore + EventStore + MacroStore) to cut peak RSS by >1 GiB.
+    # (PriceStore + FundStore + EventStore + MacroStore) to keep peak RSS well under 2 GiB.
+    if on_progress is not None:
+        on_progress("writing_training_bundle", "macro_store.parquet", 3, 4)
     price_shape = [int(d) for d in pstore.data.shape]
     price_channels = list(pstore.channels)
     price_assets = list(pstore.assets)
@@ -645,6 +978,8 @@ def build_server_training_bundle(
     m_sha, m_size = _sha256_file(m_path)
     del macro_df
 
+    if on_progress is not None:
+        on_progress("writing_training_bundle", "price_store.bin.zst", 4, 4)
     price_shards = _write_zstd_tensor_shards(
         pstore.data,
         out_dir,
@@ -656,40 +991,17 @@ def build_server_training_bundle(
     gc.collect()
     pa.default_memory_pool().release_unused()
 
-    # 4. Tier-1 X shards — build, write, and immediately free mat.X & x_tier1
-    x_tier1, col_types = build_tier1_features(mat.X, anc_frame)
-    mat.X = pd.DataFrame()
-    gc.collect()
-    x_parts: list[dict[str, Any]] = []
-    n_rows = len(x_tier1)
-    n_features_tier1 = int(x_tier1.shape[1])
-    tier1_columns = list(x_tier1.columns)
-    step = max(1, int(x_rows_per_part))
-    for part_i, lo in enumerate(range(0, max(1, n_rows), step)):
-        hi = min(n_rows, lo + step)
-        sub_x = x_tier1.iloc[lo:hi]
-        fname = f"x_tier1_part-{part_i:05d}.parquet"
-        fpath = out_dir / fname
-        pq.write_table(
-            pa.Table.from_pandas(sub_x, preserve_index=False),
-            fpath,
-            compression="zstd",
-            compression_level=6,
+    # 4. Streaming per-group Tier-1 X shards (never materializes full monolithic X in RAM)
+    x_parts, n_rows, n_features_tier1, tier1_columns, col_types = (
+        _stream_tier1_x_shards(
+            ordered_groups,
+            anc_frame,
+            out_dir,
+            x_rows_per_part=x_rows_per_part,
+            on_progress=on_progress,
+            cancel_check=cancel_check,
         )
-        sha, size = _sha256_file(fpath)
-        x_parts.append(
-            {
-                "filename": fname,
-                "start_row": int(lo),
-                "end_row": int(hi),
-                "rows": int(hi - lo),
-                "sha256": sha,
-                "size_bytes": size,
-            }
-        )
-    del x_tier1
-    gc.collect()
-    pa.default_memory_pool().release_unused()
+    )
 
     bundle_id = f"tb-v1-{r_sha[:12]}"
     bundle_meta: dict[str, Any] = {
