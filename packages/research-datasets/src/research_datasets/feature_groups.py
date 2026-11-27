@@ -12,6 +12,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 
 from . import candidates as _candidates
 from . import fundamentals_derived as _fund
@@ -145,9 +146,9 @@ class GroupBuildContext:
         return self._samples_cache
 
     def asset_batches(
-        self, *, batch_size: int = 1500, chunk_threshold: int = 1_500_000
+        self, *, batch_size: int = 256, chunk_threshold: int = 100_000
     ) -> list[tuple[list[str], np.ndarray]]:
-        """Group sample row positions into asset batches on large daily panels."""
+        """Group sample row positions into CIK-coherent asset batches on large panels."""
         key = (int(batch_size), int(chunk_threshold))
         if key not in self._batches_cache:
             samples = self.samples
@@ -161,14 +162,40 @@ class GroupBuildContext:
                     (unique_assets, np.arange(len(samples), dtype=np.int64))
                 ]
             else:
+                cik_map: dict[str, str] = {}
+                for rec in _candidates.records(self.version.universe):
+                    aid_u = str(rec.get("asset_id") or "")
+                    cik_u = str(rec.get("cik") or "").strip()
+                    if aid_u and cik_u:
+                        cik_map[aid_u] = cik_u.zfill(10)
+                # Group share-class siblings of the same CIK so valuation issuer mcap is exact.
+                cik_groups: dict[str, list[str]] = {}
+                for aid in sorted(
+                    unique_assets, key=lambda a: (cik_map.get(a, "9999999999"), a)
+                ):
+                    gkey = cik_map.get(aid) or f"asset:{aid}"
+                    cik_groups.setdefault(gkey, []).append(aid)
+
                 batches: list[tuple[list[str], np.ndarray]] = []
-                for i in range(0, len(unique_assets), batch_size):
-                    sub_assets = unique_assets[i : i + batch_size]
+                cur_assets: list[str] = []
+                for members in cik_groups.values():
+                    if cur_assets and len(cur_assets) + len(members) > batch_size:
+                        pos = np.concatenate(
+                            [
+                                np.asarray(by_asset[a], dtype=np.int64)
+                                for a in cur_assets
+                            ]
+                        )
+                        pos.sort()
+                        batches.append((cur_assets, pos))
+                        cur_assets = []
+                    cur_assets.extend(members)
+                if cur_assets:
                     pos = np.concatenate(
-                        [np.asarray(by_asset[a], dtype=np.int64) for a in sub_assets]
+                        [np.asarray(by_asset[a], dtype=np.int64) for a in cur_assets]
                     )
                     pos.sort()
-                    batches.append((sub_assets, pos))
+                    batches.append((cur_assets, pos))
                 self._batches_cache[key] = batches
         return self._batches_cache[key]
 
@@ -193,12 +220,31 @@ class GroupBuildContext:
                 "fy": max(460, int(stale_days)),
             }
             samples = self.samples
-            # Run normalize_facts + fundamental_states in a single pass up to 3.5M rows
-            # to avoid re-parsing millions of raw facts multiple times.
-            batches = self.asset_batches(batch_size=3000, chunk_threshold=3_500_000)
-            if len(batches) > 1 and "fundamentals" in self.families:
+            # Group into CIK-ordered ~256-asset batches on large panels so raw SEC
+            # FactVersion/StateRow working sets stay bounded (< 300 MB) and each batch
+            # reads a nearly disjoint slice of CIK-indexed fundamentals Parquet parts.
+            if len(samples) > 100_000 and "fundamentals" in self.families:
+                aids = samples["asset_id"].astype(str).tolist()
+                by_asset: dict[str, list[int]] = {}
+                for idx_r, aid in enumerate(aids):
+                    by_asset.setdefault(aid, []).append(idx_r)
+                cik_map: dict[str, str] = {}
+                for rec in _candidates.records(self.version.universe):
+                    aid_u = str(rec.get("asset_id") or "")
+                    cik_u = str(rec.get("cik") or "").strip().zfill(10)
+                    if aid_u:
+                        cik_map[aid_u] = cik_u
+                ordered_assets = sorted(
+                    by_asset, key=lambda a: (cik_map.get(a, "9999999999"), a)
+                )
+                batch_sz = 256
                 chunks: list[pd.DataFrame] = []
-                for _sub_assets, pos in batches:
+                for i in range(0, len(ordered_assets), batch_sz):
+                    sub_assets = ordered_assets[i : i + batch_sz]
+                    pos = np.concatenate(
+                        [np.asarray(by_asset[a], dtype=np.int64) for a in sub_assets]
+                    )
+                    pos.sort()
                     sub_d = _fund.derived_fundamentals(
                         self.version,
                         samples.iloc[pos],
@@ -206,9 +252,17 @@ class GroupBuildContext:
                         stale_after_days=stale_map,
                         provenance=False,
                     )
+                    for col_n in sub_d.columns:
+                        if col_n.endswith("_age_days"):
+                            sub_d[col_n] = sub_d[col_n].astype(np.float32)
                     chunks.append(sub_d)
+                    if hasattr(self.version, "clear_cache"):
+                        self.version.clear_cache()
+                    gc.collect()
+                    pa.default_memory_pool().release_unused()
                 df = pd.concat(chunks, axis=0).reindex(samples.index)
                 del chunks
+                gc.collect()
             else:
                 df = _fund.derived_fundamentals(
                     self.version,

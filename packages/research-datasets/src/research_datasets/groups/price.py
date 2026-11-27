@@ -44,85 +44,98 @@ def _suspect_prefix(prices: PriceStore) -> np.ndarray:
 def _rolling_mean(
     arr: np.ndarray, window: int, min_periods: int | None = None
 ) -> np.ndarray:
-    """Fast causal rolling mean over axis=1 for ``[N_assets, T_sessions]`` float64."""
+    """Fast causal rolling mean over axis=1 for ``[N_assets, T_sessions]`` float64 (chunked)."""
     w = int(window)
     mp = w if min_periods is None else max(1, min(w, int(min_periods)))
     n_assets, n_sess = arr.shape
     out = np.full((n_assets, n_sess), np.nan, dtype=np.float64)
-    if w <= 0 or n_sess == 0:
+    if w <= 0 or n_sess == 0 or n_assets == 0:
         return out
-    finite = np.isfinite(arr)
-    filled = np.where(finite, arr, 0.0)
-    csum = np.zeros((n_assets, n_sess + 1), dtype=np.float64)
-    ccnt = np.zeros((n_assets, n_sess + 1), dtype=np.int32)
-    np.cumsum(filled, axis=1, out=csum[:, 1:])
-    np.cumsum(finite.astype(np.int32), axis=1, out=ccnt[:, 1:])
     if w == 1:
-        return np.where(finite, arr, np.nan)
-    # Exact causal window [t - w + 1 .. t] using padded prefix
-    if n_sess >= 1:
-        left_s = np.zeros((n_assets, n_sess), dtype=np.float64)
-        left_c = np.zeros((n_assets, n_sess), dtype=np.int32)
+        finite = np.isfinite(arr)
+        out[finite] = arr[finite]
+        return out
+    chunk = 256
+    for a0 in range(0, n_assets, chunk):
+        a1 = min(n_assets, a0 + chunk)
+        sub = arr[a0:a1]
+        m = a1 - a0
+        finite = np.isfinite(sub)
+        filled = np.where(finite, sub, 0.0)
+        csum = np.zeros((m, n_sess + 1), dtype=np.float64)
+        ccnt = np.zeros((m, n_sess + 1), dtype=np.int32)
+        np.cumsum(filled, axis=1, out=csum[:, 1:])
+        np.cumsum(finite.astype(np.int32), axis=1, out=ccnt[:, 1:])
+        win_s = csum[:, 1:].copy()
+        win_c = ccnt[:, 1:].copy()
         if n_sess > w:
-            left_s[:, w:] = csum[:, 1 : n_sess - w + 1]
-            left_c[:, w:] = ccnt[:, 1 : n_sess - w + 1]
-        win_s = csum[:, 1:] - left_s
-        win_c = ccnt[:, 1:] - left_c
+            win_s[:, w:] -= csum[:, 1 : n_sess - w + 1]
+            win_c[:, w:] -= ccnt[:, 1 : n_sess - w + 1]
         ok = win_c >= mp
-        out[ok] = win_s[ok] / win_c[ok]
+        res = np.full((m, n_sess), np.nan, dtype=np.float64)
+        res[ok] = win_s[ok] / win_c[ok]
+        out[a0:a1] = res
     return out
 
 
 def _rolling_std(
     arr: np.ndarray, window: int, min_periods: int | None = None
 ) -> np.ndarray:
-    """Fast causal rolling sample std (ddof=1) over axis=1."""
+    """Fast causal rolling sample std (ddof=1) over axis=1 (256-asset chunked)."""
     w = int(window)
     mp = max(2, w if min_periods is None else min(w, int(min_periods)))
     n_assets, n_sess = arr.shape
     out = np.full((n_assets, n_sess), np.nan, dtype=np.float64)
-    if w < 2 or n_sess == 0:
+    if w < 2 or n_sess == 0 or n_assets == 0:
         return out
-    finite = np.isfinite(arr)
-    filled = np.where(finite, arr, 0.0)
-    csum = np.zeros((n_assets, n_sess + 1), dtype=np.float64)
-    csum2 = np.zeros((n_assets, n_sess + 1), dtype=np.float64)
-    ccnt = np.zeros((n_assets, n_sess + 1), dtype=np.int32)
-    np.cumsum(filled, axis=1, out=csum[:, 1:])
-    np.cumsum(filled * filled, axis=1, out=csum2[:, 1:])
-    np.cumsum(finite.astype(np.int32), axis=1, out=ccnt[:, 1:])
-
-    left_s = np.zeros((n_assets, n_sess), dtype=np.float64)
-    left_s2 = np.zeros((n_assets, n_sess), dtype=np.float64)
-    left_c = np.zeros((n_assets, n_sess), dtype=np.int32)
-    if n_sess > w:
-        left_s[:, w:] = csum[:, 1 : n_sess - w + 1]
-        left_s2[:, w:] = csum2[:, 1 : n_sess - w + 1]
-        left_c[:, w:] = ccnt[:, 1 : n_sess - w + 1]
-    win_c = ccnt[:, 1:] - left_c
-    win_s = csum[:, 1:] - left_s
-    win_s2 = csum2[:, 1:] - left_s2
-    ok = win_c >= mp
-    var = np.full((n_assets, n_sess), np.nan, dtype=np.float64)
-    with np.errstate(invalid="ignore", divide="ignore"):
-        var[ok] = np.maximum(
-            0.0, (win_s2[ok] - (win_s[ok] ** 2) / win_c[ok]) / (win_c[ok] - 1.0)
-        )
-    out[ok] = np.sqrt(var[ok])
+    chunk = 256
+    for a0 in range(0, n_assets, chunk):
+        a1 = min(n_assets, a0 + chunk)
+        sub = arr[a0:a1]
+        m = a1 - a0
+        finite = np.isfinite(sub)
+        filled = np.where(finite, sub, 0.0)
+        csum = np.zeros((m, n_sess + 1), dtype=np.float64)
+        csum2 = np.zeros((m, n_sess + 1), dtype=np.float64)
+        ccnt = np.zeros((m, n_sess + 1), dtype=np.int32)
+        np.cumsum(filled, axis=1, out=csum[:, 1:])
+        np.cumsum(filled * filled, axis=1, out=csum2[:, 1:])
+        np.cumsum(finite.astype(np.int32), axis=1, out=ccnt[:, 1:])
+        win_s = csum[:, 1:].copy()
+        win_s2 = csum2[:, 1:].copy()
+        win_c = ccnt[:, 1:].copy()
+        if n_sess > w:
+            win_s[:, w:] -= csum[:, 1 : n_sess - w + 1]
+            win_s2[:, w:] -= csum2[:, 1 : n_sess - w + 1]
+            win_c[:, w:] -= ccnt[:, 1 : n_sess - w + 1]
+        ok = win_c >= mp
+        res = np.full((m, n_sess), np.nan, dtype=np.float64)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            var_ok = np.maximum(
+                0.0,
+                (win_s2[ok] - (win_s[ok] ** 2) / win_c[ok]) / (win_c[ok] - 1.0),
+            )
+            res[ok] = np.sqrt(var_ok)
+        out[a0:a1] = res
     return out
 
 
 def _rolling_extrema(arr: np.ndarray, window: int, *, mode: str) -> np.ndarray:
-    """Causal rolling max/min over axis=1 using pandas on transpose only if needed."""
+    """Causal rolling max/min over axis=1 (256-asset chunked)."""
     w = int(window)
     n_assets, n_sess = arr.shape
-    if n_sess == 0 or w <= 0:
-        return np.full((n_assets, n_sess), np.nan, dtype=np.float64)
+    out = np.full((n_assets, n_sess), np.nan, dtype=np.float64)
+    if n_sess == 0 or n_assets == 0 or w <= 0:
+        return out
     mp = min(w, max(2, int(0.75 * w)))
-    df = pd.DataFrame(arr.T)
-    rolled = df.rolling(w, min_periods=mp)
-    res = rolled.max() if mode == "max" else rolled.min()
-    return res.to_numpy(dtype=np.float64).T
+    chunk = 256
+    for a0 in range(0, n_assets, chunk):
+        a1 = min(n_assets, a0 + chunk)
+        df = pd.DataFrame(arr[a0:a1].T)
+        rolled = df.rolling(w, min_periods=mp)
+        res = rolled.max() if mode == "max" else rolled.min()
+        out[a0:a1] = res.to_numpy(dtype=np.float64).T
+    return out
 
 
 def _momentum_columns(params: Mapping[str, Any]) -> tuple[str, ...]:
@@ -236,23 +249,30 @@ def build_price_vol_beta(
         mp = w if w <= 21 else max(21, int(0.8 * w))
         rv = _rolling_std(ret, w, min_periods=mp)
         data[f"pvol_rvol_{w}d"] = _select_at_anchors(rv, anchors)
+        del rv
 
     neg_ret = np.where(np.isfinite(ret), np.minimum(ret, 0.0), np.nan)
-    pos_ret = np.where(np.isfinite(ret), np.maximum(ret, 0.0), np.nan)
     down_21 = np.sqrt(_rolling_mean(neg_ret * neg_ret, 21, min_periods=15))
+    del neg_ret
+    pos_ret = np.where(np.isfinite(ret), np.maximum(ret, 0.0), np.nan)
     up_21 = np.sqrt(_rolling_mean(pos_ret * pos_ret, 21, min_periods=15))
+    del pos_ret
     with np.errstate(divide="ignore", invalid="ignore"):
         ratio = np.where(down_21 > 1e-8, up_21 / down_21, np.nan)
     data["pvol_downside_21d"] = _select_at_anchors(down_21, anchors)
     data["pvol_upside_downside_ratio_21d"] = _select_at_anchors(ratio, anchors)
+    del down_21, up_21, ratio
 
     hi = prices.channel("high_raw").astype(np.float64)
     lo = prices.channel("low_raw").astype(np.float64)
     ok_hl = np.isfinite(hi) & np.isfinite(lo) & (lo > 0) & (hi >= lo)
     hl_sq = np.full((n_assets, n_sess), np.nan, dtype=np.float64)
     hl_sq[ok_hl] = np.log(hi[ok_hl] / lo[ok_hl]) ** 2 / (4.0 * np.log(2.0))
+    del hi, lo, ok_hl
     park_21 = np.sqrt(np.maximum(0.0, _rolling_mean(hl_sq, 21, min_periods=15)))
+    del hl_sq
     data["pvol_parkinson_hl_21d"] = _select_at_anchors(park_21, anchors)
+    del park_21
 
     if prices.benchmark_idx >= 0 and prices.benchmark_idx < n_assets:
         mkt = ret[prices.benchmark_idx : prices.benchmark_idx + 1, :]
@@ -263,17 +283,25 @@ def build_price_vol_beta(
     valid_pair = np.isfinite(ret) & np.isfinite(rm)
     x = np.where(valid_pair, rm, np.nan)
     y = np.where(valid_pair, ret, np.nan)
+    del valid_pair
     mx = _rolling_mean(x, 63, min_periods=42)
     my = _rolling_mean(y, 63, min_periods=42)
     mxy = _rolling_mean(x * y, 63, min_periods=42)
     vx = _rolling_std(x, 63, min_periods=42) ** 2
+    del x
     vy = _rolling_std(y, 63, min_periods=42) ** 2
+    del y
     cov = (mxy - mx * my) * (63.0 / 62.0)
+    del mx, my, mxy
     beta = np.where(vx > 1e-12, cov / vx, np.nan)
+    del cov
     idio_var = np.maximum(0.0, vy - (beta**2) * vx)
+    del vx
     idio = np.where(np.isfinite(beta) & np.isfinite(vy), np.sqrt(idio_var), np.nan)
+    del vy, idio_var
     data["pvol_mkt_beta_63d"] = _select_at_anchors(beta, anchors)
     data["pvol_idio_vol_63d"] = _select_at_anchors(idio, anchors)
+    del beta, idio
     return pd.DataFrame(data, index=anchors.frame.index)
 
 
@@ -317,6 +345,7 @@ def build_price_range_anchor(
         np.minimum(lvl, lvl * (lo_raw / close_raw)),
         lvl,
     )
+    del close_raw, hi_raw, lo_raw, ok_scale
 
     csus = _suspect_prefix(prices)
     n_sess = lvl.shape[1]
@@ -326,25 +355,33 @@ def build_price_range_anchor(
         rmin = _rolling_extrema(lo_tr, w, mode="min")
         d_hi = np.where((rmax > 0) & np.isfinite(lvl), lvl / rmax - 1.0, np.nan)
         d_lo = np.where((rmin > 0) & np.isfinite(lvl), lvl / rmin - 1.0, np.nan)
+        del rmax, rmin
         left_su = np.zeros_like(csus[:, 1:])
         if n_sess >= w:
             left_su[:, w - 1 :] = csus[:, 1 : n_sess - w + 2]
         bad_win = (csus[:, 1:] - left_su) > 0
+        del left_su
         d_hi[bad_win] = np.nan
         d_lo[bad_win] = np.nan
+        del bad_win
         data[f"prange_dist_high_{w}d"] = _select_at_anchors(d_hi, anchors)
         data[f"prange_dist_low_{w}d"] = _select_at_anchors(d_lo, anchors)
+        del d_hi, d_lo
+    del hi_tr, lo_tr
 
     for w in [int(x) for x in params.get("windows", (21, 63, 200, 252))]:
         if w == 252:
             continue
         ma = _rolling_mean(lvl, w, min_periods=max(5, int(0.75 * w)))
         gap = np.where((ma > 0) & np.isfinite(lvl), lvl / ma - 1.0, np.nan)
+        del ma
         left_su = np.zeros_like(csus[:, 1:])
         if n_sess >= w:
             left_su[:, w - 1 :] = csus[:, 1 : n_sess - w + 2]
         gap[(csus[:, 1:] - left_su) > 0] = np.nan
+        del left_su
         data[f"prange_ma_gap_{w}d"] = _select_at_anchors(gap, anchors)
+        del gap
 
     return pd.DataFrame(data, index=anchors.frame.index)
 
@@ -372,42 +409,55 @@ def build_price_liquidity_shock(
     del params
     prices = ctx.stores.prices
     anchors = ctx.stores.anchors
-    close_r = prices.channel("close_raw").astype(np.float64)
-    vol_r = prices.channel("volume_raw").astype(np.float64)
-    hi_r = prices.channel("high_raw").astype(np.float64)
-    lo_r = prices.channel("low_raw").astype(np.float64)
-    vwap_r = prices.channel("vwap_raw").astype(np.float64)
-    tc_r = prices.channel("trade_count_raw").astype(np.float64)
-    ret = prices.channel("ret_1d").astype(np.float64)
-    if "bar_invalid" in prices.channels:
-        inv = prices.channel("bar_invalid").astype(np.float64)
+    has_inv = "bar_invalid" in prices.channels
+    bad: np.ndarray | None = None
+    if has_inv:
+        inv = prices.channel("bar_invalid")
         bad = np.isfinite(inv) & (inv > 0.5)
-        ret = np.where(bad, np.nan, ret)
-        close_r = np.where(bad, np.nan, close_r)
-        vol_r = np.where(bad, np.nan, vol_r)
-        hi_r = np.where(bad, np.nan, hi_r)
-        lo_r = np.where(bad, np.nan, lo_r)
-        vwap_r = np.where(bad, np.nan, vwap_r)
-        tc_r = np.where(bad, np.nan, tc_r)
+        del inv
 
+    def _clean_ch(name: str) -> np.ndarray:
+        arr = prices.channel(name).astype(np.float64)
+        if bad is not None:
+            arr[bad] = np.nan
+        return arr
+
+    out: dict[str, np.ndarray] = {}
+
+    # 1. Dollar-volume scale, volume shock & Amihud illiquidity
+    close_r = _clean_ch("close_raw")
+    vol_r = _clean_ch("volume_raw")
     ok_dv = np.isfinite(close_r) & (close_r > 0) & np.isfinite(vol_r) & (vol_r >= 0)
     dvol = np.where(ok_dv, close_r * vol_r, np.nan)
+    del vol_r
     dv5 = _rolling_mean(dvol, 5, min_periods=3)
     dv21 = _rolling_mean(dvol, 21, min_periods=15)
     dv63 = _rolling_mean(dvol, 63, min_periods=42)
-
     dvol_log_21 = np.where(np.isfinite(dv21) & (dv21 >= 0), np.log1p(dv21), np.nan)
+    out["pliq_dvol_log_21d"] = _select_at_anchors(dvol_log_21, anchors)
+    del dv21, dvol_log_21
     with np.errstate(divide="ignore", invalid="ignore"):
         rel_vol = np.where(
             np.isfinite(dv5) & np.isfinite(dv63) & (dv63 > 0), dv5 / dv63, np.nan
         )
+    out["pliq_rel_vol_5d_63d"] = _select_at_anchors(rel_vol, anchors)
+    del dv5, dv63, rel_vol
 
+    ret = _clean_ch("ret_1d")
     dvol_m = np.where(ok_dv & (dvol > 0), np.maximum(dvol / 1e6, 1e-6), np.nan)
+    del ok_dv, dvol
     illiq_raw = np.where(
         np.isfinite(ret) & np.isfinite(dvol_m), np.abs(ret) / dvol_m, np.nan
     )
+    del ret, dvol_m
     amihud_21 = _rolling_mean(illiq_raw, 21, min_periods=15)
+    del illiq_raw
+    out["pliq_amihud_21d"] = _select_at_anchors(amihud_21, anchors)
+    del amihud_21
 
+    # 2. Intraday high-low spread
+    hi_r = _clean_ch("high_raw")
+    lo_r = _clean_ch("low_raw")
     hl_spread = np.where(
         np.isfinite(close_r)
         & (close_r > 0)
@@ -417,28 +467,47 @@ def build_price_liquidity_shock(
         (hi_r - lo_r) / close_r,
         np.nan,
     )
+    del hi_r, lo_r
     spread_21 = _rolling_mean(hl_spread, 21, min_periods=15)
+    del hl_spread
+    out["pliq_intraday_spread_21d"] = _select_at_anchors(spread_21, anchors)
+    del spread_21
 
+    # 3. VWAP-close gap
+    vwap_r = _clean_ch("vwap_raw")
     vwap_gap = np.where(
         np.isfinite(vwap_r) & (vwap_r > 0) & np.isfinite(close_r) & (close_r > 0),
         (close_r - vwap_r) / vwap_r,
         np.nan,
     )
+    del vwap_r, close_r
     vwap_gap_5 = _rolling_mean(vwap_gap, 5, min_periods=3)
+    del vwap_gap
+    out["pliq_vwap_close_gap_5d"] = _select_at_anchors(vwap_gap_5, anchors)
+    del vwap_gap_5
 
+    # 4. Trade intensity & split-guarded trade shock
+    tc_r = _clean_ch("trade_count_raw")
     tc_clean = np.where(np.isfinite(tc_r) & (tc_r >= 0), tc_r, np.nan)
+    del tc_r
+    bad = None
     tc5 = _rolling_mean(tc_clean, 5, min_periods=3)
     tc21 = _rolling_mean(tc_clean, 21, min_periods=15)
     tc63 = _rolling_mean(tc_clean, 63, min_periods=42)
+    del tc_clean
     tc_log_21 = np.where(np.isfinite(tc21) & (tc21 >= 0), np.log1p(tc21), np.nan)
+    out["pliq_trade_intensity_21d"] = _select_at_anchors(tc_log_21, anchors)
+    del tc21, tc_log_21
     with np.errstate(divide="ignore", invalid="ignore"):
         tc_shock = np.where(
             np.isfinite(tc5) & np.isfinite(tc63) & (tc63 > 0), tc5 / tc63, np.nan
         )
+    del tc5, tc63
 
     sp = prices.channel("split_index").astype(np.float64)
     n_assets, n_sess = sp.shape
     sp_pos = np.where(np.isfinite(sp) & (sp > 0), sp, np.nan)
+    del sp
     if n_sess > 1 and np.any(np.isfinite(sp_pos)):
         sp_ff = pd.DataFrame(sp_pos.T).ffill().to_numpy(dtype=np.float64).T
         ok_sp = (
@@ -448,25 +517,20 @@ def build_price_liquidity_shock(
         split_ev[:, 1:] = (
             ok_sp & (np.abs(sp_ff[:, 1:] / sp_ff[:, :-1] - 1.0) > 1e-6)
         ).astype(np.int32)
+        del sp_ff, ok_sp
         csplit = np.zeros((n_assets, n_sess + 1), dtype=np.int32)
         np.cumsum(split_ev, axis=1, out=csplit[:, 1:])
+        del split_ev
         left_sp = np.zeros((n_assets, n_sess), dtype=np.int32)
         if n_sess >= 63:
             left_sp[:, 62:] = csplit[:, 1 : n_sess - 61]
         tc_shock[(csplit[:, 1:] - left_sp) > 0] = np.nan
+        del csplit, left_sp
+    del sp_pos
 
-    return pd.DataFrame(
-        {
-            "pliq_dvol_log_21d": _select_at_anchors(dvol_log_21, anchors),
-            "pliq_rel_vol_5d_63d": _select_at_anchors(rel_vol, anchors),
-            "pliq_amihud_21d": _select_at_anchors(amihud_21, anchors),
-            "pliq_intraday_spread_21d": _select_at_anchors(spread_21, anchors),
-            "pliq_vwap_close_gap_5d": _select_at_anchors(vwap_gap_5, anchors),
-            "pliq_trade_intensity_21d": _select_at_anchors(tc_log_21, anchors),
-            "pliq_trade_shock_5d_63d": _select_at_anchors(tc_shock, anchors),
-        },
-        index=anchors.frame.index,
-    )
+    out["pliq_trade_shock_5d_63d"] = _select_at_anchors(tc_shock, anchors)
+    del tc_shock
+    return pd.DataFrame(out, index=anchors.frame.index)
 
 
 # Backward-compatible Phase I YAML aliases -------------------------------------------------

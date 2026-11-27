@@ -7,7 +7,7 @@ import hashlib
 import json
 import re
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from importlib import resources
@@ -365,47 +365,63 @@ def _read_verified_part(
     return table.to_pandas()
 
 
+def _clear_version_cache(version: Any) -> None:
+    clear_fn = getattr(version, "clear_cache", None)
+    if callable(clear_fn):
+        clear_fn()
+
+
 def _trailing_dvol_21d(
     price_store: PriceStore,
     asset_idxs: np.ndarray,
     sess_idxs: np.ndarray,
 ) -> np.ndarray:
-    """Trailing 21-session mean dollar volume at each ``(asset_idx, session_idx)``."""
+    """Trailing 21-session mean dollar volume at each ``(asset_idx, session_idx)`` (chunked)."""
     n = len(asset_idxs)
     out = np.full(n, -1.0, dtype=np.float64)
-    if n == 0 or price_store.data.shape[1] == 0:
+    n_a, n_s = price_store.data.shape[0], price_store.data.shape[1]
+    if n == 0 or n_s == 0 or n_a == 0:
         return out
-    close_r = price_store.channel("close_raw").astype(np.float64)
-    vol_r = price_store.channel("volume_raw").astype(np.float64)
-    inv_r = price_store.channel("bar_invalid").astype(np.float64)
-    bad = np.isfinite(inv_r) & (inv_r > 0.5)
-    ok = (
-        ~bad
-        & np.isfinite(close_r)
-        & (close_r > 0.0)
-        & np.isfinite(vol_r)
-        & (vol_r >= 0.0)
-    )
-    dv = np.where(ok, close_r * vol_r, 0.0)
-    n_a, n_s = dv.shape
-    csum = np.zeros((n_a, n_s + 1), dtype=np.float64)
-    ccnt = np.zeros((n_a, n_s + 1), dtype=np.int32)
-    np.cumsum(dv, axis=1, out=csum[:, 1:])
-    np.cumsum(ok.astype(np.int32), axis=1, out=ccnt[:, 1:])
     valid = (
         (asset_idxs >= 0) & (asset_idxs < n_a) & (sess_idxs >= 0) & (sess_idxs < n_s)
     )
     if not valid.any():
         return out
-    va = asset_idxs[valid]
-    vs = sess_idxs[valid]
-    lo = np.maximum(0, vs - 20)
-    cnt = ccnt[va, vs + 1] - ccnt[va, lo]
-    tot = csum[va, vs + 1] - csum[va, lo]
-    pos = cnt > 0
-    vals = np.full(len(va), -1.0, dtype=np.float64)
-    vals[pos] = tot[pos] / cnt[pos]
-    out[valid] = vals
+    close_ch = price_store.channel("close_raw")
+    vol_ch = price_store.channel("volume_raw")
+    inv_ch = price_store.channel("bar_invalid")
+    chunk = 256
+    for a0 in range(0, n_a, chunk):
+        a1 = min(n_a, a0 + chunk)
+        in_chunk = valid & (asset_idxs >= a0) & (asset_idxs < a1)
+        if not in_chunk.any():
+            continue
+        m = a1 - a0
+        close_r = close_ch[a0:a1].astype(np.float64)
+        vol_r = vol_ch[a0:a1].astype(np.float64)
+        inv_r = inv_ch[a0:a1].astype(np.float64)
+        bad = np.isfinite(inv_r) & (inv_r > 0.5)
+        ok = (
+            ~bad
+            & np.isfinite(close_r)
+            & (close_r > 0.0)
+            & np.isfinite(vol_r)
+            & (vol_r >= 0.0)
+        )
+        dv = np.where(ok, close_r * vol_r, 0.0)
+        csum = np.zeros((m, n_s + 1), dtype=np.float64)
+        ccnt = np.zeros((m, n_s + 1), dtype=np.int32)
+        np.cumsum(dv, axis=1, out=csum[:, 1:])
+        np.cumsum(ok.astype(np.int32), axis=1, out=ccnt[:, 1:])
+        va = asset_idxs[in_chunk] - a0
+        vs = sess_idxs[in_chunk]
+        lo = np.maximum(0, vs - 20)
+        cnt = ccnt[va, vs + 1] - ccnt[va, lo]
+        tot = csum[va, vs + 1] - csum[va, lo]
+        pos = cnt > 0
+        vals = np.full(len(va), -1.0, dtype=np.float64)
+        vals[pos] = tot[pos] / cnt[pos]
+        out[in_chunk] = vals
     return out
 
 
@@ -599,6 +615,8 @@ def _compute_labels(
         cal.days,
         list(dict.fromkeys([*asset_ids, *([bench_id] if bench_id else [])])),
     )
+    del inputs
+    _clear_version_cache(version)
     manifest_cutoff = clocks.day(version.manifest["cutoff_date"])
     eff_cutoff = (
         min(manifest_cutoff, max_date) if max_date is not None else manifest_cutoff
@@ -615,6 +633,10 @@ def _compute_labels(
         in_universe=af["in_universe"],
         static=rule is None,
     )
+    del series
+    _clear_version_cache(version)
+    gc.collect()
+    pa.default_memory_pool().release_unused()
     rf_arr: np.ndarray | None = None
     if "reference_series" in _candidates.families(version):
         rf_s = _risk_free_daily(
@@ -665,9 +687,21 @@ def materialize(
     include_news_events: bool = False,
     include_stores: bool = True,
     include_labels: bool = True,
+    return_matrix: bool = True,
+    on_progress: Callable[[str, str, int, int], None] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> MaterializedDataset:
     """Materialize untruncated Stores + incrementally cached Feature Groups from a YAML recipe."""
     t0 = time.perf_counter()
+
+    def _emit(phase: str, step: str, done: int, total: int) -> None:
+        if on_progress is not None:
+            on_progress(phase, step, done, total)
+
+    def _check_cancel() -> None:
+        if cancel_check is not None and cancel_check():
+            raise RuntimeError("MATERIALIZE_CANCELLED")
+
     ensure_builtin_groups_loaded()
     if recipe_yaml is None and hasattr(version, "recipe_yaml"):
         recipe_yaml = version.recipe_yaml()
@@ -729,12 +763,24 @@ def materialize(
     if (stores_dir / "anchors.meta.json").is_file() and (
         stores_dir / "price_store.meta.json"
     ).is_file():
+        _emit("building_stores", "cache_hit", 5, 5)
         stores = Stores.load(stores_dir, mmap=True)
         anchors = stores.anchors
     else:
+        _check_cancel()
+        _emit("building_stores", "PriceStore", 1, 5)
         pstore = build_price_store(
             version, all_assets, cal.days, benchmark_id=bench_id, max_date=max_d
         )
+        # Persist PriceStore immediately and reopen memory-mapped so FundStore/EventStore
+        # builds do not stack their RSS on top of the 570 MB writable PriceStore array.
+        pstore.save(stores_dir)
+        del pstore
+        _clear_version_cache(version)
+        gc.collect()
+        pa.default_memory_pool().release_unused()
+        pstore = PriceStore.load(stores_dir, mmap=True)
+
         asset_pos = {aid: idx for idx, aid in enumerate(pstore.assets)}
         # Map each CIK to its primary active asset_idx for Event-Time Cross-Binding
         primary_cik_asset: dict[str, int] = {}
@@ -755,7 +801,11 @@ def materialize(
                     aid = str(rec.get("asset_id") or "")
                     if cik and aid in asset_pos and cik not in primary_cik_asset:
                         primary_cik_asset[cik] = asset_pos[aid]
+            del ih_df
         all_ciks = sorted(primary_cik_asset)
+
+        _check_cancel()
+        _emit("building_stores", "FundStore", 2, 5)
         fstore = build_fund_store(
             version,
             all_ciks,
@@ -765,6 +815,13 @@ def materialize(
             primary_asset_of_cik=primary_cik_asset,
             max_date=max_d,
         )
+        fstore.save(stores_dir)
+        _clear_version_cache(version)
+        gc.collect()
+        pa.default_memory_pool().release_unused()
+
+        _check_cancel()
+        _emit("building_stores", "EventStore", 3, 5)
         estore = build_event_store(
             version,
             pstore.assets,
@@ -774,6 +831,13 @@ def materialize(
             include_news=include_news_events,
             max_date=max_d,
         )
+        estore.save(stores_dir)
+        _clear_version_cache(version)
+        gc.collect()
+        pa.default_memory_pool().release_unused()
+
+        _check_cancel()
+        _emit("building_stores", "MacroStore", 4, 5)
         mstore = build_macro_store(
             version,
             cal.days,
@@ -782,6 +846,13 @@ def materialize(
             price_store=pstore,
             max_date=max_d,
         )
+        mstore.save(stores_dir)
+        _clear_version_cache(version)
+        gc.collect()
+        pa.default_memory_pool().release_unused()
+
+        _check_cancel()
+        _emit("building_stores", "Anchors", 5, 5)
         anchors, dedup_dropped = _build_anchors(
             version,
             symbols=symbols,
@@ -808,9 +879,10 @@ def materialize(
         )
         if max_d is not None:
             stores.assert_cutoff(max_d)
-        stores.save(stores_dir)
-        # Re-open PriceStore memory-mapped to drop eager write buffer RSS
+        # Write anchors last so anchors.meta.json acts as the atomic cache-complete marker.
+        anchors.save(stores_dir)
         del pstore, fstore, estore, mstore, anchors, stores
+        _clear_version_cache(version)
         gc.collect()
         pa.default_memory_pool().release_unused()
         stores = Stores.load(stores_dir, mmap=True)
@@ -825,6 +897,7 @@ def materialize(
     recomputed_groups: list[str] = []
     part_paths: dict[str, str] = {}
     declared_by_group: dict[str, list[str]] = {}
+    ordered_groups: list[tuple[str, str, list[str]]] = []
 
     active_specs: list[
         tuple[str, Any, dict[str, Any], list[str], str, Path, list[str]]
@@ -844,18 +917,28 @@ def materialize(
         kept = [c for c in declared if c not in exclude_set]
         part_paths[gname] = str(p_path)
         declared_by_group[gname] = declared
+        ordered_groups.append((gname, str(p_path), list(kept)))
         active_specs.append(
             (gname, spec, merged_params, declared, op_hash, p_path, kept)
         )
         all_cols.extend(kept)
 
+    # Enforce hard physical barrier: pointer columns & forbidden tokens never enter X
+    hits = audit_features(list(all_cols))
+    if not hits.empty:
+        raise DatasetError(
+            "INTEGRITY", f"特征矩阵审计未通过：{hits.to_dict('records')}"
+        )
+
     n_rows = len(anchors.frame)
-    # Allocate one column-contiguous (C, N).T float32 buffer to avoid pd.concat RSS spike
-    mat = (
-        np.empty((len(all_cols), n_rows), dtype=np.float32).T
-        if all_cols
-        else np.empty((n_rows, 0), dtype=np.float32)
-    )
+    # Allocate monolithic (C, N).T float32 buffer only when callers request in-memory mat.X.
+    mat: np.ndarray | None = None
+    if return_matrix:
+        mat = (
+            np.empty((len(all_cols), n_rows), dtype=np.float32).T
+            if all_cols
+            else np.empty((n_rows, 0), dtype=np.float32)
+        )
     col_offset = 0
 
     for idx_g, (
@@ -867,6 +950,8 @@ def materialize(
         p_path,
         kept,
     ) in enumerate(active_specs):
+        _check_cancel()
+        _emit("building_features", gname, idx_g + 1, len(active_specs))
         remaining_groups = {item[0] for item in active_specs[idx_g + 1 :]}
         if p_path.is_file():
             part_df = _read_verified_part(
@@ -877,14 +962,15 @@ def materialize(
                 manifest_sha256=str(version.manifest_sha256),
                 time_policy=eff_policy,
                 op_hash=op_hash,
-                kept_columns=kept,
+                kept_columns=kept if return_matrix else (),
             )
             cached_groups.append(gname)
-            for j, c in enumerate(kept):
-                mat[:, col_offset + j] = part_df[c].to_numpy(
-                    dtype=np.float32, copy=False
-                )
-            col_offset += len(kept)
+            if mat is not None:
+                for j, c in enumerate(kept):
+                    mat[:, col_offset + j] = part_df[c].to_numpy(
+                        dtype=np.float32, copy=False
+                    )
+                col_offset += len(kept)
             del part_df
         else:
             if ctx is None:
@@ -908,15 +994,20 @@ def materialize(
                 time_policy=eff_policy,
                 op_hash=op_hash,
             )
-            for j, c in enumerate(kept):
-                mat[:, col_offset + j] = built[c].to_numpy(dtype=np.float32, copy=False)
-            col_offset += len(kept)
+            if mat is not None:
+                for j, c in enumerate(kept):
+                    mat[:, col_offset + j] = built[c].to_numpy(
+                        dtype=np.float32, copy=False
+                    )
+                col_offset += len(kept)
             recomputed_groups.append(gname)
             del built
             ctx.release_derived_if_unused(remaining_groups)
+            _clear_version_cache(version)
             gc.collect()
+            pa.default_memory_pool().release_unused()
 
-    if all_cols:
+    if mat is not None and all_cols:
         X = pd.DataFrame(mat, index=anchors.frame.index, columns=all_cols, copy=False)
     else:
         X = pd.DataFrame(index=anchors.frame.index)
@@ -924,15 +1015,10 @@ def materialize(
     gc.collect()
     pa.default_memory_pool().release_unused()
 
-    # Enforce hard physical barrier: pointer columns & forbidden tokens never enter X
-    hits = audit_features(list(X.columns))
-    if not hits.empty:
-        raise DatasetError(
-            "INTEGRITY", f"特征矩阵审计未通过：{hits.to_dict('records')}"
-        )
-
     y_df: pd.DataFrame | None = None
     if include_labels and "daily_returns" in _candidates.families(version):
+        _check_cancel()
+        _emit("building_labels", "forward_returns", 1, 1)
         labels_path = stores_dir / f"labels_{'_'.join(map(str, horizons))}.parquet"
         if labels_path.is_file():
             y_df = pq.read_table(labels_path).to_pandas()
@@ -964,6 +1050,7 @@ def materialize(
             tmp_y.replace(labels_path)
             if cat_cols:
                 del y_serializable
+            _clear_version_cache(version)
             gc.collect()
             pa.default_memory_pool().release_unused()
 
@@ -973,6 +1060,7 @@ def materialize(
         "cached_groups": cached_groups,
         "recomputed_groups": recomputed_groups,
         "part_paths": part_paths,
+        "ordered_groups": ordered_groups,
         "group_columns": declared_by_group,
         "bridge_columns": list(recipe.get("bridge_columns") or ()),
         "exclude_columns": sorted(exclude_set),
@@ -982,7 +1070,7 @@ def materialize(
         "include_news_events": bool(include_news_events),
         "audit_passed": True,
         "rows": len(anchors.frame),
-        "columns": len(X.columns),
+        "columns": len(all_cols),
         "elapsed_seconds": round(time.perf_counter() - t0, 3),
     }
     return MaterializedDataset(

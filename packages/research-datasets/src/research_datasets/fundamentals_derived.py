@@ -3091,23 +3091,61 @@ def _save_cached_states(
 ) -> None:
     try:
         parquet_path.parent.mkdir(parents=True, exist_ok=True)
-        serializable = frame.copy()
-        for col in ("raw_value", "accessions"):
-            serializable[col] = serializable[col].astype("string")
-        for col in ("period_start", "period_end", "reference_date"):
-            serializable[col] = (
-                serializable[col]
-                .map(lambda d: d.isoformat() if isinstance(d, date) else None)
-                .astype("string")
-            )
+        cols: dict[str, Any] = {}
+        for col in frame.columns:
+            if col in ("raw_value", "accessions"):
+                cols[col] = frame[col].astype("string")
+            elif col in ("period_start", "period_end", "reference_date"):
+                cols[col] = (
+                    frame[col]
+                    .map(lambda d: d.isoformat() if isinstance(d, date) else None)
+                    .astype("string")
+                )
+            else:
+                cols[col] = frame[col]
+        serializable = pd.DataFrame(cols, index=frame.index, copy=False)
         tmp_pq = parquet_path.with_suffix(".parquet.tmp")
         tmp_meta = meta_path.with_suffix(".json.tmp")
         serializable.to_parquet(tmp_pq, index=False, engine="pyarrow")
+        del serializable, cols
         tmp_meta.write_text(json.dumps(dict(frame.attrs), indent=2) + "\n", "utf-8")
         tmp_pq.replace(parquet_path)
         tmp_meta.replace(meta_path)
     except OSError:
         return
+
+
+def _cik_batches_for_facts(
+    version_or_material: Any,
+    ciks: Sequence[str] | None,
+    *,
+    batch_size: int = 128,
+) -> list[Sequence[str] | None]:
+    """Split large CIK lists into CIK-ordered batches when `fundamentals` has a CIK part_index."""
+    if ciks is None:
+        return [None]
+    unique_ciks = sorted({c for c in (_valid_cik(x) for x in ciks) if c is not None})
+    if len(unique_ciks) <= batch_size:
+        return [unique_ciks]
+    manifest_obj = (
+        version_or_material.get("manifest")
+        if isinstance(version_or_material, Mapping)
+        else getattr(version_or_material, "manifest", None)
+    )
+    part_idx = (
+        manifest_obj.get("part_index") if isinstance(manifest_obj, Mapping) else None
+    )
+    has_cik_idx = isinstance(part_idx, Sequence) and any(
+        isinstance(item, Mapping)
+        and item.get("family") == "fundamentals"
+        and "first_cik" in item
+        for item in part_idx
+    )
+    if not has_cik_idx:
+        return [unique_ciks]
+    return [
+        unique_ciks[i : i + batch_size] for i in range(0, len(unique_ciks), batch_size)
+    ]
 
 
 def fundamental_states(
@@ -3153,19 +3191,14 @@ def fundamental_states(
         if cached is not None:
             return cached
 
-    manifest, frames = _iter_fact_frames(version_or_material, ciks)
-    zones = (
-        manifest.get("source_timezones", {}) if isinstance(manifest, Mapping) else {}
-    )
     totals = {
         "dropped_unknown_clock_versions": 0,
         "dropped_invalid_clock_versions": 0,
         "dropped_unmapped_tags": 0,
         "dropped_unit_mismatch": 0,
     }
-    all_rows: list[_StateRow] = []
     annual_only_steps: dict[str, list[tuple[int, bool]]] = {}
-    by_cik_buffer: dict[str, list[FactVersion]] = {}
+    manifest: Mapping[str, Any] = {}
 
     # When computing annual-only detection accurately under concept projection,
     # include revenue_total/total_assets if needed; base_needed=None reads all.
@@ -3177,51 +3210,109 @@ def fundamental_states(
             | {"revenue_total", "revenue_contracts", "net_income_parent"}
         )
     )
-    for chunk in frames:
-        if chunk is None or chunk.empty:
-            continue
-        versions, stats = normalize_facts(
-            chunk,
-            time_policy=time_policy,
-            source_timezones=zones,
-            concepts=norm_concepts,
-        )
-        for key, count in stats.items():
-            totals[key] = totals.get(key, 0) + count
-        for v in versions:
-            by_cik_buffer.setdefault(v.cik, []).append(v)
-        versions.clear()
-
     split_events_by_cik = _cik_split_events(version_or_material, ciks)
-    for cik in sorted(by_cik_buffer):
-        # An issuer is replayed once. Release its facts before accumulating more states.
-        issuer_versions = by_cik_buffer.pop(cik)
-        issuer_versions.sort(key=lambda v: (v.available_ns, v.observation_sequence))
-        evs = split_events_by_cik.get(cik)
-        split_fn = (
-            (lambda d0, d1, _evs=evs: _split_ratio_between(_evs, d0, d1))
-            if evs
-            else None
+    cik_batches = _cik_batches_for_facts(version_or_material, ciks, batch_size=128)
+    batch_frames: list[pd.DataFrame] = []
+    for cik_batch in cik_batches:
+        manifest, frames = _iter_fact_frames(version_or_material, cik_batch)
+        zones = (
+            manifest.get("source_timezones", {})
+            if isinstance(manifest, Mapping)
+            else {}
         )
-        machine = IssuerStateMachine(
-            cik, target_views=target_views, split_factor_fn=split_fn
-        )
-        machine.ingest(issuer_versions)
-        all_rows.extend(machine.rows)
-        if machine.annual_only_steps:
-            annual_only_steps[cik] = machine.annual_only_steps
-        del issuer_versions, machine
+        by_cik_buffer: dict[str, list[FactVersion]] = {}
+        for chunk in frames:
+            if chunk is None or chunk.empty:
+                continue
+            versions, stats = normalize_facts(
+                chunk,
+                time_policy=time_policy,
+                source_timezones=zones,
+                concepts=norm_concepts,
+            )
+            for key, count in stats.items():
+                totals[key] = totals.get(key, 0) + count
+            for v in versions:
+                by_cik_buffer.setdefault(v.cik, []).append(v)
+            versions.clear()
+
+        batch_rows: list[_StateRow] = []
+        for cik in sorted(by_cik_buffer):
+            # An issuer is replayed once. Release its facts before accumulating more states.
+            issuer_versions = by_cik_buffer.pop(cik)
+            issuer_versions.sort(key=lambda v: (v.available_ns, v.observation_sequence))
+            evs = split_events_by_cik.get(cik)
+            split_fn = (
+                (lambda d0, d1, _evs=evs: _split_ratio_between(_evs, d0, d1))
+                if evs
+                else None
+            )
+            machine = IssuerStateMachine(
+                cik, target_views=target_views, split_factor_fn=split_fn
+            )
+            machine.ingest(issuer_versions)
+            batch_rows.extend(machine.rows)
+            if machine.annual_only_steps:
+                annual_only_steps[cik] = machine.annual_only_steps
+            del issuer_versions, machine
+        by_cik_buffer.clear()
+        if batch_rows:
+            batch_frames.append(
+                _format_state_frame(
+                    batch_rows,
+                    time_policy=time_policy,
+                    stats={},
+                    limitations=(),
+                    annual_only_steps=None,
+                )
+            )
+            batch_rows.clear()
 
     limitations = list(manifest.get("limitations", [])) + [
         "Derived fundamentals (single quarters, TTM, YoY) are computed from as-filed XBRL facts.",
     ]
-    result = _format_state_frame(
-        all_rows,
-        time_policy=time_policy,
-        stats=totals,
-        limitations=limitations,
-        annual_only_steps=annual_only_steps,
-    )
+    if not batch_frames:
+        result = _format_state_frame(
+            [],
+            time_policy=time_policy,
+            stats=totals,
+            limitations=limitations,
+            annual_only_steps=annual_only_steps,
+        )
+    elif len(batch_frames) == 1:
+        result = batch_frames[0]
+        result.attrs.update(
+            time_policy=time_policy,
+            derivation_version=DERIVATION_VERSION,
+            dropped_counts=dict(totals),
+            limitations=list(limitations),
+            annual_only_steps={
+                k: [[int(ns), bool(flag)] for ns, flag in steps]
+                for k, steps in sorted(annual_only_steps.items())
+            },
+        )
+    else:
+        result = pd.concat(batch_frames, ignore_index=True)
+        batch_frames.clear()
+        result["status"] = pd.Categorical(
+            result["status"], categories=list(FUNDAMENTAL_STATUSES)
+        )
+        for col in ("cik", "view", "basis", "tag", "currency"):
+            result[col] = result[col].astype("category")
+        result.sort_values(
+            ["cik", "view", "available_at"], kind="mergesort", inplace=True
+        )
+        result.reset_index(drop=True, inplace=True)
+        result.attrs.update(
+            time_policy=time_policy,
+            derivation_version=DERIVATION_VERSION,
+            dropped_counts=dict(totals),
+            limitations=list(limitations),
+            annual_only_steps={
+                k: [[int(ns), bool(flag)] for ns, flag in steps]
+                for k, steps in sorted(annual_only_steps.items())
+            },
+        )
     if cache_paths is not None:
         _save_cached_states(result, *cache_paths)
     return result
@@ -3247,34 +3338,40 @@ def fiscal_quarters(
         "revenue_contracts",
         "net_income_parent",
     }
-    manifest, frames = _iter_fact_frames(version_or_material, ciks)
-    zones = (
-        manifest.get("source_timezones", {}) if isinstance(manifest, Mapping) else {}
-    )
-    by_cik_buffer: dict[str, list[FactVersion]] = {}
-    for chunk in frames:
-        if chunk is None or chunk.empty:
-            continue
-        versions, _ = normalize_facts(
-            chunk,
-            time_policy=time_policy,
-            source_timezones=zones,
-            concepts=base_needed,
-        )
-        for v in versions:
-            by_cik_buffer.setdefault(v.cik, []).append(v)
-        versions.clear()
-
     ledger_rows: list[dict[str, Any]] = []
-    for cik in sorted(by_cik_buffer):
-        issuer_versions = by_cik_buffer.pop(cik)
-        issuer_versions.sort(key=lambda v: (v.available_ns, v.observation_sequence))
-        machine = IssuerStateMachine(cik, target_views=(), record_quarters=concept_list)
-        machine.ingest(issuer_versions)
-        for _, entry in sorted(machine.quarter_ledger.items()):
-            row = {col: entry[col] for col in FISCAL_QUARTER_COLUMNS}
-            ledger_rows.append(row)
-        del issuer_versions, machine
+    for cik_batch in _cik_batches_for_facts(version_or_material, ciks, batch_size=128):
+        manifest, frames = _iter_fact_frames(version_or_material, cik_batch)
+        zones = (
+            manifest.get("source_timezones", {})
+            if isinstance(manifest, Mapping)
+            else {}
+        )
+        by_cik_buffer: dict[str, list[FactVersion]] = {}
+        for chunk in frames:
+            if chunk is None or chunk.empty:
+                continue
+            versions, _ = normalize_facts(
+                chunk,
+                time_policy=time_policy,
+                source_timezones=zones,
+                concepts=base_needed,
+            )
+            for v in versions:
+                by_cik_buffer.setdefault(v.cik, []).append(v)
+            versions.clear()
+
+        for cik in sorted(by_cik_buffer):
+            issuer_versions = by_cik_buffer.pop(cik)
+            issuer_versions.sort(key=lambda v: (v.available_ns, v.observation_sequence))
+            machine = IssuerStateMachine(
+                cik, target_views=(), record_quarters=concept_list
+            )
+            machine.ingest(issuer_versions)
+            for _, entry in sorted(machine.quarter_ledger.items()):
+                row = {col: entry[col] for col in FISCAL_QUARTER_COLUMNS}
+                ledger_rows.append(row)
+            del issuer_versions, machine
+        by_cik_buffer.clear()
 
     if not ledger_rows:
         empty = pd.DataFrame(columns=list(FISCAL_QUARTER_COLUMNS))

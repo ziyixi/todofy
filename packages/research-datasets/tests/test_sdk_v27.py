@@ -730,6 +730,77 @@ class SdkV27Tests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
 
+    def test_streaming_tier1_matches_monolithic_and_reports_progress(self) -> None:
+        sessions = _nyse_sessions(date(2024, 1, 2), 140)
+        ver = _build_rich_synthetic_version(
+            sessions=sessions,
+            restate_filed="2024-06-12",
+            include_non_reliance_on="2024-06-14",
+        )
+        recipe = {
+            "schema_version": 1,
+            "name": "stream-parity",
+            "sampling": "weekly",
+            "time_policy": "public_reconstructed",
+            "horizons_trading_days": [5, 21],
+            "feature_groups": {
+                "price_momentum_reversal": {"enabled": True, "windows": [5, 21]},
+                "fundamentals_pit": {"enabled": True},
+                "fundamental_quality": {"enabled": True},
+                "fundamental_restatement": {"enabled": True},
+                "macro_regime": {"enabled": True},
+                "peer_spillover": {"enabled": True},
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            mat = research_datasets.materialize(
+                ver, recipe_yaml=recipe, cache_dir=root / "c1"
+            )
+            mono_x, mono_types = research_datasets.build_tier1_features(
+                mat.X, mat.anchors.frame
+            )
+
+            events: list[tuple[str, str, int, int]] = []
+            meta = build_server_training_bundle(
+                ver,
+                root / "bundle",
+                recipe_yaml=recipe,
+                cache_dir=root / "c2",
+                x_rows_per_part=7,
+                on_progress=lambda p, s, d, t: events.append((p, s, d, t)),
+            )
+            self.assertEqual(meta["tier1_columns"], list(mono_x.columns))
+            self.assertEqual(meta["column_types"], mono_types)
+            phases = {p for p, _s, _d, _t in events}
+            self.assertTrue(
+                {
+                    "building_stores",
+                    "building_features",
+                    "building_labels",
+                    "writing_training_bundle",
+                }
+                <= phases
+            )
+
+            import pyarrow.parquet as pq
+
+            parts = [
+                pq.read_table(root / "bundle" / item["filename"]).to_pandas()
+                for item in meta["artifacts"]["x_tier1_parts"]
+            ]
+            stream_x = pd.concat(parts, ignore_index=True)
+            self.assertEqual(list(stream_x.columns), list(mono_x.columns))
+            self.assertEqual(len(stream_x), len(mono_x))
+            for col in mono_x.columns:
+                np.testing.assert_allclose(
+                    stream_x[col].to_numpy(dtype=np.float32),
+                    mono_x[col].to_numpy(dtype=np.float32),
+                    rtol=1e-6,
+                    atol=1e-6,
+                    equal_nan=True,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

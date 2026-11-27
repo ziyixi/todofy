@@ -19,28 +19,39 @@ _industry = importlib.import_module("research_datasets.industry")
 
 def _clean_returns_and_dvol(
     ctx: GroupBuildContext,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    *,
+    need_ovn: bool = True,
+    need_dvol: bool = True,
+) -> tuple[np.ndarray, np.ndarray | None, np.ndarray, np.ndarray | None]:
     """Return ``(ret_clean, ovn_clean, lvl_clean, dvol_clean)`` with ``bar_invalid`` masked."""
     prices = ctx.stores.prices
     ret = prices.channel("ret_1d").astype(np.float64)
-    ovn = prices.channel("overnight_ret").astype(np.float64)
     lvl = _effective_level(prices)
     inv_ch = prices.channel("bar_invalid").astype(np.float64)
     bad = np.isfinite(inv_ch) & (inv_ch > 0.5)
-    ret = np.where(bad, np.nan, ret)
-    ovn = np.where(bad, np.nan, ovn)
-    lvl = np.where(bad, np.nan, lvl)
+    del inv_ch
+    ret[bad] = np.nan
+    lvl[bad] = np.nan
 
-    close_r = prices.channel("close_raw").astype(np.float64)
-    vol_r = prices.channel("volume_raw").astype(np.float64)
-    ok_dv = (
-        ~bad
-        & np.isfinite(close_r)
-        & (close_r > 0.0)
-        & np.isfinite(vol_r)
-        & (vol_r >= 0.0)
-    )
-    dvol = np.where(ok_dv, close_r * vol_r, np.nan)
+    ovn: np.ndarray | None = None
+    if need_ovn:
+        ovn = prices.channel("overnight_ret").astype(np.float64)
+        ovn[bad] = np.nan
+
+    dvol: np.ndarray | None = None
+    if need_dvol:
+        close_r = prices.channel("close_raw").astype(np.float64)
+        vol_r = prices.channel("volume_raw").astype(np.float64)
+        ok_dv = (
+            ~bad
+            & np.isfinite(close_r)
+            & (close_r > 0.0)
+            & np.isfinite(vol_r)
+            & (vol_r >= 0.0)
+        )
+        dvol = np.where(ok_dv, close_r * vol_r, np.nan)
+        del close_r, vol_r, ok_dv
+    del bad
     return ret, ovn, lvl, dvol
 
 
@@ -58,35 +69,44 @@ def _rolling_ols_beta_1d(
     window: int,
     min_periods: int,
 ) -> np.ndarray:
-    """Fast O(N*T) causal rolling univariate OLS slope of ``y[N, T]`` on ``x_1d[T]``."""
+    """Fast O(N*T) causal rolling univariate OLS slope of ``y[N, T]`` on ``x_1d[T]`` (chunked)."""
     n_assets, n_sess = y.shape
     out = np.full((n_assets, n_sess), np.nan, dtype=np.float64)
     if n_assets == 0 or n_sess == 0 or window < 2:
         return out
     x = np.asarray(x_1d, dtype=np.float64)[:n_sess]
-    valid = np.isfinite(y) & np.isfinite(x)[None, :]
-    xv = np.where(valid, x[None, :], 0.0)
-    yv = np.where(valid, y, 0.0)
-    vn = valid.astype(np.float64)
+    x_fin = np.isfinite(x)[None, :]
+    x_row = np.where(x_fin, x[None, :], 0.0)
+    chunk = 256
+    for a0 in range(0, n_assets, chunk):
+        a1 = min(n_assets, a0 + chunk)
+        m = a1 - a0
+        sub_y = y[a0:a1]
+        valid = np.isfinite(sub_y) & x_fin
+        xv = np.where(valid, x_row, 0.0)
+        yv = np.where(valid, sub_y, 0.0)
+        vn = valid.astype(np.float64)
 
-    def _wsum(a: np.ndarray) -> np.ndarray:
-        cs = np.zeros((n_assets, n_sess + 1), dtype=np.float64)
-        np.cumsum(a, axis=1, out=cs[:, 1:])
-        left = np.zeros((n_assets, n_sess), dtype=np.float64)
-        if n_sess > window:
-            left[:, window:] = cs[:, 1 : n_sess - window + 1]
-        return cs[:, 1:] - left
+        def _wsum(a: np.ndarray, _m: int = m) -> np.ndarray:
+            cs = np.zeros((_m, n_sess + 1), dtype=np.float64)
+            np.cumsum(a, axis=1, out=cs[:, 1:])
+            res = cs[:, 1:].copy()
+            if n_sess > window:
+                res[:, window:] -= cs[:, 1 : n_sess - window + 1]
+            return res
 
-    cnt = _wsum(vn)
-    sx = _wsum(xv)
-    sy = _wsum(yv)
-    sxx = _wsum(xv * xv)
-    sxy = _wsum(xv * yv)
-    with np.errstate(invalid="ignore", divide="ignore"):
-        denom = sxx - (sx * sx) / cnt
-        numer = sxy - (sx * sy) / cnt
-        ok = (cnt >= min_periods) & (denom > 1e-12)
-        out[ok] = numer[ok] / denom[ok]
+        cnt = _wsum(vn)
+        sx = _wsum(xv)
+        sy = _wsum(yv)
+        sxx = _wsum(xv * xv)
+        sxy = _wsum(xv * yv)
+        sub_out = np.full((m, n_sess), np.nan, dtype=np.float64)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            denom = sxx - (sx * sx) / cnt
+            numer = sxy - (sx * sy) / cnt
+            ok = (cnt >= min_periods) & (denom > 1e-12)
+            sub_out[ok] = numer[ok] / denom[ok]
+        out[a0:a1] = sub_out
     return out
 
 
@@ -209,6 +229,7 @@ def build_peer_spillover(
     shrink_k = float(params.get("shrinkage_days", 20.0))
 
     ret, ovn, lvl, dvol = _clean_returns_and_dvol(ctx)
+    assert ovn is not None and dvol is not None
     n_assets, n_sess = ret.shape
     mkt_ret = _market_series(prices, ret)
     mkt_ovn = _market_series(prices, ovn)
@@ -216,6 +237,7 @@ def build_peer_spillover(
     # Market-residualized daily returns & overnight gaps
     resid_ret = ret - mkt_ret[None, :]
     resid_ovn = ovn - mkt_ovn[None, :]
+    del ret, ovn
 
     # Trailing 5d / 21d excess returns and 5d-vs-63d log dollar-volume shock
     ret_5d = np.full((n_assets, n_sess), np.nan, dtype=np.float64)
@@ -239,12 +261,14 @@ def build_peer_spillover(
 
     dv5 = _rolling_mean(dvol, 5, min_periods=3)
     dv63 = _rolling_mean(dvol, 63, min_periods=20)
+    del lvl, dvol
     with np.errstate(divide="ignore", invalid="ignore"):
         dv_shock = np.where(
             np.isfinite(dv5) & np.isfinite(dv63) & (dv5 > 0.0) & (dv63 > 0.0),
             np.log(dv5 / dv63),
             np.nan,
         )
+    del dv5, dv63
 
     # PIT FF12 industry & CIK per anchor row
     ind_df = _industry.industry(ctx.version, ctx.samples, time_policy=ctx.time_policy)
@@ -440,7 +464,8 @@ def build_sec_shock_interaction(
         return pd.DataFrame(data, index=af.index)
 
     lookback = max(5, int(params.get("lookback_sessions", 21)))
-    ret, _, lvl, dvol = _clean_returns_and_dvol(ctx)
+    ret, _, lvl, dvol = _clean_returns_and_dvol(ctx, need_ovn=False, need_dvol=True)
+    assert dvol is not None
     n_assets, n_sess = ret.shape
     mkt_ret = _market_series(prices, ret)
     mkt_lvl = _market_series(prices, lvl)
@@ -757,10 +782,11 @@ def build_macro_sensitivity_crisis(
 
     win = max(63, int(params.get("window", 252)))
     mp = max(42, win // 2)
-    ret, _, lvl, _ = _clean_returns_and_dvol(ctx)
+    ret, _, lvl, _ = _clean_returns_and_dvol(ctx, need_ovn=False, need_dvol=False)
     n_assets, n_sess = ret.shape
     mkt_ret = _market_series(prices, ret)
     resid = ret - mkt_ret[None, :]
+    del ret
 
     m_cols = {c: idx for idx, c in enumerate(mstore.columns)}
     m_len = min(n_sess, mstore.data.shape[0])
@@ -804,20 +830,19 @@ def build_macro_sensitivity_crisis(
         "mac_beta_iwm_spy_252d": iwm_1d - spy_1d,
         "mac_beta_iwf_iwd_252d": iwf_1d - iwd_1d,
     }
-    betas_mat: dict[str, np.ndarray] = {}
     for col_name, shock_arr in shocks.items():
         if np.isfinite(shock_arr).sum() >= mp:
             b_mat = _rolling_ols_beta_1d(resid, shock_arr, win, mp)
-        else:
-            b_mat = np.full((n_assets, n_sess), np.nan, dtype=np.float64)
-        betas_mat[col_name] = b_mat
-        data[col_name] = _select_at_anchors(b_mat, ctx.stores.anchors)
+            data[col_name] = _select_at_anchors(b_mat, ctx.stores.anchors)
+            del b_mat
 
     # 63d causal rolling stock beta to 7x24 BTC daily log return (min_periods=30)
     btc_1d = _mcol("crypto_ret_1d_btc")
     if np.isfinite(btc_1d).sum() >= 30:
         b_btc = _rolling_ols_beta_1d(resid, btc_1d, 63, 30)
         data["mac_beta_btc_63d"] = _select_at_anchors(b_btc, ctx.stores.anchors)
+        del b_btc
+    del resid
 
     # Zero-parameter explicit crisis interactions (dormant=0 in calm markets)
     with np.errstate(invalid="ignore", divide="ignore"):
