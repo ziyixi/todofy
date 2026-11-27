@@ -7,10 +7,6 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 Private application follow-ups and release verification are tracked in `private/HANDOFF.md`.
 
-Branch `feat/freeze-progress-and-low-rss` (on top of `bd8f33a8`, which merged `packages/research-datasets` `2.7.0` and private OCI packaging fixes) streams Tier-1 training bundle shards with lower peak memory across stores, CIK-batched derived fundamentals/valuation/earnings, chunked price/macro/label rolling operators, and per-stage cache eviction, and pins the corresponding private application progress/isolation update. Local `ruff`, all 242 SDK tests (including streaming-vs-monolithic parity), and a 574k-row 18-group cold benchmark passed (`4.52 GiB` peak RSS across stores and all 18 feature groups, `3.60 GiB` peak RSS on 574k-row labels). Merge after `CI gate` passes, then wait for same-SHA main `CI and deploy` and `Personal cloud reconcile` and complete post-deploy live verification.
-
-`packages/research-datasets` `2.5.0` (untruncated multi-clock `Stores`, pluggable 15-group feature registry, declarative YAML `materialize`, and `load_local`) is pinned to public `main` (`f7840d90c7cbd104be71901c9406a4b03b54ae43`) and cleanly verified in an isolated Python 3.14 environment (`2.5.0`, 20 registered groups).
-
 `packages/research-datasets` memory, indexing, coverage-slice, period-anchor, panel-benchmark, earnings-projection,
 and vectorized fundamental-factor updates landed on `main` (`75e518c4`) after branch CI passed.
 
@@ -71,15 +67,11 @@ documentation-only follow-up describes Home's generated private registration in 
 naming rule to the private repository's own commit subjects and branch names, and names the private check's error
 codes generically. It changes no source, so it publishes no service and no private application.
 
-- Private source in public CI: every job fetches the pinned private commit through the quiet
-  `.github/actions/private-checkout` action and keeps private operation output in a runner-side file, so public logs
-  expose only reviewed `PRIVATE_*` codes and bounded fields. The scheduled reconcile also compares the private application's live sources with
-  the pinned gitlink (or its newest settled release). Verify after landing: the release, Home and reconcile jobs print
-  no checkout subject, and the next scheduled reconcile reports `PRIVATE_REVISION_MATCHES_PIN`.
+- Private source in public CI: `Private Bazel` streams build/test logs directly, shares single-pass planned target lists across shards via artifact, and caches non-secret Bazel repository/action state on `main` while keeping release/infra credentials isolated in protected workflows. The scheduled reconcile compares the private application's live sources with the pinned gitlink (or its newest settled release).
 
 ## Latest verified release
 
-Main `096382fb` shipped `packages/research-datasets` `2.6.0` (`41a564b0`..`096382fb`: Q4/split `FundStore`, typed `EventStore`, `PriceStore`/`MacroStore` upgrades, Welch 252d beta / `GaussRank` / forward risk targets, `peer_spillover` / `sec_shock_interaction` / `macro_sensitivity_crisis` groups, physical `max_date` cutoff, and dual-class same-CIK deduplication) with passing branch `CI gate`, main `CI and deploy`, and same-SHA `Personal cloud reconcile` (zero infrastructure drift); private application verification is tracked in `private/HANDOFF.md`. Earlier on November 25, main `9a7da234` completed the November 24–25 release wave (Home Paid quota tracking, Mail Hero alarm self-heal & backup recovery, Website release-gate handling, SDK data-quality fixes, Model Router partial index, Newsletter aged Notion retry, CI verify-once/sharded checks, and pinned private application updates) with zero drift and clean live Home verification (`暂无未处理提醒`, `0` Worker errors across all 17 Workers). See the [November 25 archive](docs/history/handoff-2026-11-25.md), [November 24 archive](docs/history/handoff-2026-11-24.md), and [November 15 archive](docs/history/handoff-2026-11-15.md).
+Main `24385f5a` shipped `packages/research-datasets` `2.7.0` (`bd8f33a8`..`24385f5a`: bounded `<= 28 MiB` Zstd/Parquet training-bundle sharding with SHA-256 verification, low-RSS streaming across multi-clock stores/features/labels, causal `ds.training()` / `to_jax()` static tensors, `fundamental_restatement`, and keyless 7×24 crypto macro/beta features), transparent and action-cached `Private Bazel` CI workflows, and pinned private application updates, verified with passing `CI gate`, production deployment, same-SHA `Personal cloud reconcile` (`Require resolved infrastructure drift` green), and live Colab consumer streaming/JAX checks; private application details are tracked in `private/HANDOFF.md`. Earlier releases are recorded in the [November 27 archive](docs/history/handoff-2026-11-27.md), [November 25 archive](docs/history/handoff-2026-11-25.md), [November 24 archive](docs/history/handoff-2026-11-24.md), and [November 15 archive](docs/history/handoff-2026-11-15.md).
 
 Shared Worker receipt recovery (`7ef001fe`) adds fixed failure stages, exact committed-result readback and a
 guarded receipt-only path without application redeployment. The old statusless Tasks receipt remains historical

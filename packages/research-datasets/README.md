@@ -3,7 +3,7 @@
 Install directly into Google Colab or any Python 3.11+ environment:
 
 ```bash
-pip install -q "https://github.com/ziyixi/todofy/archive/f7840d90c7cbd104be71901c9406a4b03b54ae43.zip#subdirectory=packages/research-datasets"
+pip install -q "https://github.com/ziyixi/todofy/archive/24385f5af5f6080dbdf7f2df79ad6737c880806e.zip#subdirectory=packages/research-datasets"
 ```
 
 This command pins the reviewed source commit. The archive installation needs no GitHub login.
