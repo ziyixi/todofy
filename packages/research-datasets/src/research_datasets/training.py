@@ -38,6 +38,8 @@ from .stores import PRICE_CHANNELS, MacroStore, PriceStore
 TRAINING_BUNDLE_SCHEMA_VERSION = 1
 DEFAULT_JAX_HORIZONS: tuple[int, ...] = (5, 10, 21, 63)
 DEFAULT_PAD_TO = 1280
+# Keep every server training shard safely below collector/StorageRPC MAX_OBJECT_BYTES (32 MiB).
+MAX_TRAINING_SHARD_BYTES = 28 * 1024 * 1024
 SEQ_PRICE_CHANNELS: tuple[str, ...] = (
     "ret_1d",
     "overnight_ret",
@@ -486,12 +488,60 @@ def _sha256_file(path: Path) -> tuple[str, int]:
     return digest.hexdigest(), total
 
 
+def _write_parquet_table_bounded(
+    tbl: pa.Table,
+    out_dir: Path,
+    prefix: str,
+    *,
+    start_row: int = 0,
+    next_part_idx: int = 0,
+    max_bytes: int = MAX_TRAINING_SHARD_BYTES,
+) -> list[dict[str, Any]]:
+    """Write ``tbl`` as one or more Zstd Parquet shards guaranteed ``<= max_bytes``."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fname = f"{prefix}_part-{next_part_idx:05d}.parquet"
+    fpath = out_dir / fname
+    pq.write_table(tbl, fpath, compression="zstd", compression_level=6)
+    sha, size = _sha256_file(fpath)
+    n_rows = int(tbl.num_rows)
+    if size <= max_bytes or n_rows <= 1:
+        return [
+            {
+                "filename": fname,
+                "start_row": int(start_row),
+                "end_row": int(start_row + n_rows),
+                "rows": n_rows,
+                "sha256": sha,
+                "size_bytes": size,
+            }
+        ]
+    fpath.unlink(missing_ok=True)
+    mid = n_rows // 2
+    left = _write_parquet_table_bounded(
+        tbl.slice(0, mid),
+        out_dir,
+        prefix,
+        start_row=start_row,
+        next_part_idx=next_part_idx,
+        max_bytes=max_bytes,
+    )
+    right = _write_parquet_table_bounded(
+        tbl.slice(mid, n_rows - mid),
+        out_dir,
+        prefix,
+        start_row=start_row + mid,
+        next_part_idx=next_part_idx + len(left),
+        max_bytes=max_bytes,
+    )
+    return left + right
+
+
 def _write_zstd_tensor_shards(
     arr: np.ndarray,
     output_dir: Path,
     *,
     prefix: str = "price_store",
-    target_shard_bytes: int = 96 * 1024 * 1024,
+    target_shard_bytes: int = 24 * 1024 * 1024,
 ) -> list[dict[str, Any]]:
     """Split ``arr`` along axis 0 into bounded Zstd-compressed float32 binary shards."""
     n0 = arr.shape[0]
@@ -802,18 +852,17 @@ def _stream_tier1_x_shards(
             emitted_cols.add("ind_ff12_code")
             col_types["categorical"].append("ind_ff12_code")
 
-        # 3. Assemble final Zstd-compressed x_tier1_part-*.parquet one 200k-row slice at a time.
+        # 3. Assemble final Zstd-compressed x_tier1_part-*.parquet shards strictly <= MAX_TRAINING_SHARD_BYTES.
         x_parts: list[dict[str, Any]] = []
         readers = [pq.ParquetFile(p) for p in temp_files]
         for part_i, lo in enumerate(range(0, n, step)):
             if cancel_check is not None and cancel_check():
                 raise RuntimeError("MATERIALIZE_CANCELLED")
-            hi = min(n, lo + step)
-            fname = f"x_tier1_part-{part_i:05d}.parquet"
+            fname_hint = f"x_tier1_part-{len(x_parts):05d}.parquet"
             if on_progress is not None:
                 on_progress(
                     "writing_training_bundle",
-                    fname,
+                    fname_hint,
                     n_groups + part_i + 1,
                     n_groups + n_shards,
                 )
@@ -829,24 +878,15 @@ def _stream_tier1_x_shards(
             chunk_tbl = pa.table(
                 [col_arrays[c] for c in ordered_names], names=ordered_names
             )
-            fpath = out_dir / fname
-            pq.write_table(
+            written_parts = _write_parquet_table_bounded(
                 chunk_tbl,
-                fpath,
-                compression="zstd",
-                compression_level=6,
+                out_dir,
+                "x_tier1",
+                start_row=int(lo),
+                next_part_idx=len(x_parts),
+                max_bytes=MAX_TRAINING_SHARD_BYTES,
             )
-            sha, size = _sha256_file(fpath)
-            x_parts.append(
-                {
-                    "filename": fname,
-                    "start_row": int(lo),
-                    "end_row": int(hi),
-                    "rows": int(hi - lo),
-                    "sha256": sha,
-                    "size_bytes": size,
-                }
-            )
+            x_parts.extend(written_parts)
             del col_arrays, chunk_tbl
             gc.collect()
             pa.default_memory_pool().release_unused()
@@ -865,8 +905,8 @@ def build_server_training_bundle(
     cache_dir: str | Path | None = None,
     benchmark: str = "SPY",
     universe: str = "pit",
-    x_rows_per_part: int = 200_000,
-    price_shard_raw_bytes: int = 96 * 1024 * 1024,
+    x_rows_per_part: int = 50_000,
+    price_shard_raw_bytes: int = 24 * 1024 * 1024,
     on_progress: Callable[[str, str, int, int], None] | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
@@ -911,7 +951,7 @@ def build_server_training_bundle(
     pstore = mat.stores.prices
     mstore = mat.stores.macro
 
-    # 1. Anchors parquet
+    # 1. Anchors parquet shards (bounded <= MAX_TRAINING_SHARD_BYTES)
     if on_progress is not None:
         on_progress("writing_training_bundle", "anchors.parquet", 1, 4)
     anc_df = anc_frame.copy()
@@ -923,29 +963,45 @@ def build_server_training_bundle(
         clocks.day(v).isoformat() if pd.notna(v) and v is not None else ""
         for v in anc_df["entry_session"]
     ]
-    anc_path = out_dir / "anchors.parquet"
-    pq.write_table(
-        pa.Table.from_pandas(anc_df, preserve_index=False),
-        anc_path,
-        compression="zstd",
-        compression_level=6,
+    anc_tbl = pa.Table.from_pandas(anc_df, preserve_index=False)
+    anchors_parts = _write_parquet_table_bounded(
+        anc_tbl, out_dir, "anchors", max_bytes=MAX_TRAINING_SHARD_BYTES
     )
-    anc_sha, anc_size = _sha256_file(anc_path)
-    del anc_df
+    del anc_df, anc_tbl
 
-    # 2. Compact labels parquet — write & immediately free mat.y
+    # 2. Compact labels parquet shards — write in bounded slices & immediately free mat.y
     if on_progress is not None:
         on_progress("writing_training_bundle", "labels.parquet", 2, 4)
     y_compact = _compact_labels_frame(mat.y, horizons)
     label_columns = list(y_compact.columns)
-    y_path = out_dir / "labels.parquet"
-    pq.write_table(
-        pa.Table.from_pandas(y_compact, preserve_index=False),
-        y_path,
-        compression="zstd",
-        compression_level=6,
-    )
-    y_sha, y_size = _sha256_file(y_path)
+    labels_parts: list[dict[str, Any]] = []
+    label_step = max(1, min(int(x_rows_per_part), 100_000))
+    if len(y_compact) == 0:
+        labels_parts.extend(
+            _write_parquet_table_bounded(
+                pa.Table.from_pandas(y_compact, preserve_index=False),
+                out_dir,
+                "labels",
+                max_bytes=MAX_TRAINING_SHARD_BYTES,
+            )
+        )
+    else:
+        for l_lo in range(0, len(y_compact), label_step):
+            l_hi = min(len(y_compact), l_lo + label_step)
+            l_tbl = pa.Table.from_pandas(
+                y_compact.iloc[l_lo:l_hi], preserve_index=False
+            )
+            labels_parts.extend(
+                _write_parquet_table_bounded(
+                    l_tbl,
+                    out_dir,
+                    "labels",
+                    start_row=l_lo,
+                    next_part_idx=len(labels_parts),
+                    max_bytes=MAX_TRAINING_SHARD_BYTES,
+                )
+            )
+            del l_tbl
     del y_compact
     mat.y = None
     gc.collect()
@@ -1026,17 +1082,9 @@ def build_server_training_bundle(
         "macro_columns": macro_columns,
         "macro_sessions": macro_sessions,
         "artifacts": {
-            "anchors": {
-                "filename": "anchors.parquet",
-                "sha256": anc_sha,
-                "size_bytes": anc_size,
-            },
+            "anchors_parts": anchors_parts,
             "x_tier1_parts": x_parts,
-            "labels": {
-                "filename": "labels.parquet",
-                "sha256": y_sha,
-                "size_bytes": y_size,
-            },
+            "labels_parts": labels_parts,
             "macro_store": {
                 "filename": "macro_store.parquet",
                 "sha256": m_sha,
@@ -1138,10 +1186,18 @@ def _bundle_file_items(
             "size_bytes": int(obj["size_bytes"]),
         }
 
-    items.append(_entry(arts["anchors"]))
+    if "anchors_parts" in arts:
+        for p in arts["anchors_parts"]:
+            items.append(_entry(p))
+    elif "anchors" in arts:
+        items.append(_entry(arts["anchors"]))
     for p in arts.get("x_tier1_parts", ()):
         items.append(_entry(p))
-    items.append(_entry(arts["labels"]))
+    if "labels_parts" in arts:
+        for p in arts["labels_parts"]:
+            items.append(_entry(p))
+    elif "labels" in arts:
+        items.append(_entry(arts["labels"]))
     items.append(_entry(arts["macro_store"]))
     for p in arts.get("price_shards", ()):
         items.append(_entry(p))
@@ -1332,7 +1388,15 @@ def load_training_bundle(
             }
             return client._artifact(item)
 
-        anc_df = pd.read_parquet(_get_path(arts["anchors"]))
+        if "anchors_parts" in arts:
+            anc_frames = [pd.read_parquet(_get_path(p)) for p in arts["anchors_parts"]]
+            anc_df = (
+                pd.concat(anc_frames, ignore_index=True)
+                if anc_frames
+                else pd.DataFrame()
+            )
+        else:
+            anc_df = pd.read_parquet(_get_path(arts["anchors"]))
         anc_df["signal_session"] = pd.Series(
             [clocks.day(v) for v in anc_df["signal_session"]],
             index=anc_df.index,
@@ -1352,7 +1416,15 @@ def load_training_bundle(
             pd.read_parquet(_get_path(p)) for p in arts.get("x_tier1_parts", ())
         ]
         x_df = pd.concat(x_frames, ignore_index=True) if x_frames else pd.DataFrame()
-        labels_df = pd.read_parquet(_get_path(arts["labels"]))
+        if "labels_parts" in arts:
+            lbl_frames = [pd.read_parquet(_get_path(p)) for p in arts["labels_parts"]]
+            labels_df = (
+                pd.concat(lbl_frames, ignore_index=True)
+                if lbl_frames
+                else pd.DataFrame()
+            )
+        else:
+            labels_df = pd.read_parquet(_get_path(arts["labels"]))
         if "signal_session" in labels_df.columns:
             labels_df["signal_session"] = pd.Series(
                 [clocks.day(v) for v in labels_df["signal_session"]],

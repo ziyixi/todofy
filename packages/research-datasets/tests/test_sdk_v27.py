@@ -718,10 +718,11 @@ class SdkV27Tests(unittest.TestCase):
                 )
 
                 # Tamper SHA-256 check on cached shard raises INTEGRITY error on refetch
+                tampered_key = f"{key_prefix}/anchors_part-00000.parquet"
                 tampered_item = {
-                    "key": f"{key_prefix}/anchors.parquet",
+                    "key": tampered_key,
                     "sha256": "0" * 64,
-                    "size_bytes": len(files_map[f"{key_prefix}/anchors.parquet"]),
+                    "size_bytes": len(files_map[tampered_key]),
                 }
                 with self.assertRaises(DatasetError) as err:
                     client2._artifact(tampered_item)
@@ -800,6 +801,39 @@ class SdkV27Tests(unittest.TestCase):
                     atol=1e-6,
                     equal_nan=True,
                 )
+            # Every emitted training shard stays strictly below 32 MiB MAX_OBJECT_BYTES,
+            # and _write_parquet_table_bounded splits oversized tables deterministically.
+            for item in (
+                *meta["artifacts"]["anchors_parts"],
+                *meta["artifacts"]["x_tier1_parts"],
+                *meta["artifacts"]["labels_parts"],
+                meta["artifacts"]["macro_store"],
+                *meta["artifacts"]["price_shards"],
+            ):
+                self.assertLessEqual(int(item["size_bytes"]), 28 * 1024 * 1024)
+
+            import pyarrow as pa
+
+            from research_datasets.training import _write_parquet_table_bounded
+
+            rng = np.random.default_rng(7)
+            big_tbl = pa.table({"v": rng.standard_normal(4096).astype(np.float32)})
+            split_parts = _write_parquet_table_bounded(
+                big_tbl, root / "split_check", "check", max_bytes=4096
+            )
+            self.assertGreater(len(split_parts), 1)
+            self.assertTrue(all(p["size_bytes"] <= 4096 for p in split_parts))
+            rejoined = pd.concat(
+                [
+                    pq.read_table(root / "split_check" / p["filename"]).to_pandas()
+                    for p in split_parts
+                ],
+                ignore_index=True,
+            )
+            np.testing.assert_allclose(
+                rejoined["v"].to_numpy(dtype=np.float32),
+                big_tbl.column("v").to_numpy(),
+            )
 
 
 if __name__ == "__main__":
