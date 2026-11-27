@@ -31,6 +31,8 @@ feature_groups:
     stale_days: 180
   fundamental_quality:
     enabled: true
+  fundamental_restatement:
+    enabled: true
   valuation_dynamic:
     enabled: true
   earnings_pead_sue:

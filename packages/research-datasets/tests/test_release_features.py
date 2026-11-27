@@ -352,7 +352,7 @@ class ReleaseFeaturesTest(unittest.TestCase):
                 np.testing.assert_allclose(out["release_revenue_yoy"], expected)
 
     def test_family_specs_and_manifest_validation(self) -> None:
-        self.assertEqual(research_datasets.__version__, "2.6.0")
+        self.assertEqual(research_datasets.__version__, "2.7.0")
         self.assertEqual(
             FAMILY_SPECS["release_documents"].identity,
             "cik",

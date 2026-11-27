@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import time, timedelta
 from types import MappingProxyType
 
-__version__ = "2.6.0"
+__version__ = "2.7.0"
 API = "v1"
 
 # The newest manifest layout this SDK reads; client_min_version is checked separately.
@@ -345,5 +345,12 @@ REFERENCE_SERIES: Mapping[str, Mapping[str, str]] = MappingProxyType(
         "DEXSFUS": _series_meta("fx", "units_per_usd", "log_return"),
         "DEXUSNZ": _series_meta("fx", "usd_per_unit", "log_return"),
         "DEXTHUS": _series_meta("fx", "units_per_usd", "log_return"),
+        # 7x24 Crypto daily & causal NY clock snapshots.
+        "CBBTCUSD": _series_meta("crypto", "usd", "log_return"),
+        "CBETHUSD": _series_meta("crypto", "usd", "log_return"),
+        "ALPACA_BTC_CLOSE16": _series_meta("crypto", "usd", "log_return"),
+        "ALPACA_BTC_PRE06": _series_meta("crypto", "usd", "log_return"),
+        "ALPACA_ETH_CLOSE16": _series_meta("crypto", "usd", "log_return"),
+        "ALPACA_ETH_PRE06": _series_meta("crypto", "usd", "log_return"),
     }
 )

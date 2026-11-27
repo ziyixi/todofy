@@ -1,3 +1,4 @@
+load("@rules_python//python:packaging.bzl", "py_package", "py_wheel")
 load("//tools/bazel/audit:sources.bzl", "source_audit_files")
 load("//tools/bazel/python:tests.bzl", "ruff_test")
 
@@ -28,6 +29,25 @@ alias(
     name = "library",
     actual = "//packages/research-datasets/src/research_datasets:library",
     visibility = ["//visibility:public"],
+)
+
+py_package(
+    name = "wheel_files",
+    packages = ["packages/research-datasets/src"],
+    tags = ["manual"],
+    deps = ["//packages/research-datasets/src/research_datasets:library"],
+)
+
+py_wheel(
+    name = "wheel",
+    distribution = "todofy-research-datasets",
+    python_requires = ">=3.11",
+    stamp = 0,
+    strip_path_prefixes = ["packages/research-datasets/src"],
+    tags = ["manual"],
+    version = "2.7.0",
+    visibility = ["//visibility:public"],
+    deps = [":wheel_files"],
 )
 
 filegroup(

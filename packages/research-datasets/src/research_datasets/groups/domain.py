@@ -217,6 +217,218 @@ def build_fundamental_quality(
     return pd.DataFrame(data, index=af.index)
 
 
+_RESTATEMENT_COLS = (
+    "restate_ni_assets",
+    "restate_rev_assets",
+    "restate_ni_count_4q",
+    "restate_rev_count_4q",
+    "restate_any_downward_4q",
+    "restate_sec_non_reliance_365d",
+    "restate_sec_amendment_365d",
+)
+_AMENDMENT_EVENT_KINDS = frozenset(
+    {"annual_report_amendment", "quarterly_report_amendment"}
+)
+
+
+@register_feature_group(
+    "fundamental_restatement",
+    columns=_RESTATEMENT_COLS,
+    default_params={"lookback_days": 365, "quarters": 4},
+    description="Zero-LLM PIT financial restatement deltas from FundStore snapshots + SEC 8-K 4.02 / 10-K/Q-A flags.",
+)
+def build_fundamental_restatement(
+    ctx: GroupBuildContext, params: Mapping[str, Any]
+) -> pd.DataFrame:
+    af = ctx.stores.anchors.frame
+    n = len(af)
+    data = {col: np.full(n, np.nan, dtype=np.float32) for col in _RESTATEMENT_COLS}
+    if n == 0:
+        return pd.DataFrame(data, index=af.index)
+
+    n_q = max(1, int(params.get("quarters", 4)))
+    lookback_days = max(30, int(params.get("lookback_days", 365)))
+    lookback_ns = lookback_days * 86_400_000_000_000
+    fin_mask = _sic_financial_mask(ctx)
+
+    # Part 1: Strictly causal per-snapshot restatement deltas from FundStore
+    fstore = ctx.stores.fundamentals
+    n_snaps = max(0, len(fstore.snap_offsets) - 1)
+    if n_snaps > 0:
+        from ..stores import FUND_CHANNELS
+
+        ch_pos = {name: i for i, name in enumerate(FUND_CHANNELS)}
+        idx_ni = ch_pos["net_income"]
+        idx_rev = ch_pos["revenue"]
+        idx_ta = ch_pos["total_assets"]
+
+        snap_ni_assets = np.full(n_snaps, np.nan, dtype=np.float32)
+        snap_rev_assets = np.full(n_snaps, np.nan, dtype=np.float32)
+        snap_ni_cnt = np.full(n_snaps, np.nan, dtype=np.float32)
+        snap_rev_cnt = np.full(n_snaps, np.nan, dtype=np.float32)
+        snap_down = np.full(n_snaps, np.nan, dtype=np.float32)
+
+        q_vals = fstore.quarter_values
+        q_ords = fstore.quarter_period_end_ordinals
+        offs = fstore.snap_offsets
+
+        for c_idx in range(len(fstore.ciks)):
+            lo_s = int(fstore.cik_snap_starts[c_idx])
+            hi_s = int(fstore.cik_snap_ends[c_idx])
+            if hi_s <= lo_s:
+                continue
+            first_ni: dict[int, float] = {}
+            first_rev: dict[int, float] = {}
+            for s_id in range(lo_s, hi_s):
+                r0 = int(offs[s_id])
+                r1 = int(offs[s_id + 1])
+                if r1 <= r0:
+                    continue
+                vals_s = q_vals[r0:r1]
+                ords_s = q_ords[r0:r1]
+
+                # Record first-reported value per fiscal period strictly chronologically
+                ni_col = vals_s[:, idx_ni]
+                rev_col = vals_s[:, idx_rev]
+                ta_col = vals_s[:, idx_ta]
+                ni_pairs: list[tuple[int, float]] = []
+                rev_pairs: list[tuple[int, float]] = []
+                latest_ta = float("nan")
+                for row_k in range(len(ords_s)):
+                    pe = int(ords_s[row_k])
+                    ni_v = float(ni_col[row_k])
+                    if math.isfinite(ni_v):
+                        if pe not in first_ni:
+                            first_ni[pe] = ni_v
+                        ni_pairs.append((pe, ni_v))
+                    rev_v = float(rev_col[row_k])
+                    if math.isfinite(rev_v):
+                        if pe not in first_rev:
+                            first_rev[pe] = rev_v
+                        rev_pairs.append((pe, rev_v))
+                    ta_v = float(ta_col[row_k])
+                    if math.isfinite(ta_v) and ta_v > 0.0:
+                        latest_ta = ta_v
+
+                if not math.isfinite(latest_ta) or latest_ta <= 0.0:
+                    continue
+                tol = max(1e-4 * latest_ta, 1e4)
+                if ni_pairs:
+                    recent_ni = ni_pairs[-n_q:]
+                    ni_sum = 0.0
+                    ni_c = 0
+                    down_flag = 0.0
+                    for pe, cur_v in recent_ni:
+                        d_v = cur_v - first_ni[pe]
+                        ni_sum += d_v
+                        if abs(d_v) > tol:
+                            ni_c += 1
+                        if d_v < -tol:
+                            down_flag = 1.0
+                    snap_ni_assets[s_id] = np.float32(
+                        np.clip(ni_sum / latest_ta, -2.0, 2.0)
+                    )
+                    snap_ni_cnt[s_id] = np.float32(ni_c)
+                    snap_down[s_id] = np.float32(down_flag)
+                if rev_pairs:
+                    recent_rev = rev_pairs[-n_q:]
+                    rev_sum = 0.0
+                    rev_c = 0
+                    for pe, cur_v in recent_rev:
+                        d_v = cur_v - first_rev[pe]
+                        rev_sum += d_v
+                        if abs(d_v) > tol:
+                            rev_c += 1
+                    snap_rev_assets[s_id] = np.float32(
+                        np.clip(rev_sum / latest_ta, -2.0, 2.0)
+                    )
+                    snap_rev_cnt[s_id] = np.float32(rev_c)
+
+        snap_ids = af["fund_snap_id"].to_numpy(dtype=np.int64, copy=False)
+        valid_snap = (snap_ids >= 0) & (snap_ids < n_snaps)
+        if valid_snap.any():
+            vs = snap_ids[valid_snap]
+            data["restate_ni_assets"][valid_snap] = snap_ni_assets[vs]
+            data["restate_rev_assets"][valid_snap] = snap_rev_assets[vs]
+            data["restate_ni_count_4q"][valid_snap] = snap_ni_cnt[vs]
+            data["restate_rev_count_4q"][valid_snap] = snap_rev_cnt[vs]
+            data["restate_any_downward_4q"][valid_snap] = snap_down[vs]
+        if fin_mask.any():
+            data["restate_rev_assets"][fin_mask] = np.nan
+            data["restate_rev_count_4q"][fin_mask] = np.nan
+
+    # Part 2: Strictly causal SEC 8-K Item 4.02 (non_reliance) & 10-K/Q-A flags from EventStore
+    ev_store = ctx.stores.events
+    if "event_observations" in ctx.families or len(ev_store.available_at_ns) > 0:
+        non_rel_code = -1
+        amend_codes: set[int] = set()
+        for k_idx, k_name in enumerate(ev_store.kinds):
+            if k_name == "non_reliance":
+                non_rel_code = k_idx
+            elif k_name in _AMENDMENT_EVENT_KINDS:
+                amend_codes.add(k_idx)
+
+        ai = af["asset_idx"].to_numpy(dtype=np.int64, copy=False)
+        dec_ns = clocks.instants(af["decision_at"].to_numpy(dtype=object))
+        non_rel_out = np.zeros(n, dtype=np.float32)
+        amend_out = np.zeros(n, dtype=np.float32)
+        invalid_dec = dec_ns == clocks.NAT
+        non_rel_out[invalid_dec] = np.nan
+        amend_out[invalid_dec] = np.nan
+
+        if len(ev_store.available_at_ns) > 0 and (non_rel_code >= 0 or amend_codes):
+            order = np.argsort(ai, kind="mergesort")
+            ai_s = ai[order]
+            diffs = np.flatnonzero(np.diff(ai_s)) + 1
+            starts = np.concatenate(([0], diffs))
+            ends = np.concatenate((diffs, [n]))
+            amend_arr = np.array(sorted(amend_codes), dtype=np.int32)
+            for b_idx in range(len(starts)):
+                s_p = int(starts[b_idx])
+                e_p = int(ends[b_idx])
+                a_i = int(ai_s[s_p])
+                if a_i < 0 or (a_i + 1) >= len(ev_store.asset_offsets):
+                    continue
+                e0 = int(ev_store.asset_offsets[a_i])
+                e1 = int(ev_store.asset_offsets[a_i + 1])
+                if e1 <= e0:
+                    continue
+                srcs = ev_store.source_id[e0:e1]
+                av = ev_store.available_at_ns[e0:e1]
+                kc = ev_store.kind_code[e0:e1]
+                sec_ok = (srcs == 0) & (av != clocks.NAT)
+                if not sec_ok.any():
+                    continue
+                rows = order[s_p:e_p]
+                d_rows = dec_ns[rows]
+                ok_d = d_rows != clocks.NAT
+                if not ok_d.any():
+                    continue
+                rows_ok = rows[ok_d]
+                d_ok = d_rows[ok_d]
+
+                if non_rel_code >= 0:
+                    nr_mask = sec_ok & (kc == non_rel_code)
+                    if nr_mask.any():
+                        nr_av = np.sort(av[nr_mask])
+                        hi_p = np.searchsorted(nr_av, d_ok, side="right")
+                        lo_p = np.searchsorted(nr_av, d_ok - lookback_ns, side="right")
+                        non_rel_out[rows_ok] = ((hi_p - lo_p) > 0).astype(np.float32)
+
+                if len(amend_arr):
+                    am_mask = sec_ok & np.isin(kc, amend_arr)
+                    if am_mask.any():
+                        am_av = np.sort(av[am_mask])
+                        hi_p = np.searchsorted(am_av, d_ok, side="right")
+                        lo_p = np.searchsorted(am_av, d_ok - lookback_ns, side="right")
+                        amend_out[rows_ok] = (hi_p - lo_p).astype(np.float32)
+
+        data["restate_sec_non_reliance_365d"] = non_rel_out
+        data["restate_sec_amendment_365d"] = amend_out
+
+    return pd.DataFrame(data, index=af.index)
+
+
 _VALUATION_COLS = tuple(f"val_{name}" for name in _valuation.VALUATION_NAMES)
 
 
@@ -960,9 +1172,19 @@ def build_news_intensity(
     return pd.DataFrame(data, index=af.index)
 
 
+_CRYPTO_MACRO_COLS = (
+    "crypto_ret_1d_btc",
+    "crypto_ret_1d_eth",
+    "crypto_ret_21d_btc",
+    "crypto_rvol_21d_btc",
+    "crypto_weekend_gap_btc",
+    "crypto_weekend_gap_eth",
+)
+
 _MACRO_ALL_COLS = (
     *_extra_features.REFERENCE_COLUMNS[:-1],
     *_extra_features.MARKET_ETF_COLUMNS,
+    *_CRYPTO_MACRO_COLS,
 )
 
 
