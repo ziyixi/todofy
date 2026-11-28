@@ -136,6 +136,8 @@ _FUND_NORMALIZE_CONCEPTS = frozenset(
         "long_term_debt",
         "shares_outstanding_cover",
         "shares_outstanding_bs",
+        "shares_weighted_diluted",
+        "shares_weighted_basic",
         "eps_diluted",
     }
 )
@@ -198,6 +200,8 @@ _ANCHOR_META_COLS = (
     "fund_snap_id",
     "event_start_cursor",
     "event_end_cursor",
+    "market_cap_usd",
+    "adv21_usd",
 )
 
 
@@ -1158,6 +1162,24 @@ def build_fund_store(
                         if ps is not None or not pv.usable:
                             continue
                         inst_by_pe.setdefault(pe, {})[ch_name] = pv
+                # Fallback to diluted -> basic quarterly shares when instant cover/BS shares are absent
+                for fallback_sh in ("shares_weighted_diluted", "shares_weighted_basic"):
+                    q_sh_map = quarters_by_concept.get(fallback_sh, {})
+                    for pv in q_sh_map.values():
+                        if not pv.usable:
+                            continue
+                        slot_i = inst_by_pe.setdefault(pv.period_end, {})
+                        if "shares_outstanding" not in slot_i:
+                            slot_i["shares_outstanding"] = pv
+                    p_sh_map = concept_periods.get(fallback_sh, {})
+                    for (ps, pe), pv in p_sh_map.items():
+                        if ps is None or not pv.usable:
+                            continue
+                        span = (pe - ps).days + 1
+                        if 70 <= span <= 375:
+                            slot_i = inst_by_pe.setdefault(pe, {})
+                            if "shares_outstanding" not in slot_i:
+                                slot_i["shares_outstanding"] = pv
 
                 all_pes = sorted(set(dur_by_pe) | set(inst_by_pe))
                 if not all_pes:
@@ -1234,7 +1256,11 @@ def build_fund_store(
             machine = _fund.IssuerStateMachine(
                 cik,
                 target_views=(),
-                record_quarters=_FUND_QUARTER_CONCEPTS,
+                record_quarters=(
+                    *_FUND_QUARTER_CONCEPTS,
+                    "shares_weighted_diluted",
+                    "shares_weighted_basic",
+                ),
                 split_factor_fn=split_fn,
                 snapshot_callback=_on_snapshot,
                 update_ledger=False,

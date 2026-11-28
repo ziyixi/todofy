@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import time, timedelta
 from types import MappingProxyType
 
-__version__ = "2.7.0"
+__version__ = "2.8.0"
 API = "v1"
 
 # The newest manifest layout this SDK reads; client_min_version is checked separately.
@@ -195,6 +195,10 @@ FAMILY_SPECS: dict[str, FamilySpec] = {
     "release_documents": FamilySpec("cik", "accepted_at", _V1),
     "extraction_results": FamilySpec("cik", "recorded_at", _V1),
     "extraction_facts": FamilySpec("cik", "accepted_at", _V1),
+    # Data v2 open-weight Item 1 embeddings, 10-K/10-Q paragraph diff scores & 8-K event facts.
+    "sec_item1_embeddings": FamilySpec("cik", "filing_date", _V1),
+    "sec_filing_diffs": FamilySpec("cik", "accepted_at", _V1),
+    "sec_8k_events": FamilySpec("cik", "accepted_at", _V1),
 }
 DATA_FAMILIES: tuple[str, ...] = tuple(FAMILY_SPECS)
 

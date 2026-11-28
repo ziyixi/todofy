@@ -371,6 +371,9 @@ _BASE_CONCEPTS: tuple[Concept, ...] = (
         True,
         _tags(
             "PaymentsForRepurchaseOfCommonStock",
+            "PaymentsForRepurchaseOfEquity",
+            "StockRepurchasedAndRetiredDuringPeriodValue",
+            "StockRepurchasedDuringPeriodValue",
             ("ifrs-full", "PaymentsToAcquireOrRedeemEntitysShares"),
         ),
         2,

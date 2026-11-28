@@ -392,6 +392,267 @@ def build_peer_spillover(
             data["peer_spill_dvol_shock_5d_252w"][rows] = sdv_252.astype(np.float32)
             data["peer_spill_ovn_5d_252w"][rows] = sovn_252.astype(np.float32)
 
+    # Blend PIT Qwen3-Embedding-4B Item 1 cosine peers when `sec_item1_embeddings` is present
+    emb_blend = float(params.get("embedding_blend", 0.5))
+    if "sec_item1_embeddings" in ctx.families and 0.0 < emb_blend <= 1.0:
+        emb_df = build_embedding_peer_spillover(ctx, {"top_k": top_k})
+        for ret_col, emb_col in (
+            ("peer_spill_ret_5d_63w", "emb_peer_ret_5d"),
+            ("peer_spill_ret_21d_63w", "emb_peer_ret_21d"),
+            ("peer_spill_dvol_shock_5d_63w", "emb_peer_dvol_shock_5d"),
+        ):
+            r_arr = data[ret_col]
+            e_arr = emb_df[emb_col].to_numpy(dtype=np.float32, copy=False)
+            both_ok = np.isfinite(r_arr) & np.isfinite(e_arr)
+            only_e = (~np.isfinite(r_arr)) & np.isfinite(e_arr)
+            if both_ok.any():
+                r_arr[both_ok] = (
+                    (1.0 - emb_blend) * r_arr[both_ok] + emb_blend * e_arr[both_ok]
+                ).astype(np.float32)
+            if only_e.any():
+                r_arr[only_e] = e_arr[only_e]
+
+    return pd.DataFrame(data, index=af.index)
+
+
+_EMB_PEER_COLS: tuple[str, ...] = (
+    "emb_peer_ret_5d",
+    "emb_peer_ret_21d",
+    "emb_peer_dvol_shock_5d",
+    "emb_peer_max_cos",
+    "emb_self_yoy_cos",
+)
+
+
+def _decode_embedding_blob(
+    raw_val: Any, expected_dim: int | None = None
+) -> np.ndarray | None:
+    """Decode float16/float32 bytes or sequence into an L2-normalized 1D float32 vector."""
+    arr: np.ndarray | None = None
+    if isinstance(raw_val, (bytes, bytearray, memoryview)):
+        b_len = len(raw_val)
+        if b_len == 0:
+            return None
+        if expected_dim and b_len == expected_dim * 2:
+            arr = np.frombuffer(raw_val, dtype=np.float16).astype(np.float32)
+        elif expected_dim and b_len == expected_dim * 4:
+            arr = np.frombuffer(raw_val, dtype=np.float32).copy()
+        elif b_len % 2 == 0:
+            arr = np.frombuffer(raw_val, dtype=np.float16).astype(np.float32)
+    elif isinstance(raw_val, (list, tuple, np.ndarray)):
+        arr = np.asarray(raw_val, dtype=np.float32)
+    if arr is None or arr.ndim != 1 or arr.size == 0 or not np.all(np.isfinite(arr)):
+        return None
+    norm = float(np.linalg.norm(arr))
+    if norm <= 1e-8:
+        return None
+    return (arr / norm).astype(np.float32, copy=False)
+
+
+@register_feature_group(
+    "embedding_peer_spillover",
+    columns=_EMB_PEER_COLS,
+    default_params={"top_k": 10, "min_cosine": 0.25},
+    description="PIT Qwen3-Embedding-4B 10-K Item 1 dynamic cosine peer spillover & YoY business drift.",
+)
+def build_embedding_peer_spillover(
+    ctx: GroupBuildContext, params: Mapping[str, Any]
+) -> pd.DataFrame:
+    af = ctx.stores.anchors.frame
+    prices = ctx.stores.prices
+    n = len(af)
+    data = {col: np.full(n, np.nan, dtype=np.float32) for col in _EMB_PEER_COLS}
+    if (
+        n == 0
+        or "sec_item1_embeddings" not in ctx.families
+        or prices.data.shape[0] < 2
+        or prices.data.shape[1] < 6
+    ):
+        return pd.DataFrame(data, index=af.index)
+
+    emb_raw = (
+        ctx.version.family("sec_item1_embeddings")
+        if hasattr(ctx.version, "family")
+        else None
+    )
+    if emb_raw is None or emb_raw.empty or "cik" not in emb_raw.columns:
+        return pd.DataFrame(data, index=af.index)
+
+    acc_col = (
+        "accepted_at"
+        if "accepted_at" in emb_raw.columns
+        else ("available_at" if "available_at" in emb_raw.columns else "filing_date")
+    )
+    pub_ns = clocks.instants(emb_raw[acc_col].to_numpy(dtype=object))
+    if ctx.time_policy == "observed_content" and "observed_at" in emb_raw.columns:
+        obs_ns = clocks.instants(emb_raw["observed_at"].to_numpy(dtype=object))
+        avail_ns = clocks.available_at(
+            pub_ns, pub_ns == clocks.NAT, "observed_content", [obs_ns]
+        )
+    else:
+        avail_ns = pub_ns
+
+    vec_col = (
+        "vector_f16_blob"
+        if "vector_f16_blob" in emb_raw.columns
+        else ("embedding" if "embedding" in emb_raw.columns else None)
+    )
+    if vec_col is None:
+        return pd.DataFrame(data, index=af.index)
+
+    # Index sorted PIT embeddings per 10-digit CIK: (avail_ns, vec_f32, self_yoy_cos)
+    by_cik_raw: dict[str, list[tuple[int, np.ndarray]]] = {}
+    dims_col = (
+        pd.to_numeric(emb_raw["dim"], errors="coerce").fillna(0).astype(int).tolist()
+        if "dim" in emb_raw.columns
+        else [0] * len(emb_raw)
+    )
+    ciks_list = emb_raw["cik"].astype(str).str.strip().str.zfill(10).tolist()
+    blobs_list = emb_raw[vec_col].tolist()
+    for av_i, cik_s, dim_i, blob in zip(
+        avail_ns.tolist(), ciks_list, dims_col, blobs_list, strict=True
+    ):
+        if av_i == clocks.NAT or not cik_s.isdigit():
+            continue
+        vec = _decode_embedding_blob(blob, dim_i if dim_i > 0 else None)
+        if vec is not None:
+            by_cik_raw.setdefault(cik_s, []).append((int(av_i), vec))
+
+    if not by_cik_raw:
+        return pd.DataFrame(data, index=af.index)
+
+    by_cik: dict[str, tuple[np.ndarray, list[np.ndarray], np.ndarray]] = {}
+    target_dim: int | None = None
+    for cik_s, items in by_cik_raw.items():
+        items.sort(key=lambda pair: pair[0])
+        filtered: list[tuple[int, np.ndarray]] = []
+        for av_i, v in items:
+            if target_dim is None:
+                target_dim = int(v.size)
+            if int(v.size) == target_dim:
+                filtered.append((av_i, v))
+        if not filtered:
+            continue
+        av_arr = np.array([it[0] for it in filtered], dtype=np.int64)
+        vecs = [it[1] for it in filtered]
+        yoy = np.full(len(vecs), np.nan, dtype=np.float32)
+        for j in range(1, len(vecs)):
+            yoy[j] = np.float32(np.clip(float(np.dot(vecs[j], vecs[j - 1])), -1.0, 1.0))
+        by_cik[cik_s] = (av_arr, vecs, yoy)
+
+    if target_dim is None or not by_cik:
+        return pd.DataFrame(data, index=af.index)
+
+    ret, _, lvl, dvol = _clean_returns_and_dvol(ctx)
+    assert dvol is not None
+    n_assets, n_sess = ret.shape
+    mkt_lvl = _market_series(prices, lvl)
+    ret_5d = np.full((n_assets, n_sess), np.nan, dtype=np.float64)
+    ret_21d = np.full((n_assets, n_sess), np.nan, dtype=np.float64)
+    for w, target in ((5, ret_5d), (21, ret_21d)):
+        if n_sess > w:
+            p1, p0 = lvl[:, w:], lvl[:, :-w]
+            m1, m0 = mkt_lvl[w:], mkt_lvl[:-w]
+            ok = (
+                np.isfinite(p1)
+                & np.isfinite(p0)
+                & (p0 > 0)
+                & np.isfinite(m1)[None, :]
+                & np.isfinite(m0)[None, :]
+                & (m0 > 0)[None, :]
+            )
+            with np.errstate(invalid="ignore", divide="ignore"):
+                m_ret = np.broadcast_to((m1 / m0 - 1.0)[None, :], p1.shape)
+                target[:, w:][ok] = (p1[ok] / p0[ok] - 1.0) - m_ret[ok]
+    dv5 = _rolling_mean(dvol, 5, min_periods=3)
+    dv63 = _rolling_mean(dvol, 63, min_periods=20)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        dv_shock = np.where(
+            np.isfinite(dv5) & np.isfinite(dv63) & (dv5 > 0.0) & (dv63 > 0.0),
+            np.log(dv5 / dv63),
+            np.nan,
+        )
+    del ret, lvl, dvol, dv5, dv63
+
+    top_k = max(1, int(params.get("top_k", 10)))
+    min_cos = float(params.get("min_cosine", 0.25))
+    ciks_arr = ctx.ciks.astype(object).fillna("").astype(str).to_numpy()
+    ai = af["asset_idx"].to_numpy(dtype=np.int64, copy=False)
+    si = af["session_idx"].to_numpy(dtype=np.int64, copy=False)
+    dec_ns = clocks.instants(af["decision_at"].to_numpy(dtype=object))
+
+    order = np.argsort(si, kind="mergesort")
+    si_s = si[order]
+    diffs = np.flatnonzero(np.diff(si_s)) + 1
+    starts = np.concatenate(([0], diffs))
+    ends = np.concatenate((diffs, [n]))
+
+    for b_idx in range(len(starts)):
+        s_pos, e_pos = int(starts[b_idx]), int(ends[b_idx])
+        s = int(si_s[s_pos])
+        if s < 5 or s >= n_sess:
+            continue
+        rows = order[s_pos:e_pos]
+        emb_rows: list[int] = []
+        emb_vecs: list[np.ndarray] = []
+        emb_ciks: list[str] = []
+        emb_aids: list[int] = []
+        for r_i in rows.tolist():
+            a_i = int(ai[r_i])
+            d_i = int(dec_ns[r_i])
+            c_s = str(ciks_arr[r_i]).strip()
+            c_pad = c_s.zfill(10) if c_s.isdigit() else ""
+            if a_i < 0 or a_i >= n_assets or d_i == clocks.NAT or c_pad not in by_cik:
+                continue
+            av_arr, vec_list, yoy_arr = by_cik[c_pad]
+            pos_v = int(np.searchsorted(av_arr, d_i, side="right")) - 1
+            if pos_v < 0:
+                continue
+            data["emb_self_yoy_cos"][r_i] = yoy_arr[pos_v]
+            emb_rows.append(r_i)
+            emb_vecs.append(vec_list[pos_v])
+            emb_ciks.append(c_pad)
+            emb_aids.append(a_i)
+
+        m = len(emb_rows)
+        if m < 2:
+            continue
+        mat_e = np.vstack(emb_vecs)  # [m, D], L2-normalized
+        sim_mat = mat_e @ mat_e.T
+        np.fill_diagonal(sim_mat, -np.inf)
+        for i1 in range(m):
+            for i2 in range(i1 + 1, m):
+                if emb_ciks[i1] == emb_ciks[i2]:
+                    sim_mat[i1, i2] = -np.inf
+                    sim_mat[i2, i1] = -np.inf
+
+        a_arr = np.asarray(emb_aids, dtype=np.int64)
+        r5_v = ret_5d[a_arr, s]
+        r21_v = ret_21d[a_arr, s]
+        dv_v = dv_shock[a_arr, s]
+        k_eff = min(top_k, m - 1)
+        for i_loc, r_idx in enumerate(emb_rows):
+            sims = sim_mat[i_loc]
+            if k_eff < len(sims):
+                cand = np.argpartition(sims, -k_eff)[-k_eff:]
+            else:
+                cand = np.arange(len(sims))
+            good = cand[np.isfinite(sims[cand]) & (sims[cand] >= min_cos)]
+            if not len(good):
+                continue
+            w = sims[good].astype(np.float64)
+            data["emb_peer_max_cos"][r_idx] = np.float32(np.max(w))
+            for src_v, dst_col in (
+                (r5_v, "emb_peer_ret_5d"),
+                (r21_v, "emb_peer_ret_21d"),
+                (dv_v, "emb_peer_dvol_shock_5d"),
+            ):
+                pv = src_v[good]
+                ok = np.isfinite(pv)
+                if ok.any():
+                    wk = w[ok]
+                    data[dst_col][r_idx] = np.float32(np.dot(wk, pv[ok]) / np.sum(wk))
+
     return pd.DataFrame(data, index=af.index)
 
 
@@ -902,5 +1163,213 @@ def build_macro_sensitivity_crisis(
         0.0,
         c_str_row * (-b_crd),
     ).astype(np.float32)
+
+    return pd.DataFrame(data, index=af.index)
+
+
+_STOCK_MACRO_IX_COLS: tuple[str, ...] = (
+    "ix_beta_x_vix_shock",
+    "ix_lev_x_credit_chg",
+    "ix_duration_x_rate_chg",
+    "ix_btc_beta_x_weekend_gap",
+    "ix_size_x_small_spread",
+    "ix_mom_x_mkt_vol",
+)
+
+
+def _demean_by_session(values: np.ndarray, session_idx: np.ndarray) -> np.ndarray:
+    """Cross-sectionally demean finite values within each session so mean == 0 per date."""
+    out = np.full(len(values), np.nan, dtype=np.float64)
+    fin = np.flatnonzero(np.isfinite(values))
+    if not len(fin):
+        return out
+    s_sub = session_idx[fin]
+    ord_s = np.argsort(s_sub, kind="mergesort")
+    fin_s = fin[ord_s]
+    ss = s_sub[ord_s]
+    diffs = np.flatnonzero(np.diff(ss)) + 1
+    starts = np.concatenate(([0], diffs))
+    ends = np.concatenate((diffs, [len(fin_s)]))
+    for s0, e0 in zip(starts.tolist(), ends.tolist(), strict=True):
+        sl = fin_s[s0:e0]
+        v = values[sl]
+        sd = float(np.std(v))
+        mu = float(np.mean(v))
+        out[sl] = (v - mu) / sd if sd > 1e-8 else 0.0
+    return out
+
+
+@register_feature_group(
+    "stock_macro_interactions",
+    columns=_STOCK_MACRO_IX_COLS,
+    default_params={"window": 252},
+    description="Orthogonalized cross-sectional Stock x Macro interaction features.",
+)
+def build_stock_macro_interactions(
+    ctx: GroupBuildContext, params: Mapping[str, Any]
+) -> pd.DataFrame:
+    af = ctx.stores.anchors.frame
+    prices = ctx.stores.prices
+    mstore = ctx.stores.macro
+    fstore = ctx.stores.fundamentals
+    n = len(af)
+    data = {col: np.full(n, np.nan, dtype=np.float32) for col in _STOCK_MACRO_IX_COLS}
+    if n == 0 or prices.data.shape[1] < 22 or mstore.data.shape[0] == 0:
+        return pd.DataFrame(data, index=af.index)
+
+    win = int(params.get("window", 252))
+    mp = max(20, min(60, win // 2))
+    ret, _, lvl, dvol = _clean_returns_and_dvol(ctx)
+    assert dvol is not None
+    n_assets, n_sess = ret.shape
+    mkt_ret = _market_series(prices, ret)
+    resid = ret - mkt_ret[None, :]
+    m_pos = {c: idx for idx, c in enumerate(mstore.columns)}
+
+    def _mvec(name: str) -> np.ndarray:
+        out_m = np.full(n_sess, np.nan, dtype=np.float64)
+        if name in m_pos:
+            k = min(n_sess, mstore.data.shape[0])
+            out_m[:k] = mstore.data[:k, m_pos[name]].astype(np.float64)
+        return out_m
+
+    # Stock rolling market beta, rate beta, and 63d BTC beta
+    mkt_beta_mat = _rolling_ols_beta_1d(ret, mkt_ret, min(win, n_sess), mp)
+    mkt_beta = _select_at_anchors(mkt_beta_mat, ctx.stores.anchors).astype(np.float64)
+    del mkt_beta_mat, ret
+
+    dgs10 = _mvec("raw_dgs10") / 100.0
+    d10y_1d = np.full(n_sess, np.nan, dtype=np.float64)
+    if n_sess > 1:
+        d10y_1d[1:] = dgs10[1:] - dgs10[:-1]
+    if np.isfinite(d10y_1d).sum() >= mp:
+        rate_beta_mat = _rolling_ols_beta_1d(resid, d10y_1d, min(win, n_sess), mp)
+        rate_beta = _select_at_anchors(rate_beta_mat, ctx.stores.anchors).astype(
+            np.float64
+        )
+        del rate_beta_mat
+    else:
+        rate_beta = np.full(n, np.nan, dtype=np.float64)
+
+    btc_1d = _mvec("crypto_ret_1d_btc")
+    if np.isfinite(btc_1d).sum() >= 30:
+        btc_beta_mat = _rolling_ols_beta_1d(resid, btc_1d, 63, 30)
+        btc_beta = _select_at_anchors(btc_beta_mat, ctx.stores.anchors).astype(
+            np.float64
+        )
+        del btc_beta_mat
+    else:
+        btc_beta = np.full(n, np.nan, dtype=np.float64)
+    del resid
+
+    # Trailing 126d momentum & 21d log dollar volume size proxy
+    mom_126 = np.full((n_assets, n_sess), np.nan, dtype=np.float64)
+    w_mom = min(126, max(21, n_sess - 1))
+    if n_sess > w_mom:
+        p1, p0 = lvl[:, w_mom:], lvl[:, :-w_mom]
+        ok = np.isfinite(p1) & np.isfinite(p0) & (p0 > 0.0)
+        mom_126[:, w_mom:][ok] = p1[ok] / p0[ok] - 1.0
+    mom_row = _select_at_anchors(mom_126, ctx.stores.anchors).astype(np.float64)
+    dv21_mat = _rolling_mean(dvol, 21, min_periods=10)
+    ldv_row = np.log1p(
+        np.maximum(
+            _select_at_anchors(dv21_mat, ctx.stores.anchors).astype(np.float64), 0.0
+        )
+    )
+    del lvl, dvol, mom_126, dv21_mat
+
+    # PIT net leverage = (total_debt - cash) / total_assets & negative FCF/Assets duration proxy from FundStore
+    si = af["session_idx"].to_numpy(dtype=np.int64, copy=False)
+    snap_ids = af["fund_snap_id"].to_numpy(dtype=np.int32, copy=False)
+    net_lev = np.full(n, np.nan, dtype=np.float64)
+    neg_cf_dur = np.full(n, np.nan, dtype=np.float64)
+    if len(fstore.snap_offsets) > 1:
+        # FUND_CHANNELS indices: fcf=8, cash=9, total_assets=10, total_debt=13
+        for r_i in range(n):
+            sp = int(snap_ids[r_i])
+            if sp < 0 or sp + 1 >= len(fstore.snap_offsets):
+                continue
+            q0, q1 = int(fstore.snap_offsets[sp]), int(fstore.snap_offsets[sp + 1])
+            if q1 <= q0:
+                continue
+            qv = fstore.quarter_values[q0:q1]
+            ta_idx = np.flatnonzero(np.isfinite(qv[:, 10]) & (qv[:, 10] > 0.0))
+            if not len(ta_idx):
+                continue
+            ta = float(qv[int(ta_idx[-1]), 10])
+            cash_idx = np.flatnonzero(np.isfinite(qv[:, 9]))
+            debt_idx = np.flatnonzero(np.isfinite(qv[:, 13]))
+            cash_v = float(qv[int(cash_idx[-1]), 9]) if len(cash_idx) else 0.0
+            debt_v = float(qv[int(debt_idx[-1]), 13]) if len(debt_idx) else 0.0
+            net_lev[r_i] = np.clip((debt_v - cash_v) / ta, -2.0, 2.0)
+            fcf_vals = qv[max(0, len(qv) - 4) :, 8]
+            if np.isfinite(fcf_vals).any():
+                neg_cf_dur[r_i] = np.clip(-float(np.nansum(fcf_vals)) / ta, -1.5, 1.5)
+
+    dur_proxy = np.where(
+        np.isfinite(neg_cf_dur) & np.isfinite(rate_beta),
+        0.5 * neg_cf_dur - 0.5 * rate_beta,
+        np.where(np.isfinite(neg_cf_dur), neg_cf_dur, -rate_beta),
+    )
+    if "market_cap_usd" in af.columns:
+        mc_raw = pd.to_numeric(af["market_cap_usd"], errors="coerce").to_numpy(
+            dtype=np.float64
+        )
+        size_char = np.where(
+            np.isfinite(mc_raw) & (mc_raw > 0.0), np.log(mc_raw), ldv_row
+        )
+    else:
+        size_char = ldv_row
+
+    # Causal macro state vectors aligned to anchor session_idx
+    valid_s = (si >= 0) & (si < n_sess)
+    dvix_21 = _mvec("ref_dvix_21d")
+    if not np.any(np.isfinite(dvix_21)):
+        vix_l = _mvec("raw_vixcls")
+        if n_sess > 21:
+            dvix_21[21:] = vix_l[21:] - vix_l[:-21]
+
+    baa_l = _mvec("ref_credit_baa")
+    if not np.any(np.isfinite(baa_l)):
+        baa_l = _mvec("raw_baa10y") / 100.0
+    d_credit_21 = np.full(n_sess, np.nan, dtype=np.float64)
+    if n_sess > 21:
+        d_credit_21[21:] = baa_l[21:] - baa_l[:-21]
+
+    d10y_21 = _mvec("ref_d10y_21d")
+    if not np.any(np.isfinite(d10y_21)) and n_sess > 21:
+        d10y_21[21:] = dgs10[21:] - dgs10[:-21]
+
+    wgap_btc = _mvec("crypto_weekend_gap_btc")
+    small_sp = _mvec("etf_size_ret_63d")
+    spy_rvol = _mvec("etf_rvol_21d_spy")
+
+    def _row_macro(m_arr: np.ndarray) -> np.ndarray:
+        out_r = np.full(n, np.nan, dtype=np.float64)
+        out_r[valid_s] = m_arr[si[valid_s]]
+        return out_r
+
+    # Orthogonalize stock characteristics per session BEFORE multiplying by causal macro shock
+    z_beta = _demean_by_session(mkt_beta, si)
+    z_lev = _demean_by_session(net_lev, si)
+    z_dur = _demean_by_session(dur_proxy, si)
+    z_btc = _demean_by_session(btc_beta, si)
+    z_size = _demean_by_session(-size_char, si)  # positive for smaller-cap names
+    z_mom = _demean_by_session(mom_row, si)
+
+    for col_name, z_stock, m_shock in (
+        ("ix_beta_x_vix_shock", z_beta, _row_macro(dvix_21)),
+        ("ix_lev_x_credit_chg", z_lev, _row_macro(d_credit_21) * 100.0),
+        ("ix_duration_x_rate_chg", z_dur, _row_macro(d10y_21) * 100.0),
+        ("ix_btc_beta_x_weekend_gap", z_btc, _row_macro(wgap_btc) * 10.0),
+        ("ix_size_x_small_spread", z_size, _row_macro(small_sp) * 10.0),
+        ("ix_mom_x_mkt_vol", z_mom, _row_macro(spy_rvol) * 100.0),
+    ):
+        prod = np.where(
+            np.isfinite(z_stock) & np.isfinite(m_shock),
+            np.clip(z_stock * m_shock, -8.0, 8.0),
+            np.nan,
+        )
+        data[col_name] = prod.astype(np.float32)
 
     return pd.DataFrame(data, index=af.index)

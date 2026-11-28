@@ -470,8 +470,8 @@ def _build_anchors(
     )
 
     dedup_dropped = 0
+    dv21 = _trailing_dvol_21d(price_store, asset_idxs, sess_idxs)
     if deduplicate_issuers and len(cands) > 1:
-        dv21 = _trailing_dvol_21d(price_store, asset_idxs, sess_idxs)
         best_by_key: dict[tuple[date, str], tuple[float, str, int]] = {}
         keep_mask = np.ones(len(cands), dtype=bool)
         for i in range(len(cands)):
@@ -501,6 +501,7 @@ def _build_anchors(
             ciks_s = [ciks_s[i] for i in keep_list]
             asset_idxs = asset_idxs[keep_mask]
             sess_idxs = sess_idxs[keep_mask]
+            dv21 = dv21[keep_mask]
 
     dec_ns = clocks.instants(cands["decision_at"].to_numpy(dtype=object))
 
@@ -541,6 +542,89 @@ def _build_anchors(
         if "is_benchmark" in cands.columns
         else np.zeros(n, dtype=bool)
     )
+    adv21_usd = np.where((dv21 >= 0.0) & (~is_bench), dv21, np.nan).astype(np.float32)
+
+    # Exact PIT market_cap_usd = raw_close * split_adjusted_shares from FundStore + PriceStore
+    mcap_usd = np.full(n, np.nan, dtype=np.float32)
+    n_a, n_s = price_store.data.shape[0], price_store.data.shape[1]
+    if n > 0 and n_a > 0 and n_s > 0 and len(fund_store.snap_offsets) > 1:
+        close_raw_ch = price_store.channel("close_raw")
+        close_adj_ch = price_store.channel("close_adj")
+        split_ch = price_store.channel("split_index")
+        sh_ch_idx = 14  # FUND_CHANNELS.index("shares_outstanding")
+        cal_ords = np.array([d.toordinal() for d in cal.days], dtype=np.int32)
+        snap_sh = np.full(len(fund_store.snap_epoch_ns), np.nan, dtype=np.float64)
+        snap_s_idx = np.full(len(fund_store.snap_epoch_ns), -1, dtype=np.int32)
+        for sp_i in range(len(fund_store.snap_epoch_ns)):
+            q0 = int(fund_store.snap_offsets[sp_i])
+            q1 = int(fund_store.snap_offsets[sp_i + 1])
+            if q1 > q0:
+                sh_vec = fund_store.quarter_values[q0:q1, sh_ch_idx]
+                fin_q = np.flatnonzero(np.isfinite(sh_vec) & (sh_vec > 0.0))
+                if len(fin_q):
+                    snap_sh[sp_i] = float(sh_vec[int(fin_q[-1])])
+                    ep_day = (
+                        pd.Timestamp(
+                            int(fund_store.snap_epoch_ns[sp_i]), unit="ns", tz="UTC"
+                        )
+                        .tz_convert(clocks.NEW_YORK)
+                        .date()
+                    )
+                    pos_s = (
+                        int(np.searchsorted(cal_ords, ep_day.toordinal(), side="right"))
+                        - 1
+                    )
+                    snap_s_idx[sp_i] = (
+                        max(0, min(pos_s, n_s - 1)) if len(cal_ords) else -1
+                    )
+        for i in range(n):
+            if is_bench[i]:
+                continue
+            sp_id = int(snap_ids[i])
+            a_i = int(asset_idxs[i])
+            s_i = int(sess_idxs[i])
+            if (
+                sp_id < 0
+                or sp_id >= len(snap_sh)
+                or not np.isfinite(snap_sh[sp_id])
+                or a_i < 0
+                or a_i >= n_a
+                or s_i < 0
+                or s_i >= n_s
+            ):
+                continue
+            px_r = float(close_raw_ch[a_i, s_i])
+            if not (np.isfinite(px_r) and px_r > 0.0):
+                continue
+            ref_si = int(snap_s_idx[sp_id])
+            split_mult = 1.0
+            if 0 <= ref_si < s_i:
+                sp_sig = float(split_ch[a_i, s_i])
+                sp_ref = float(split_ch[a_i, ref_si])
+                if np.isfinite(sp_sig) and np.isfinite(sp_ref) and sp_ref > 0.0:
+                    split_mult = sp_sig / sp_ref
+                else:
+                    adj_sig = float(close_adj_ch[a_i, s_i])
+                    adj_ref = float(close_adj_ch[a_i, ref_si])
+                    raw_ref = float(close_raw_ch[a_i, ref_si])
+                    if (
+                        np.isfinite(adj_sig)
+                        and np.isfinite(adj_ref)
+                        and np.isfinite(raw_ref)
+                        and adj_ref > 0.0
+                        and raw_ref > 0.0
+                    ):
+                        cand_m = (adj_sig / px_r) / (adj_ref / raw_ref)
+                        if (
+                            np.isfinite(cand_m)
+                            and cand_m > 0.0
+                            and not (0.8 <= cand_m <= 1.25)
+                        ):
+                            split_mult = cand_m
+            mc_val = snap_sh[sp_id] * split_mult * px_r
+            if np.isfinite(mc_val) and mc_val > 0.0:
+                mcap_usd[i] = np.float32(mc_val)
+
     df = pd.DataFrame(
         {
             "row_id": np.arange(n, dtype=np.int64),
@@ -555,6 +639,8 @@ def _build_anchors(
             "fund_snap_id": snap_ids,
             "event_start_cursor": ev_starts,
             "event_end_cursor": ev_ends,
+            "market_cap_usd": mcap_usd,
+            "adv21_usd": adv21_usd,
         }
     )
     order_sha = compute_anchor_order_sha256(df)

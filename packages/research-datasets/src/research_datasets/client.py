@@ -1013,6 +1013,7 @@ class Dataset:
         pad_to: int = 1280,
         recipe_yaml: str | Mapping[str, Any] | None = None,
         include_stores: bool = True,
+        exclude_macro_from_X: bool = True,
         progress: bool | None = None,
     ) -> Any:
         """Zero-leakage <50 ms RAM training view with Tier-2 <= fit_end scaling and JAX TPU tensors."""
@@ -1040,6 +1041,7 @@ class Dataset:
             fit_end=fit_end,
             pad_to=pad_to,
             include_stores=include_stores,
+            exclude_macro_from_X=exclude_macro_from_X,
         )
 
     def preload(self, families: Sequence[str] | None = None) -> Dataset:
