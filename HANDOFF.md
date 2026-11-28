@@ -7,6 +7,8 @@ Documentation entrypoints are in [docs/README](docs/README.md).
 
 Private application follow-ups and release verification are tracked in `private/HANDOFF.md`.
 
+Branch `feat/research-datasets-v2-8` upgrades `packages/research-datasets` to `2.8.0`: physical source gating on unverified news columns in training bundles (`allow_unverified_news=False` by default) with `<= 365` filing-age clipping, exact point-in-time `market_cap_usd` (with `shares_weighted_diluted_q` fallback) and `adv21_usd` persisted in `Anchors`, expanded 10-Q XBRL share-repurchase tags and historical CUSIP short-interest link support, default separation of date-constant macro columns out of cross-sectional `TrainingView.X` into `TrainingView.macro_X` / `JaxTrainingBatch.x_macro` alongside orthogonalized `stock_macro_interactions`, causal `embedding_peer_spillover` (`sec_item1_embeddings`) and `llm_filing_semantics` (`sec_8k_events`, `sec_filing_diffs`) groups, `continuous_feature_scorecard` and `source_coverage_placebo_audit` diagnostics, and one-shot `publish_ml_run` archive upload (`//packages/research-datasets:check` 23/23 targets passed locally).
+
 `packages/research-datasets` memory, indexing, coverage-slice, period-anchor, panel-benchmark, earnings-projection,
 and vectorized fundamental-factor updates landed on `main` (`75e518c4`) after branch CI passed.
 

@@ -49,6 +49,7 @@ VALUATION_LIMITATION = (
 
 _VALUATION_REQUIRED_VIEWS: tuple[str, ...] = (
     "shares_outstanding_i",
+    "shares_weighted_diluted_q",
     "shares_weighted_basic_q",
     "equity_i",
     "net_income_ttm",
@@ -447,18 +448,20 @@ def _build_split_adjuster(
         families = version_or_material.manifest.get("data_families") or {}
         if isinstance(families, Mapping) and "corporate_actions" in families:
             has_ca = True
-            ca_df = (
-                version_or_material.corporate_actions(asset_ids)
-                if asset_ids
-                else pd.DataFrame()
-            )
+            if not asset_ids:
+                ca_df = pd.DataFrame()
+            elif hasattr(version_or_material, "corporate_actions"):
+                ca_df = version_or_material.corporate_actions(asset_ids)
+            else:
+                ca_df = version_or_material.family("corporate_actions", asset_ids)
         elif isinstance(families, Mapping) and "daily_returns" in families:
             has_dr = True
-            dr_df = (
-                version_or_material.total_returns(asset_ids)
-                if asset_ids
-                else pd.DataFrame()
-            )
+            if not asset_ids:
+                dr_df = pd.DataFrame()
+            elif hasattr(version_or_material, "total_returns"):
+                dr_df = version_or_material.total_returns(asset_ids)
+            else:
+                dr_df = version_or_material.family("daily_returns", asset_ids)
 
     if has_ca:
         ev_map = {}
@@ -1157,6 +1160,7 @@ def valuation(
     sh_i_v, sh_i_s, sh_i_pe, _, sh_i_ref, sh_i_basis = _col_values(
         "shares_outstanding_i"
     )
+    sh_d_v, sh_d_s, sh_d_pe, _, sh_d_ref, _ = _col_values("shares_weighted_diluted_q")
     sh_q_v, sh_q_s, sh_q_pe, _, sh_q_ref, _ = _col_values("shares_weighted_basic_q")
     eq_v, eq_s, _, eq_c, _, _ = _col_values("equity_i")
     ni_v, ni_s, _, ni_c, _, _ = _col_values("net_income_ttm")
@@ -1480,6 +1484,23 @@ def valuation(
                     sh_pe = sh_q_pe[i]
                     sh_approx = True
                     sh_basis_label = "weighted_basic"
+                elif (
+                    sh_i_s[i]
+                    in {
+                        "metric_missing",
+                        "not_captured",
+                        "not_yet_available",
+                        "period_unavailable",
+                    }
+                    and sh_d_s[i] in {"ok", "approximate"}
+                    and math.isfinite(sh_d_v[i])
+                    and sh_d_v[i] > 0
+                ):
+                    sh_val = float(sh_d_v[i])
+                    sh_ref = sh_d_ref[i] or sh_d_pe[i]
+                    sh_pe = sh_d_pe[i]
+                    sh_approx = True
+                    sh_basis_label = "weighted_diluted"
 
                 if sh_val is not None:
                     f_iss, unv_iss, sb_iss = split_adj.factor(prim_aid, sh_ref, sig)

@@ -69,6 +69,12 @@ from .constants import (
     SourceContract,
     __version__,
 )
+from .diagnostics import (
+    BENIGN_ACCOUNTING_ZERO_PREFIXES,
+    LANDMARK_DELISTED_SYMBOLS,
+    continuous_feature_scorecard,
+    source_coverage_placebo_audit,
+)
 from .events import EventSpec
 from .extra_features import (
     borrow_features,
@@ -131,6 +137,11 @@ from .materialize import (
     materialize,
     validate_recipe,
 )
+from .ml_publish import (
+    MAX_PUBLISH_BYTES,
+    build_model_bundle_archive,
+    publish_ml_run,
+)
 from .panels import (
     KEYS,
     LIMITATIONS,
@@ -190,6 +201,7 @@ ensure_builtin_groups_loaded()
 __all__ = [
     "ALL_METRICS",
     "API",
+    "BENIGN_ACCOUNTING_ZERO_PREFIXES",
     "CAPTURE_GRACE",
     "COMPOSITES",
     "CONCEPTS",
@@ -220,10 +232,12 @@ __all__ = [
     "INDUSTRY_COLUMNS",
     "INSTANT_METRICS",
     "KEYS",
+    "LANDMARK_DELISTED_SYMBOLS",
     "LEGACY_SEC_COUNT_FORMS",
     "LEGACY_TAG_ORDER",
     "LIMITATIONS",
     "MANIFEST_SCHEMA_MAX",
+    "MAX_PUBLISH_BYTES",
     "NOT_LISTED_CODES",
     "PERIODIC_ANNUAL_FORMS",
     "POLICIES",
@@ -273,6 +287,7 @@ __all__ = [
     "audit_features",
     "borrow_features",
     "build_candidates",
+    "build_model_bundle_archive",
     "build_server_training_bundle",
     "build_tier1_features",
     "check_manifest",
@@ -280,6 +295,7 @@ __all__ = [
     "classify_sec_filing",
     "code_digest",
     "connect",
+    "continuous_feature_scorecard",
     "daily_features",
     "default_extractor_version",
     "derived_fundamentals",
@@ -315,6 +331,7 @@ __all__ = [
     "prepare",
     "prepare_fundamental_features",
     "prepare_fundamental_ratios",
+    "publish_ml_run",
     "reference_features",
     "register_feature_group",
     "release_features",
@@ -327,6 +344,7 @@ __all__ = [
     "sic_to_division",
     "sic_to_ff12",
     "sic_to_major_group",
+    "source_coverage_placebo_audit",
     "split_membership",
     "sue_features",
     "text_change_features",

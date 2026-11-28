@@ -1384,3 +1384,175 @@ def build_extraction_signals_alias(
     ctx: GroupBuildContext, params: Mapping[str, Any]
 ) -> pd.DataFrame:
     return build_llm_release_guidance(ctx, params)
+
+
+_LLM_FILING_SEMANTIC_COLS: tuple[str, ...] = (
+    "ev8k_mna_sentiment",
+    "ev8k_exec_departure_sev",
+    "ev8k_buyback_pct_mcap",
+    "ev8k_guidance_shock",
+    "ev8k_distress_litigation",
+    "diff_item1a_new_risk_sev",
+    "diff_item1a_tone_shift",
+    "diff_mdna_margin_driver",
+    "diff_mdna_acct_policy_chg",
+    "diff_substantive_chg_ratio",
+)
+
+
+@register_feature_group(
+    "llm_filing_semantics",
+    columns=_LLM_FILING_SEMANTIC_COLS,
+    default_params={"ev8k_half_life_days": 21.0, "diff_max_age_days": 200},
+    description="PIT structured 8-K LLM event shocks and 10-K/10-Q paragraph diff severity scores.",
+)
+def build_llm_filing_semantics(
+    ctx: GroupBuildContext, params: Mapping[str, Any]
+) -> pd.DataFrame:
+    af = ctx.stores.anchors.frame
+    n = len(af)
+    data = {
+        col: np.full(n, np.nan, dtype=np.float32) for col in _LLM_FILING_SEMANTIC_COLS
+    }
+    if n == 0:
+        return pd.DataFrame(data, index=af.index)
+
+    has_8k = "sec_8k_events" in ctx.families
+    has_diff = "sec_filing_diffs" in ctx.families
+    if not has_8k and not has_diff:
+        return pd.DataFrame(data, index=af.index)
+
+    ciks_arr = ctx.ciks.astype(object).fillna("").astype(str).to_numpy()
+    dec_ns = clocks.instants(af["decision_at"].to_numpy(dtype=object))
+    ns_per_day = 86_400_000_000_000.0
+    hl_days = max(1.0, float(params.get("ev8k_half_life_days", 21.0)))
+    lam = math.log(2.0) / hl_days
+    max_diff_age_ns = int(params.get("diff_max_age_days", 200)) * 86_400_000_000_000
+
+    # 1. Non-earnings 8-K structured LLM event facts (decayed over 90d window)
+    if has_8k and hasattr(ctx.version, "family"):
+        ev_df = ctx.version.family("sec_8k_events")
+        if ev_df is not None and not ev_df.empty and "cik" in ev_df.columns:
+            acc_c = "accepted_at" if "accepted_at" in ev_df.columns else "available_at"
+            pub_ns = clocks.instants(ev_df[acc_c].to_numpy(dtype=object))
+            if ctx.time_policy == "observed_content" and "recorded_at" in ev_df.columns:
+                rec_ns = clocks.instants(ev_df["recorded_at"].to_numpy(dtype=object))
+                av_ns = clocks.available_at(
+                    pub_ns, pub_ns == clocks.NAT, "observed_content", [rec_ns]
+                )
+            else:
+                av_ns = pub_ns
+            ev8k_cols = (
+                "ev8k_mna_sentiment",
+                "ev8k_exec_departure_sev",
+                "ev8k_buyback_pct_mcap",
+                "ev8k_guidance_shock",
+                "ev8k_distress_litigation",
+            )
+            by_cik_8k: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+            work_8k = ev_df.copy()
+            work_8k["_av"] = av_ns
+            work_8k["_cik"] = work_8k["cik"].astype(str).str.strip().str.zfill(10)
+            work_8k = work_8k[
+                (work_8k["_av"] != clocks.NAT) & work_8k["_cik"].str.isdigit()
+            ].sort_values("_av", kind="mergesort")
+            for cik_k, grp in work_8k.groupby("_cik", sort=False):
+                mat_v = np.column_stack(
+                    [
+                        pd.to_numeric(
+                            grp[c] if c in grp.columns else 0.0, errors="coerce"
+                        )
+                        .fillna(0.0)
+                        .to_numpy(dtype=np.float64)
+                        for c in ev8k_cols
+                    ]
+                )
+                by_cik_8k[str(cik_k)] = (grp["_av"].to_numpy(dtype=np.int64), mat_v)
+
+            cutoff_90d = 90 * 86_400_000_000_000
+            for r_i in range(n):
+                d_i = int(dec_ns[r_i])
+                c_s = str(ciks_arr[r_i]).strip()
+                c_pad = c_s.zfill(10) if c_s.isdigit() else ""
+                if d_i == clocks.NAT or not c_pad:
+                    continue
+                entry_8k = by_cik_8k.get(c_pad)
+                if entry_8k is None:
+                    for col_n in ev8k_cols:
+                        data[col_n][r_i] = 0.0
+                    continue
+                av_vec, val_mat = entry_8k
+                lo_i = int(np.searchsorted(av_vec, d_i - cutoff_90d, side="left"))
+                hi_i = int(np.searchsorted(av_vec, d_i, side="right"))
+                if lo_i >= hi_i:
+                    for col_n in ev8k_cols:
+                        data[col_n][r_i] = 0.0
+                else:
+                    w_dec = np.exp(-lam * ((d_i - av_vec[lo_i:hi_i]) / ns_per_day))
+                    agg = w_dec @ val_mat[lo_i:hi_i]
+                    for j_c, col_n in enumerate(ev8k_cols):
+                        data[col_n][r_i] = np.float32(agg[j_c])
+
+    # 2. 10-K Item 1A & 10-Q MD&A paragraph-diff semantic scores (latest <= decision_at)
+    if has_diff and hasattr(ctx.version, "family"):
+        diff_df = ctx.version.family("sec_filing_diffs")
+        if diff_df is not None and not diff_df.empty and "cik" in diff_df.columns:
+            acc_c = (
+                "accepted_at" if "accepted_at" in diff_df.columns else "available_at"
+            )
+            pub_ns = clocks.instants(diff_df[acc_c].to_numpy(dtype=object))
+            if (
+                ctx.time_policy == "observed_content"
+                and "recorded_at" in diff_df.columns
+            ):
+                rec_ns = clocks.instants(diff_df["recorded_at"].to_numpy(dtype=object))
+                av_ns = clocks.available_at(
+                    pub_ns, pub_ns == clocks.NAT, "observed_content", [rec_ns]
+                )
+            else:
+                av_ns = pub_ns
+            diff_cols = (
+                "diff_item1a_new_risk_sev",
+                "diff_item1a_tone_shift",
+                "diff_mdna_margin_driver",
+                "diff_mdna_acct_policy_chg",
+                "diff_substantive_chg_ratio",
+            )
+            by_cik_diff: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+            work_d = diff_df.copy()
+            work_d["_av"] = av_ns
+            work_d["_cik"] = work_d["cik"].astype(str).str.strip().str.zfill(10)
+            work_d = work_d[
+                (work_d["_av"] != clocks.NAT) & work_d["_cik"].str.isdigit()
+            ].sort_values("_av", kind="mergesort")
+            for cik_k, grp in work_d.groupby("_cik", sort=False):
+                mat_d = np.column_stack(
+                    [
+                        pd.to_numeric(
+                            grp[c]
+                            if c in grp.columns
+                            else pd.Series(np.nan, index=grp.index),
+                            errors="coerce",
+                        ).to_numpy(dtype=np.float64)
+                        for c in diff_cols
+                    ]
+                )
+                # Forward-fill across 10-K (Item 1A) and 10-Q (MD&A) within each CIK's causal filing stream
+                mat_d = pd.DataFrame(mat_d).ffill().to_numpy(dtype=np.float64)
+                by_cik_diff[str(cik_k)] = (grp["_av"].to_numpy(dtype=np.int64), mat_d)
+
+            for r_i in range(n):
+                d_i = int(dec_ns[r_i])
+                c_s = str(ciks_arr[r_i]).strip()
+                c_pad = c_s.zfill(10) if c_s.isdigit() else ""
+                if d_i == clocks.NAT or c_pad not in by_cik_diff:
+                    continue
+                av_vec, val_mat = by_cik_diff[c_pad]
+                pos_d = int(np.searchsorted(av_vec, d_i, side="right")) - 1
+                if pos_d >= 0 and (d_i - int(av_vec[pos_d])) <= max_diff_age_ns:
+                    row_v = val_mat[pos_d]
+                    for j_c, col_n in enumerate(diff_cols):
+                        if math.isfinite(row_v[j_c]):
+                            data[col_n][r_i] = np.float32(row_v[j_c])
+
+    return pd.DataFrame(data, index=af.index)

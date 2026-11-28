@@ -199,10 +199,27 @@ _TYPE_C_SPARSE_PREFIXES: tuple[str, ...] = (
     "buyback_",
     "dividend_",
     "release_",
+    "ev8k_",
     "alpaca_news_events_",
     "finnhub_news_events_",
     "news_decay_",
 )
+
+# Physical source gate: unverified news counts/ranks are blocked from training bundles by default
+# unless `allow_unverified_news=True` or `news_intensity.verified_delisted_coverage: true`.
+_UNVERIFIED_NEWS_PREFIXES: tuple[str, ...] = (
+    "alpaca_news_events_",
+    "finnhub_news_events_",
+    "news_decay_",
+    "news_21d_rank",
+)
+
+
+def _is_blocked_unverified_news(name: str, *, allow_unverified_news: bool) -> bool:
+    return (not allow_unverified_news) and str(name).startswith(
+        _UNVERIFIED_NEWS_PREFIXES
+    )
+
 
 # Type D market-wide regime features (identical across all stocks on a given date).
 _TYPE_D_PREFIXES: tuple[str, ...] = ("ref_", "etf_", "crypto_")
@@ -242,6 +259,12 @@ def _clip_physical_domain(name: str, vals: np.ndarray) -> np.ndarray:
         return np.where(np.isfinite(arr), np.maximum(arr, 0.0), np.nan)
     if name.startswith("ins_net_ratio_"):
         return np.clip(arr, -1.0, 1.0)
+    if name.endswith(("_days_since", "_age_days")) or name in {
+        "earn_sessions_since",
+        "release_sessions_since",
+        "si_age_sessions",
+    }:
+        return np.clip(arr, 0.0, 365.0)
     return arr
 
 
@@ -314,6 +337,8 @@ def _sector_gauss_rank(
 def build_tier1_features(
     x_raw: pd.DataFrame,
     anchors_df: pd.DataFrame,
+    *,
+    allow_unverified_news: bool = False,
 ) -> tuple[pd.DataFrame, dict[str, list[str]]]:
     """Run Tier-1 stateless single-date preprocessing with zero cross-date coupling."""
     n = len(x_raw)
@@ -391,7 +416,13 @@ def build_tier1_features(
         col_types["tier2_c_sparse"].append("fund_age_days")
 
     for raw_name in x_raw.columns:
-        if raw_name in _TYPE_B_DROP_COLS or raw_name in fund_age_cols:
+        if (
+            raw_name in _TYPE_B_DROP_COLS
+            or raw_name in fund_age_cols
+            or _is_blocked_unverified_news(
+                str(raw_name), allow_unverified_news=allow_unverified_news
+            )
+        ):
             col_types["dropped"].append(str(raw_name))
             continue
 
@@ -596,12 +627,15 @@ def _transform_tier1_column(
     sessions: np.ndarray,
     ind_codes: np.ndarray,
     cs_mask: np.ndarray,
+    allow_unverified_news: bool = False,
 ) -> tuple[str, str, np.ndarray | None]:
     """Run Tier-1 single-date transform on one raw feature column.
 
     Returns ``(out_name, col_type, float32_array_or_None)``. ``None`` means dropped.
     """
-    if raw_name in _TYPE_B_DROP_COLS:
+    if raw_name in _TYPE_B_DROP_COLS or _is_blocked_unverified_news(
+        str(raw_name), allow_unverified_news=allow_unverified_news
+    ):
         return str(raw_name), "dropped", None
 
     arr = pd.to_numeric(raw_series, errors="coerce").to_numpy(dtype=np.float64)
@@ -642,6 +676,7 @@ def _stream_tier1_x_shards(
     out_dir: Path,
     *,
     x_rows_per_part: int,
+    allow_unverified_news: bool = False,
     on_progress: Callable[[str, str, int, int], None] | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> tuple[list[dict[str, Any]], int, int, list[str], dict[str, list[str]]]:
@@ -787,7 +822,11 @@ def _stream_tier1_x_shards(
             read_cols = [
                 c
                 for c in kept_cols
-                if c not in _TYPE_B_DROP_COLS and c not in fund_age_set
+                if c not in _TYPE_B_DROP_COLS
+                and c not in fund_age_set
+                and not _is_blocked_unverified_news(
+                    str(c), allow_unverified_news=allow_unverified_news
+                )
             ]
             # Record dropped columns in exact column order.
             if not read_cols:
@@ -798,7 +837,13 @@ def _stream_tier1_x_shards(
             col_lookup = {name: i for i, name in enumerate(part_tbl.schema.names)}
             arrays_out: dict[str, pa.Array] = {}
             for raw_name in kept_cols:
-                if raw_name in _TYPE_B_DROP_COLS or raw_name in fund_age_set:
+                if (
+                    raw_name in _TYPE_B_DROP_COLS
+                    or raw_name in fund_age_set
+                    or _is_blocked_unverified_news(
+                        str(raw_name), allow_unverified_news=allow_unverified_news
+                    )
+                ):
                     col_types["dropped"].append(str(raw_name))
                     continue
                 raw_s = part_tbl.column(col_lookup[raw_name]).to_pandas()
@@ -808,6 +853,7 @@ def _stream_tier1_x_shards(
                     sessions=sessions,
                     ind_codes=ind_codes,
                     cs_mask=cs_mask,
+                    allow_unverified_news=allow_unverified_news,
                 )
                 del raw_s
                 if out_arr is None:
@@ -907,6 +953,7 @@ def build_server_training_bundle(
     universe: str = "pit",
     x_rows_per_part: int = 50_000,
     price_shard_raw_bytes: int = 24 * 1024 * 1024,
+    allow_unverified_news: bool = False,
     on_progress: Callable[[str, str, int, int], None] | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
@@ -1048,12 +1095,17 @@ def build_server_training_bundle(
     pa.default_memory_pool().release_unused()
 
     # 4. Streaming per-group Tier-1 X shards (never materializes full monolithic X in RAM)
+    news_cfg = (mat.recipe.get("feature_groups") or {}).get("news_intensity") or {}
+    eff_allow_news = bool(
+        allow_unverified_news or news_cfg.get("verified_delisted_coverage", False)
+    )
     x_parts, n_rows, n_features_tier1, tier1_columns, col_types = (
         _stream_tier1_x_shards(
             ordered_groups,
             anc_frame,
             out_dir,
             x_rows_per_part=x_rows_per_part,
+            allow_unverified_news=eff_allow_news,
             on_progress=on_progress,
             cancel_check=cancel_check,
         )
@@ -1476,7 +1528,16 @@ def load_training_bundle(
         )
         assert mat.stores is not None and mat.y is not None
         anc_df = mat.anchors.frame.copy()
-        x_df, col_types = build_tier1_features(mat.X, anc_df)
+        news_cfg_local = (mat.recipe.get("feature_groups") or {}).get(
+            "news_intensity"
+        ) or {}
+        x_df, col_types = build_tier1_features(
+            mat.X,
+            anc_df,
+            allow_unverified_news=bool(
+                news_cfg_local.get("verified_delisted_coverage", False)
+            ),
+        )
         horizons = tuple(
             int(h)
             for h in mat.recipe.get("horizons_trading_days", DEFAULT_JAX_HORIZONS)
@@ -1654,6 +1715,10 @@ class JaxTrainingBatch:
     feature_names: tuple[str, ...]
     horizons: tuple[int, ...]
     pad_to: int
+    x_macro: Any = None  # [T_weeks, D_macro] float32
+    macro_feature_names: tuple[str, ...] = ()
+    y_max_dd: Any = None  # [T_weeks, pad_to, H] float32
+    max_dd_mask: Any = None  # [T_weeks, pad_to, H] bool
     _price_store: PriceStore | None = field(default=None, repr=False)
     _seq_stats: Mapping[str, tuple[float, float]] = field(
         default_factory=dict, repr=False
@@ -1750,8 +1815,12 @@ class TrainingView:
     transform_state: dict[str, Any]
     price_store: PriceStore | None
     macro_store: MacroStore | None
-    _x_cols_np: dict[str, np.ndarray] = field(repr=False)
-    _x_cols_order: tuple[str, ...] = field(repr=False)
+    macro_X: pd.DataFrame = field(default_factory=pd.DataFrame)
+    macro_state: pd.DataFrame = field(default_factory=pd.DataFrame)
+    _x_cols_np: dict[str, np.ndarray] = field(default_factory=dict, repr=False)
+    _x_cols_order: tuple[str, ...] = field(default=(), repr=False)
+    _macro_cols_np: dict[str, np.ndarray] = field(default_factory=dict, repr=False)
+    _macro_cols_order: tuple[str, ...] = field(default=(), repr=False)
     _jax_cache: dict[tuple[Any, ...], JaxTrainingBatch] = field(
         default_factory=dict, repr=False
     )
@@ -1787,6 +1856,7 @@ class TrainingView:
         keep_idx = np.flatnonzero(keep)
 
         d_tab = len(self._x_cols_order)
+        d_mac = len(self._macro_cols_order)
         n_h = len(eff_h)
         if len(keep_idx) == 0:
             empty_batch = JaxTrainingBatch(
@@ -1803,6 +1873,10 @@ class TrainingView:
                 feature_names=self._x_cols_order,
                 horizons=eff_h,
                 pad_to=eff_pad,
+                x_macro=np.zeros((0, d_mac), dtype=np.float32),
+                macro_feature_names=self._macro_cols_order,
+                y_max_dd=np.zeros((0, eff_pad, n_h), dtype=np.float32),
+                max_dd_mask=np.zeros((0, eff_pad, n_h), dtype=bool),
                 _price_store=self.price_store,
                 _seq_stats=self.transform_state.get("seq_stats", {}),
             )
@@ -1834,18 +1908,24 @@ class TrainingView:
         valid_mask = np.zeros((t_weeks, eff_pad), dtype=bool)
         y_ret = np.zeros((t_weeks, eff_pad, n_h), dtype=np.float32)
         trainable_mask = np.zeros((t_weeks, eff_pad, n_h), dtype=bool)
+        y_max_dd = np.zeros((t_weeks, eff_pad, n_h), dtype=np.float32)
+        max_dd_mask = np.zeros((t_weeks, eff_pad, n_h), dtype=bool)
         y_risk = np.zeros((t_weeks, eff_pad, 4), dtype=np.float32)
         risk_mask = np.zeros((t_weeks, eff_pad, 4), dtype=bool)
         asset_mat = np.full((t_weeks, eff_pad), -1, dtype=np.int32)
         sess_vec = np.zeros(t_weeks, dtype=np.int32)
+        x_macro = np.zeros((t_weeks, d_mac), dtype=np.float32)
         sig_sessions: list[date] = []
 
         # Pre-extract target arrays once across all kept rows
         y_gr_cols = []
         y_tr_cols = []
+        y_dd_cols = []
+        y_dd_ok_cols = []
         for h in eff_h:
             gr_c = f"h{h}_gauss_rank"
             tr_c = f"trainable_{h}d"
+            dd_c = f"h{h}_fwd_max_dd"
             gr_v = (
                 pd.to_numeric(self.y[gr_c], errors="coerce").to_numpy(dtype=np.float32)
                 if gr_c in self.y.columns
@@ -1856,8 +1936,15 @@ class TrainingView:
                 if tr_c in self.y.columns
                 else np.zeros(len(self.y), dtype=bool)
             )
+            dd_v = (
+                pd.to_numeric(self.y[dd_c], errors="coerce").to_numpy(dtype=np.float32)
+                if dd_c in self.y.columns
+                else np.full(len(self.y), np.nan, dtype=np.float32)
+            )
             y_gr_cols.append(gr_v)
             y_tr_cols.append(tr_v & np.isfinite(gr_v))
+            y_dd_cols.append(dd_v)
+            y_dd_ok_cols.append(tr_v & np.isfinite(dd_v))
 
         risk_specs = (
             ("h21_fwd_rvol", True),
@@ -1896,10 +1983,17 @@ class TrainingView:
             gv = y_gr_cols[h_i][rows_ord]
             trainable_mask[w_ids, slot_ids, h_i] = tm
             y_ret[w_ids, slot_ids, h_i] = np.where(tm, gv, 0.0)
+            dd_m = y_dd_ok_cols[h_i][rows_ord]
+            dd_v_ord = y_dd_cols[h_i][rows_ord]
+            max_dd_mask[w_ids, slot_ids, h_i] = dd_m
+            y_max_dd[w_ids, slot_ids, h_i] = np.where(dd_m, dd_v_ord, 0.0)
         rk_ok = risk_ok_all[rows_ord]
         risk_mask[w_ids, slot_ids, :] = rk_ok
         y_risk[w_ids, slot_ids, :] = np.where(rk_ok, risk_vals_all[rows_ord], 0.0)
         sess_vec = si_ord[starts].astype(np.int32, copy=False)
+        first_rows = rows_ord[starts]
+        for m_i, m_col in enumerate(self._macro_cols_order):
+            x_macro[:, m_i] = self._macro_cols_np[m_col][first_rows]
         sig_sessions = [clocks.day(sig_ord[int(s0)]) for s0 in starts]
 
         if as_jax:
@@ -1919,6 +2013,10 @@ class TrainingView:
                 feature_names=tuple(self.X.columns),
                 horizons=eff_h,
                 pad_to=eff_pad,
+                x_macro=jnp.asarray(x_macro),
+                macro_feature_names=self._macro_cols_order,
+                y_max_dd=jnp.asarray(y_max_dd),
+                max_dd_mask=jnp.asarray(max_dd_mask),
                 _price_store=self.price_store,
                 _seq_stats=self.transform_state.get("seq_stats", {}),
             )
@@ -1937,6 +2035,10 @@ class TrainingView:
                 feature_names=tuple(self.X.columns),
                 horizons=eff_h,
                 pad_to=eff_pad,
+                x_macro=x_macro,
+                macro_feature_names=self._macro_cols_order,
+                y_max_dd=y_max_dd,
+                max_dd_mask=max_dd_mask,
                 _price_store=self.price_store,
                 _seq_stats=self.transform_state.get("seq_stats", {}),
             )
@@ -1955,6 +2057,7 @@ def slice_training_view(
     fit_end: str | date | None = None,
     pad_to: int = DEFAULT_PAD_TO,
     include_stores: bool = True,
+    exclude_macro_from_X: bool = True,
 ) -> TrainingView:
     """Execute Tier-2 causal slicing & <= fit_end fitting purely in RAM (< 50 ms)."""
     max_sess_d = (
@@ -2157,7 +2260,35 @@ def slice_training_view(
                 else:
                     seq_stats[cname] = (0.0, 1.0)
 
-    x_frame = pd.DataFrame(x_out_cols, copy=False)
+    macro_col_set = set(loaded.col_types.get("tier2_d_macro", ()))
+    macro_cols_order = tuple(col for col in loaded.x_tier1_cols if col in macro_col_set)
+    macro_cols_np: dict[str, np.ndarray] = {
+        col: x_out_cols[col] for col in macro_cols_order
+    }
+    macro_x_frame = pd.DataFrame(macro_cols_np, copy=False)
+
+    s_stop_m = min(max(0, max_s_idx + 1), loaded.macro_store.data.shape[0])
+    macro_state_cols: dict[str, np.ndarray] = {}
+    for col in loaded.macro_store.columns:
+        cz_vec = loaded.macro_causal_z.get(col)
+        if cz_vec is not None:
+            macro_state_cols[col] = cz_vec[:s_stop_m]
+    macro_state_frame = pd.DataFrame(
+        macro_state_cols,
+        index=pd.Index(loaded.macro_store.sessions[:s_stop_m], name="session"),
+        copy=False,
+    )
+
+    if exclude_macro_from_X:
+        cs_cols_order = tuple(
+            col for col in loaded.x_tier1_cols if col not in macro_col_set
+        )
+        cs_cols_np = {col: x_out_cols[col] for col in cs_cols_order}
+    else:
+        cs_cols_order = loaded.x_tier1_cols
+        cs_cols_np = x_out_cols
+
+    x_frame = pd.DataFrame(cs_cols_np, copy=False)
     transform_state = {
         "as_of": as_of_d.isoformat(),
         "fit_end": fit_end_d.isoformat(),
@@ -2166,6 +2297,7 @@ def slice_training_view(
         "seq_stats": seq_stats,
         "max_session_idx": max_s_idx,
         "fit_session_idx": fit_s_idx,
+        "exclude_macro_from_X": bool(exclude_macro_from_X),
     }
     return TrainingView(
         dataset_id=loaded.dataset_id,
@@ -2182,6 +2314,10 @@ def slice_training_view(
         transform_state=transform_state,
         price_store=p_cut,
         macro_store=m_cut,
-        _x_cols_np=x_out_cols,
-        _x_cols_order=loaded.x_tier1_cols,
+        macro_X=macro_x_frame,
+        macro_state=macro_state_frame,
+        _x_cols_np=cs_cols_np,
+        _x_cols_order=cs_cols_order,
+        _macro_cols_np=macro_cols_np,
+        _macro_cols_order=macro_cols_order,
     )

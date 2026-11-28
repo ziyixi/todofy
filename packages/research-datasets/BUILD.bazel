@@ -45,7 +45,7 @@ py_wheel(
     stamp = 0,
     strip_path_prefixes = ["packages/research-datasets/src"],
     tags = ["manual"],
-    version = "2.7.0",
+    version = "2.8.0",
     visibility = ["//visibility:public"],
     deps = [":wheel_files"],
 )

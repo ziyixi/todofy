@@ -63,3 +63,14 @@ feature_groups:
   macro_sensitivity_crisis:
     enabled: true
     window: 252
+  stock_macro_interactions:
+    enabled: true
+    window: 252
+  embedding_peer_spillover:
+    enabled: true
+    top_k: 10
+    min_cosine: 0.25
+  llm_filing_semantics:
+    enabled: true
+    ev8k_half_life_days: 21.0
+    diff_max_age_days: 200

@@ -1360,7 +1360,18 @@ def short_interest_features(
     ):
         work = si_df.copy()
         if "link_basis" in work.columns and not allow_unverified_links:
-            work = work[work["link_basis"].astype(str) == "symbol_interval"].copy()
+            work = work[
+                work["link_basis"]
+                .astype(str)
+                .isin(
+                    {
+                        "symbol_interval",
+                        "cusip_interval",
+                        "security_identifier",
+                        "verified_cusip",
+                    }
+                )
+            ].copy()
         if not work.empty:
             eff_ns = _effective_available_ns(work, policy)
             work["_eff_ns"] = eff_ns
