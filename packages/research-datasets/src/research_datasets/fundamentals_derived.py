@@ -29,6 +29,8 @@ from .concepts import (
     PERIODIC_ANNUAL_FORMS,
     PERIODIC_QUARTER_FORMS,
     STALE_AFTER_DAYS,
+    SUPPLEMENTAL_BARE_TAGS,
+    SUPPLEMENTAL_CONCEPT_TAGS,
     SYNTHETIC_METRIC_TO_CONCEPT,
     TAG_RANKS,
     CompositeSpec,
@@ -222,11 +224,17 @@ def _resolve_concept_and_rank(
         concept = CONCEPT_TAGS.get(key)
         if concept is not None:
             return concept, tax_s, tag_s, TAG_RANKS[key]
+        supp = SUPPLEMENTAL_CONCEPT_TAGS.get(key)
+        if supp is not None:
+            return CONCEPTS[supp[0]], tax_s, tag_s, supp[1]
     if not tax_s and tag_s:
         concept = BARE_TAG_TO_CONCEPT.get(tag_s)
         if concept is not None:
             matched_tax = next(t for t, name in concept.tags if name == tag_s)
             return concept, matched_tax, tag_s, TAG_RANKS[(matched_tax, tag_s)]
+        supp_bare = SUPPLEMENTAL_BARE_TAGS.get(tag_s)
+        if supp_bare is not None:
+            return CONCEPTS[supp_bare[1]], supp_bare[0], tag_s, supp_bare[2]
     metric_s = metric.strip() if isinstance(metric, str) else ""
     candidate = tag_s or metric_s
     if candidate in SYNTHETIC_METRIC_TO_CONCEPT and (not tax_s or tag_s == metric_s):

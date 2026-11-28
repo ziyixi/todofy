@@ -371,9 +371,6 @@ _BASE_CONCEPTS: tuple[Concept, ...] = (
         True,
         _tags(
             "PaymentsForRepurchaseOfCommonStock",
-            "PaymentsForRepurchaseOfEquity",
-            "StockRepurchasedAndRetiredDuringPeriodValue",
-            "StockRepurchasedDuringPeriodValue",
             ("ifrs-full", "PaymentsToAcquireOrRedeemEntitysShares"),
         ),
         2,
@@ -796,6 +793,21 @@ def _build_tag_maps() -> tuple[
 
 
 CONCEPT_TAGS, TAG_TO_CONCEPT, TAG_RANKS, BARE_TAG_TO_CONCEPT = _build_tag_maps()
+
+# Supplemental XBRL tags resolved by consumer derivations before collector catalogue promotion.
+SUPPLEMENTAL_CONCEPT_TAGS: Mapping[tuple[str, str], tuple[str, int]] = MappingProxyType(
+    {
+        ("us-gaap", "PaymentsForRepurchaseOfEquity"): ("repurchases", 2),
+        ("us-gaap", "StockRepurchasedAndRetiredDuringPeriodValue"): ("repurchases", 3),
+        ("us-gaap", "StockRepurchasedDuringPeriodValue"): ("repurchases", 4),
+    }
+)
+SUPPLEMENTAL_BARE_TAGS: Mapping[str, tuple[str, str, int]] = MappingProxyType(
+    {
+        tag: (tax, concept_name, rank)
+        for (tax, tag), (concept_name, rank) in SUPPLEMENTAL_CONCEPT_TAGS.items()
+    }
+)
 
 # Synthetic/legacy metric-named tags used in fixtures lacking XBRL tag names.
 SYNTHETIC_METRIC_TO_CONCEPT: Mapping[str, str] = MappingProxyType(
